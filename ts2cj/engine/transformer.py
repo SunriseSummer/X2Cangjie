@@ -359,16 +359,139 @@ class Transformer:
 
     # ---- function declarations -------------------------------------------
     def _rewrite_function_decl(self, st: List[Tok]) -> List[Tok]:
-        """function NAME<G>(params): RetType { body }  →  func NAME<G>(params): RetType { body }."""
+        """function NAME<G>(params): RetType { body }  →  func NAME<G>(params): RetType { body }.
+
+        If the parameter list has any default-valued parameters, we also
+        generate positional-style overloads so that call sites that pass
+        the defaulted parameters positionally still type-check.
+        """
         self.rule_fires += 1
         sig = list(st)
-        # find 'function' keyword
         for i, t in enumerate(sig):
             if t.kind == "kw" and t.value == "function":
                 sig[i] = Tok("kw", "func")
                 break
-        sig = self._rewrite_signature_and_body(sig, is_method=False)
-        return sig
+        # Look for default params; if present, capture func name & decide
+        # whether to emit overloads.
+        func_name = self._extract_func_name(sig)
+        param_info = self._extract_param_info(sig)
+        rewritten = self._rewrite_signature_and_body(sig, is_method=False)
+        if func_name and any(pi.get("default") for pi in param_info):
+            overloads = self._build_default_overloads(func_name, param_info,
+                                                     return_type=self._extract_return_type(sig))
+            if overloads:
+                # Prepend overload decls to the primary one
+                ov_tok = [Tok("id", overloads), Tok("nl", "\n")]
+                return ov_tok + rewritten
+        return rewritten
+
+    def _extract_func_name(self, sig: List[Tok]) -> str:
+        for i, t in enumerate(sig):
+            if t.kind == "kw" and t.value == "func":
+                j = _next_sig(sig, i + 1)
+                if j < len(sig) and sig[j].kind in ("id", "kw"):
+                    return sig[j].value
+        return ""
+
+    def _extract_return_type(self, sig: List[Tok]) -> str:
+        """Find `): TYPE {` or `): TYPE` and return the mapped TYPE."""
+        # locate `(` ... `)` then optional `: TYPE` up to `{`
+        i = 0
+        while i < len(sig) and not (sig[i].kind == "punct" and sig[i].value == "("):
+            i += 1
+        if i >= len(sig):
+            return ""
+        close = _match_pair(sig, i, "(", ")")
+        if close == -1:
+            return ""
+        j = close + 1
+        while j < len(sig) and sig[j].kind in ("ws", "nl", "cmt"):
+            j += 1
+        if j < len(sig) and sig[j].kind == "punct" and sig[j].value == ":":
+            k = j + 1
+            while k < len(sig) and not (sig[k].kind == "punct" and sig[k].value == "{"):
+                k += 1
+            return map_type_string(_to_text(sig[j + 1:k])) or "Unit"
+        return "Unit"
+
+    def _extract_param_info(self, sig: List[Tok]) -> list:
+        i = 0
+        while i < len(sig) and not (sig[i].kind == "punct" and sig[i].value == "("):
+            i += 1
+        if i >= len(sig):
+            return []
+        close = _match_pair(sig, i, "(", ")")
+        if close == -1:
+            return []
+        params = _split_top_commas(sig[i + 1:close])
+        infos = []
+        for p in params:
+            ps = _strip_trivia(p)
+            if not ps:
+                continue
+            while ps and ps[0].kind == "kw" and ps[0].value in (
+                    "public", "private", "protected", "readonly", "static"):
+                ps = ps[1:]
+            if not ps:
+                continue
+            name = ps[0].value
+            ps = ps[1:]
+            optional = False
+            if ps and ps[0].kind == "op" and ps[0].value == "?":
+                optional = True
+                ps = ps[1:]
+            tann = ""
+            default = ""
+            if ps and ps[0].kind == "punct" and ps[0].value == ":":
+                j = 1
+                depth = 0
+                while j < len(ps):
+                    t = ps[j]
+                    if t.kind == "punct" and t.value in "([{":
+                        depth += 1
+                    elif t.kind == "punct" and t.value in ")]}":
+                        depth -= 1
+                    if depth == 0 and t.kind == "op" and t.value == "=":
+                        break
+                    j += 1
+                tann = map_type_string(_to_text(ps[1:j])) or "Any"
+                ps = ps[j:]
+            if ps and ps[0].kind == "op" and ps[0].value == "=":
+                default = _to_text(self._rewrite_inline_expr(ps[1:]))
+            if optional and tann and not tann.startswith("?"):
+                tann = "?" + tann
+            infos.append({"name": name, "type": tann or "Any",
+                          "default": default, "optional": optional})
+        return infos
+
+    def _build_default_overloads(self, name: str, params: list, *, return_type: str) -> str:
+        """Generate positional overload(s) for functions that have default params.
+
+        For each leading run of required params followed by defaulted params,
+        we emit one overload that fills in the defaults from the right.
+        """
+        # Find the first param that has a default; everything after it is
+        # considered defaultable.
+        first_default = next((i for i, p in enumerate(params) if p["default"]), -1)
+        if first_default < 0:
+            return ""
+        # Emit overloads for each subset taking 0..len(defaults)-1 of the
+        # defaulted params from the left.
+        rt = return_type or "Unit"
+        lines = []
+        # Forwarding overload(s): with fewer args than full, fill rest from defaults.
+        for take_extra in range(0, len(params) - first_default):
+            n_params = first_default + take_extra
+            head = params[:n_params]
+            head_sig = ", ".join(f"{escape_id(p['name'])}: {p['type']}" for p in head)
+            args = [escape_id(p['name']) for p in head]
+            for p in params[n_params:]:
+                args.append(p["default"])
+            call_args = ", ".join(args)
+            lines.append(
+                f"func {escape_id(name)}({head_sig}): {rt} {{ return {escape_id(name)}({call_args}) }}"
+            )
+        return "\n".join(lines)
 
     def _rewrite_fn_binding(self, st: List[Tok]) -> List[Tok]:
         """`const f = (a) => expr` → `func f(a) { return expr }`"""
@@ -526,16 +649,12 @@ class Transformer:
         sig = _strip_trivia(p)
         if not sig:
             return ""
-        # Drop modifiers: public/private/protected/readonly
         while sig and sig[0].kind == "kw" and sig[0].value in (
                 "public", "private", "protected", "readonly", "static"):
             sig = sig[1:]
-        # destructured pattern – degrade by name = "arg"
         if sig and sig[0].kind == "punct" and sig[0].value in ("{", "["):
             self.notes.append("destructured parameter not fully supported")
             return "_arg: Any"
-        # Spread: ...args  → variadic; Cangjie has variadic only on call site.
-        # We pass as Array.
         is_rest = False
         if sig and sig[0].kind == "op" and sig[0].value == "...":
             is_rest = True
@@ -551,7 +670,6 @@ class Transformer:
         type_str = ""
         default_str = ""
         if sig and sig[0].kind == "punct" and sig[0].value == ":":
-            # collect type until '=' or end
             j = 1
             depth = 0
             while j < len(sig):
@@ -574,9 +692,9 @@ class Transformer:
         if is_rest:
             type_str = f"Array<{type_str}>"
         out = f"{escape_id(name)}: {type_str}"
-        if default_str:
-            # Cangjie default-value parameters use `!` named-param syntax
-            out = f"{escape_id(name)}!: {type_str} = {default_str}"
+        # NOTE: we *do not* emit `name!: T = default` because we always
+        # generate positional overload forwarders that supply the defaults.
+        # This keeps positional call sites compiling without changes.
         return out
 
     def _rewrite_block(self, toks: List[Tok]) -> List[Tok]:
@@ -738,7 +856,11 @@ class Transformer:
 
     # ---- control flow ---------------------------------------------------
     def _rewrite_if(self, st: List[Tok]) -> List[Tok]:
-        # Recurse: rewrite condition expressions and block bodies.
+        """Rewrite an if/else-if/else chain.
+
+        Cangjie requires `{...}` around each branch body; TS allows a bare
+        statement.  We detect bare bodies and wrap them in braces.
+        """
         self.rule_fires += 1
         out: List[Tok] = []
         i = 0
@@ -756,6 +878,53 @@ class Transformer:
                     out.extend(self._rewrite_inline_expr(inner))
                     out.append(st[close])
                     i = close + 1
+                    # After the condition, the next significant token is
+                    # the body — either `{` or a bare statement.  Wrap bare
+                    # statement in braces.
+                    j = i
+                    while j < len(st) and st[j].kind in ("ws", "nl", "cmt"):
+                        out.append(st[j]); j += 1
+                    if j < len(st):
+                        if st[j].kind == "punct" and st[j].value == "{":
+                            # already a block; let normal flow handle it
+                            i = j
+                            continue
+                        # Collect a single statement (up to ';' or until
+                        # we hit `else` or end).
+                        bs = j
+                        depth_p = depth_b = depth_br = 0
+                        while bs < len(st):
+                            bt = st[bs]
+                            v = bt.value
+                            if bt.kind == "punct":
+                                if v == "(":
+                                    depth_p += 1
+                                elif v == ")":
+                                    depth_p -= 1
+                                elif v == "[":
+                                    depth_b += 1
+                                elif v == "]":
+                                    depth_b -= 1
+                                elif v == "{":
+                                    depth_br += 1
+                                elif v == "}":
+                                    depth_br -= 1
+                            if depth_p == depth_b == depth_br == 0:
+                                if bt.kind == "punct" and v == ";":
+                                    bs += 1
+                                    break
+                                if bt.kind == "kw" and v == "else":
+                                    break
+                            bs += 1
+                        body_part = st[j:bs]
+                        rewritten = self._rewrite_stmt_list(body_part)
+                        out.append(Tok("punct", "{"))
+                        out.append(Tok("nl", "\n"))
+                        out.extend(rewritten)
+                        out.append(Tok("punct", "}"))
+                        out.append(Tok("ws", " "))
+                        i = bs
+                        continue
                     continue
             if t.kind == "punct" and t.value == "{":
                 close = _match_pair(st, i, "{", "}")
@@ -1025,7 +1194,10 @@ class Transformer:
             groups.append((cur_label, cur_body))
         # Emit each group
         for label, gbody in groups:
-            # remove `break;` from body
+            # Skip a leading "empty" group with no label and no body — it's
+            # an artefact of how we tokenise the switch body.
+            if label is None and not _strip_trivia(gbody):
+                continue
             cleaned = self._strip_breaks(gbody)
             if label is None:
                 pat = "_"
@@ -1234,7 +1406,17 @@ class Transformer:
         return pieces, cur
 
     def _chain_contains_string(self, chain) -> bool:
-        return any(k == "str" for k, _ in chain)
+        if any(k == "str" for k, _ in chain):
+            return True
+        # Heuristic: if any expression operand is a *bare identifier* whose
+        # variable type is known to be `String`, treat the whole chain as
+        # a string concatenation.
+        for k, text in chain:
+            if k == "expr":
+                name = text.strip()
+                if name in self.var_types and self.var_types[name] == "String":
+                    return True
+        return False
 
     def _rewrite_templates(self, toks: List[Tok]) -> List[Tok]:
         out: List[Tok] = []
@@ -1261,6 +1443,21 @@ class Transformer:
         return out
 
     def _rewrite_simple_replacements(self, toks: List[Tok], preserve_keywords: set) -> List[Tok]:
+        # Identifiers that are TS primitive type *names* (lowercase).  In
+        # practice these never appear as runtime values in idiomatic TS,
+        # so it is safe to globally rewrite them to their Cangjie names.
+        # This makes `identity<number>(...)` and `new Map<string, number>()`
+        # produce valid Cangjie type arguments without a separate pass.
+        _LC_TYPE_MAP = {
+            "number": "Int64",
+            "string": "String",
+            "boolean": "Bool",
+            "void": "Unit",
+            "any": "Any",
+            "unknown": "Any",
+            "never": "Nothing",
+            "bigint": "Int64",
+        }
         out: List[Tok] = []
         i = 0
         while i < len(toks):
@@ -1284,7 +1481,6 @@ class Transformer:
                 out.append(Tok("id", PLAIN_IDENT[t.value]))
                 self.rule_fires += 1
             elif t.kind == "id" and t.value == "Map":
-                # `new Map<K,V>()` already had new dropped — but bare `Map` → `HashMap`
                 self.imports.add("std.collection.*")
                 out.append(Tok("id", "HashMap"))
                 self.rule_fires += 1
@@ -1292,8 +1488,9 @@ class Transformer:
                 self.imports.add("std.collection.*")
                 out.append(Tok("id", "HashSet"))
                 self.rule_fires += 1
-            elif t.kind == "id" and t.value == "Array":
-                out.append(t)
+            elif t.kind in ("id", "kw") and t.value in _LC_TYPE_MAP:
+                out.append(Tok("id", _LC_TYPE_MAP[t.value]))
+                self.rule_fires += 1
             else:
                 out.append(t)
             i += 1
@@ -1302,6 +1499,7 @@ class Transformer:
     def _rewrite_dotted_globals(self, toks: List[Tok]) -> List[Tok]:
         """`console.log(x)` → `println(x)`, `Math.sqrt(x)` → `sqrt(Float64(x))`, etc."""
         FLOAT_WRAPPED = {"sqrt", "pow", "floor", "ceil", "round"}
+        NEEDS_HELPER = {"abs", "max", "min"}
         out: List[Tok] = []
         i = 0
         while i < len(toks):
@@ -1312,15 +1510,11 @@ class Transformer:
                 key = f"{toks[j].value}.{toks[j + 2].value}"
                 if key in GLOBAL_IDENT:
                     repl = GLOBAL_IDENT[key]
-                    # Wrap the next call's arguments in Float64() for math
-                    # functions that require it.
                     if repl in FLOAT_WRAPPED and j + 3 < len(toks) and toks[j + 3].kind == "punct" and toks[j + 3].value == "(":
                         close = _match_pair(toks, j + 3, "(", ")")
                         if close != -1:
                             inner = toks[j + 4:close]
                             inner_rew = self._rewrite_inline_expr_tokens(inner, set())
-                            inner_text = _to_text(inner_rew).strip()
-                            # Split on top-level commas (pow has 2 args)
                             args = _split_top_commas(inner_rew)
                             cast_parts = [f"Float64({_to_text(a).strip()})" for a in args]
                             out.append(Tok("id", repl))
@@ -1335,7 +1529,10 @@ class Transformer:
                     out.append(Tok("id", repl))
                     self.rule_fires += 1
                     i = j + 3
-                    if key.startswith("Math.") and repl in FLOAT_WRAPPED:
+                    if repl in FLOAT_WRAPPED:
+                        self.helpers.add(repl)
+                        self.imports.add("std.math.*")
+                    if repl in NEEDS_HELPER:
                         self.helpers.add(repl)
                     continue
             out.append(toks[i])
@@ -1347,14 +1544,52 @@ class Transformer:
         i = 0
         while i < len(toks):
             t = toks[i]
-            # `.method(` → `.newname(`
+            # `.set(k, v)` on a hash-map-like object  →  `[k] = v`
+            if (t.kind == "punct" and t.value == "."
+                    and i + 2 < len(toks)
+                    and toks[i + 1].kind in ("id", "kw") and toks[i + 1].value == "set"
+                    and toks[i + 2].kind == "punct" and toks[i + 2].value == "("):
+                close = _match_pair(toks, i + 2, "(", ")")
+                if close != -1:
+                    inner = toks[i + 3:close]
+                    args = _split_top_commas(inner)
+                    if len(args) == 2:
+                        k_txt = _to_text(self._rewrite_inline_expr_tokens(args[0], set())).strip()
+                        v_txt = _to_text(self._rewrite_inline_expr_tokens(args[1], set())).strip()
+                        out.append(Tok("punct", "["))
+                        out.append(Tok("id", k_txt))
+                        out.append(Tok("punct", "]"))
+                        out.append(Tok("ws", " "))
+                        out.append(Tok("op", "="))
+                        out.append(Tok("ws", " "))
+                        out.append(Tok("id", v_txt))
+                        i = close + 1
+                        self.rule_fires += 1
+                        continue
+            # `.get(k)` on a hash-map-like object  →  `[k]` (Cangjie's
+            # indexer returns the value; for HashMap it returns ?V).
+            if (t.kind == "punct" and t.value == "."
+                    and i + 2 < len(toks)
+                    and toks[i + 1].kind in ("id", "kw") and toks[i + 1].value == "get"
+                    and toks[i + 2].kind == "punct" and toks[i + 2].value == "("):
+                close = _match_pair(toks, i + 2, "(", ")")
+                if close != -1:
+                    inner = toks[i + 3:close]
+                    args = _split_top_commas(inner)
+                    if len(args) == 1:
+                        k_txt = _to_text(self._rewrite_inline_expr_tokens(args[0], set())).strip()
+                        out.append(Tok("punct", "["))
+                        out.append(Tok("id", k_txt))
+                        out.append(Tok("punct", "]"))
+                        i = close + 1
+                        self.rule_fires += 1
+                        continue
+            # Method rename via knowledge base
             if (t.kind == "punct" and t.value == "."
                     and i + 1 < len(toks) and toks[i + 1].kind in ("id", "kw")
                     and toks[i + 1].value in METHOD_RENAME):
                 name = toks[i + 1].value
                 new_name, _kind = METHOD_RENAME[name]
-                # Only rewrite if it really is a call (followed by `(`)
-                # — but even property access like `.length` matters
                 if i + 2 < len(toks) and toks[i + 2].kind == "punct" and toks[i + 2].value == "(":
                     out.append(t)
                     out.append(Tok("id", new_name))
@@ -1399,7 +1634,7 @@ class Transformer:
                         if m < len(toks) and toks[m].kind == "str":
                             ty_lit = toks[m].value.strip("'\"")
                             cj_t = {
-                                "string": "String", "number": "Float64",
+                                "string": "String", "number": "Int64",
                                 "boolean": "Bool", "object": "Any",
                                 "function": "Any", "undefined": "Unit",
                             }.get(ty_lit, "Any")
@@ -1427,11 +1662,26 @@ class Transformer:
         i = 0
         while i < len(toks):
             t = toks[i]
-            # Case A: `(` params `)` `=>` body
+            # Case A: `(` params `)` (optional `: RetType`) `=>` body
             if t.kind == "punct" and t.value == "(":
                 close = _match_pair(toks, i, "(", ")")
                 if close != -1:
+                    # skip optional `: ReturnType` after `)`
                     nxt = _next_sig(toks, close + 1)
+                    if nxt < len(toks) and toks[nxt].kind == "punct" and toks[nxt].value == ":":
+                        # consume return-type annotation up to '=>'
+                        rj = nxt + 1
+                        depth = 0
+                        while rj < len(toks):
+                            tt = toks[rj]
+                            if tt.kind == "punct" and tt.value in "([{":
+                                depth += 1
+                            elif tt.kind == "punct" and tt.value in ")]}":
+                                depth -= 1
+                            if depth == 0 and tt.kind == "op" and tt.value == "=>":
+                                break
+                            rj += 1
+                        nxt = rj
                     if nxt < len(toks) and toks[nxt].kind == "op" and toks[nxt].value == "=>":
                         # extract optional return type between ) and =>
                         # (ignore: not needed for lambda emit)
@@ -1595,9 +1845,17 @@ class Transformer:
 
     # ---- enum ----
     def _rewrite_enum_decl(self, st: List[Tok]) -> List[Tok]:
-        """`enum E { A, B = 2, C }` → `enum E { A | B | C }` (loses explicit values)."""
+        """`enum E { A, B = 2, C }` → Cangjie enum with `==`/`!=` operators."""
         self.rule_fires += 1
         out = list(st)
+        # Extract enum name
+        enum_name = ""
+        for k, t in enumerate(out):
+            if t.kind == "kw" and t.value == "enum":
+                j = _next_sig(out, k + 1)
+                if j < len(out):
+                    enum_name = out[j].value
+                break
         i = 0
         while i < len(out) and not (out[i].kind == "punct" and out[i].value == "{"):
             i += 1
@@ -1607,24 +1865,30 @@ class Transformer:
         if close == -1:
             return st
         inner = out[i + 1:close]
-        # split on commas (top level)
         entries = _split_top_commas(inner)
         names = []
         for e in entries:
             esig = _strip_trivia(e)
             if not esig:
                 continue
-            # name maybe followed by '=' value — drop value
-            n = esig[0].value
-            names.append(escape_id(n))
-        body = [Tok("ws", " ")]
-        for k, n in enumerate(names):
-            if k > 0:
-                body.append(Tok("ws", " "))
-                body.append(Tok("op", "|"))
-                body.append(Tok("ws", " "))
-            body.append(Tok("id", n))
-        body.append(Tok("ws", " "))
+            names.append(escape_id(esig[0].value))
+        # Body: variants + auto-generated == / != operators (so the
+        # converted TS code that uses `Color.Red == c` still works).
+        variant_line = " | ".join(names)
+        if names:
+            arms_eq = " | ".join(f"({n}, {n})" for n in names)
+            extra = (
+                f"\n    public operator func ==(other: {enum_name}): Bool {{\n"
+                f"        match ((this, other)) {{\n"
+                f"            case {arms_eq} => true\n"
+                f"            case _ => false\n"
+                f"        }}\n"
+                f"    }}\n"
+                f"    public operator func !=(other: {enum_name}): Bool {{ !(this == other) }}\n"
+            )
+        else:
+            extra = ""
+        body = [Tok("ws", " "), Tok("id", variant_line), Tok("id", extra)]
         return out[:i + 1] + body + out[close:]
 
     # ---- interface ----
@@ -1751,36 +2015,30 @@ class Transformer:
 
     # ---- class ----
     def _rewrite_class_decl(self, st: List[Tok], *, abstract: bool = False) -> List[Tok]:
-        """Rewrite class declaration.
-
-        Translates:
-          * field declarations  (`x: T = v;` → `var x: T = v`)
-          * `constructor(...)`  →  `init(...)`
-          * `method(...): T {}` →  `public func method(...): T {}`
-          * access modifiers (public/private/protected) preserved
-          * `extends Y` → `<: Y`
-          * `implements I1, I2` → `<: I1 & I2`
-        """
+        """Rewrite class declaration."""
         self.rule_fires += 1
         out = list(st)
-        # Drop `abstract`, mark `open`/`abstract`
+        # collect header up to first '{'
         opener: List[Tok] = []
         i = 0
-        # collect modifiers and the class name + generics + heritage clauses
         while i < len(out) and not (out[i].kind == "punct" and out[i].value == "{"):
             opener.append(out[i])
             i += 1
-        # transform header text
         header_str = _to_text(opener)
-        # `abstract class` → `abstract open class`? In Cangjie use `abstract`
+        # `abstract class` → `abstract open class`
         header_str = header_str.replace("abstract class", "abstract open class")
-        # extends X → <: X
+        # extends X → <: X     (and mark this class as a child)
         m = re.search(r"\bextends\s+([\w\.<>,\s]+?)(?=\s+implements\b|\s*\{|$)", header_str)
         super_clause = ""
         if m:
             super_name = m.group(1).strip()
             header_str = header_str[:m.start()].rstrip() + header_str[m.end():]
             super_clause = super_name
+            # Remember the parent so that, if its decl is in the same file,
+            # we can mark it `open`.
+            if not hasattr(self, "_open_parents"):
+                self._open_parents = set()
+            self._open_parents.add(super_name.split("<")[0].strip())
         # implements I1, I2 → list
         m2 = re.search(r"\bimplements\s+(.+?)(?=\s*\{|$)", header_str)
         iface_list: List[str] = []
@@ -1790,7 +2048,12 @@ class Transformer:
         bases = ([super_clause] if super_clause else []) + iface_list
         if bases:
             header_str = header_str.rstrip() + " <: " + " & ".join(bases) + " "
-        # body
+        # If we have a super clause, the *methods* may also need `open`/
+        # `override`.  We pass this flag downward.
+        if super_clause:
+            self._has_super = True
+        else:
+            self._has_super = False
         if i >= len(out):
             return st
         close = _match_pair(out, i, "{", "}")
@@ -1901,11 +2164,18 @@ class Transformer:
             if is_static:
                 out.append(Tok("ws", " "))
                 out.append(Tok("kw", "static"))
-            if is_override:
+            # If this class extends a parent, default to `override` for
+            # non-static, non-constructor methods (parent has open methods).
+            mark_override = (not is_static and getattr(self, "_has_super", False)
+                             and not is_override)
+            if is_override or mark_override:
                 out.append(Tok("ws", " "))
                 out.append(Tok("kw", "redef" if is_static else "override"))
+            elif not is_static:
+                # mark methods open so subclasses (declared later) can override
+                out.append(Tok("ws", " "))
+                out.append(Tok("kw", "open"))
             if is_abstract:
-                # Cangjie: declare without body; method must be in an `open abstract class`
                 out.append(Tok("ws", " "))
             out.append(Tok("ws", " "))
             out.append(Tok("kw", "func"))
@@ -2033,22 +2303,31 @@ class Transformer:
     def _render_helpers(self) -> str:
         out_lines: List[str] = []
         if "abs" in self.helpers:
-            out_lines.append("func abs<T>(x: T): T where T <: Comparable<T> & Neg<T> { if (x < (x - x)) { -x } else { x } }")
-        # max/min on numbers
+            out_lines.append(
+                "func abs(x: Int64): Int64 { if (x < 0) { -x } else { x } }\n"
+                "func absF(x: Float64): Float64 { if (x < 0.0) { -x } else { x } }"
+            )
         if "max" in self.helpers:
             out_lines.append("func max(a: Int64, b: Int64): Int64 { if (a >= b) { a } else { b } }")
         if "min" in self.helpers:
             out_lines.append("func min(a: Int64, b: Int64): Int64 { if (a <= b) { a } else { b } }")
-        # std.math.* is added via self.imports — don't duplicate here.
         return "\n".join(out_lines)
 
     def _postprocess(self, text: str) -> str:
-        # Collapse leftover semicolons at line-ends (Cangjie tolerates `;` but
-        # idiomatic code omits them).  We leave them in place – they parse.
         # Strip stray TS modifiers that may have leaked through
         text = re.sub(r"\bdeclare\b\s*", "", text)
         text = re.sub(r"\bexport\s+default\s*", "", text)
         text = re.sub(r"\bexport\s+", "", text)
-        # Collapse blank lines run
+        # Mark class `open` if it contains open/redef methods so subclasses
+        # can extend it.  Insert `open ` before `class NAME` where NAME is
+        # tracked in `_open_parents`.
+        opens = getattr(self, "_open_parents", set())
+        # Always also mark *every* non-abstract class as `open` to be safe –
+        # this matches the common case of inheritance in TS code.
+        text = re.sub(r"\b(?<!open )class\b", "open class", text)
+        # avoid `abstract open open class`
+        text = text.replace("abstract open open class", "abstract open class")
+        text = re.sub(r"\bopen open class\b", "open class", text)
+        # Collapse blank lines
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text
