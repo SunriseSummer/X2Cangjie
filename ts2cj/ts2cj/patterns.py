@@ -252,6 +252,15 @@ CHUNK_PATTERNS: List[Pattern] = [
         "for ($I in $START..=$END) {\n$BODY\n}",
         ("I", "START", "END", "BODY"),
     ),
+    # Generic fall-back for any C-style ``for(init; cond; step)`` whose
+    # condition cannot be reduced to a simple range.  Lowered to an
+    # ``init; while(cond) { body; step; }`` form.
+    Pattern(
+        "for_generic",
+        "for ( $INIT ; $COND ; $STEP ) { $BODY }",
+        "$INIT\nwhile ($COND) {\n$BODY\n$STEP\n}",
+        ("INIT", "COND", "STEP", "BODY"),
+    ),
     Pattern(
         "for_of",
         "for ( const $I of $XS ) { $BODY }",
