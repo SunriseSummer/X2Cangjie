@@ -165,6 +165,31 @@ def _map_one_type(toks: List[Tok], i: int, *, int_hint: bool = False) -> Tuple[s
                 break
         return out, consumed
 
+    # `[T, U, ...]` tuple type → Cangjie `(T, U, ...)`
+    if t.kind == "punct" and t.value == "[":
+        depth = 1
+        j = i + 1
+        while j < len(toks) and depth > 0:
+            if toks[j].kind == "punct" and toks[j].value == "[":
+                depth += 1
+            elif toks[j].kind == "punct" and toks[j].value == "]":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        inner = toks[i + 1:j]
+        # If inner contains top-level commas it's a tuple; otherwise it's
+        # actually an empty array marker handled elsewhere.
+        parts = _split_top_commas(inner)
+        if len(parts) >= 2:
+            mapped_parts = []
+            for p in parts:
+                mp, _ = _map_type_tokens(p, int_hint=int_hint)
+                mapped_parts.append(mp or "Any")
+            return f"({', '.join(mapped_parts)})", j - i + 1
+        # fall through — treat as Any
+        return "Any", j - i + 1
+
     # `{...}` object type – degrade to Any
     if t.kind == "punct" and t.value == "{":
         depth = 1

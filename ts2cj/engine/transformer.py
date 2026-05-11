@@ -564,7 +564,7 @@ class Transformer:
                     out.append(Tok("ws", " "))
                     out.append(Tok("id", map_type_string(_to_text(ret_ann_tokens))))
                 out.append(Tok("ws", " "))
-                out.extend(self._rewrite_arrow_body(body_part))
+                out.extend(self._rewrite_arrow_body_as_func_body(body_part))
             elif rest_sig[0].kind == "id":
                 # `x => expr`
                 pname = rest_sig[0].value
@@ -579,10 +579,26 @@ class Transformer:
                 out.append(Tok("id", "Int64"))
                 out.append(Tok("punct", ")"))
                 out.append(Tok("ws", " "))
-                out.extend(self._rewrite_arrow_body(body_part))
+                out.extend(self._rewrite_arrow_body_as_func_body(body_part))
             else:
                 return st
         return out
+
+    def _rewrite_arrow_body_as_func_body(self, body_part: List[Tok]) -> List[Tok]:
+        """Like :meth:`_rewrite_arrow_body` but ensures the result is a
+        ``{ ... }`` block suitable for a Cangjie ``func`` declaration.
+
+        A TS expression-bodied arrow ``(x) => x * 2`` translates to
+        ``func double(x: Int64) { x * 2 }``: the last expression is the
+        implicit return value in Cangjie, so no ``return`` is needed.
+        """
+        sig = _strip_trivia(body_part)
+        if sig and sig[0].kind == "punct" and sig[0].value == "{":
+            return self._rewrite_arrow_body(body_part)
+        inner = self._rewrite_inline_expr_tokens(list(body_part), set())
+        return [Tok("punct", "{"), Tok("nl", "\n"), Tok("ws", "    "),
+                *inner, Tok("nl", "\n"), Tok("punct", "}")]
+
 
     def _rewrite_function_signature_body(self, toks: List[Tok]) -> List[Tok]:
         """toks starts at `(` — params and body."""
@@ -1253,6 +1269,8 @@ class Transformer:
                                     preserve_keywords: set) -> List[Tok]:
         """Token-level rewrites for expressions/inline code."""
         out = list(toks)
+        out = self._rewrite_function_exprs(out)
+        out = self._rewrite_ternary(out)
         out = self._rewrite_templates(out)
         out = self._rewrite_arrow_in_expr(out)
         out = self._rewrite_simple_replacements(out, preserve_keywords)
@@ -1261,6 +1279,193 @@ class Transformer:
         out = self._rewrite_index_access(out)
         out = self._rewrite_typeof(out)
         out = self._rewrite_string_concat(out)
+        return out
+
+    def _rewrite_ternary(self, toks: List[Tok]) -> List[Tok]:
+        """Rewrite ``cond ? a : b`` to Cangjie ``if (cond) { a } else { b }``.
+
+        We do a single right-to-left scan so nested ternaries collapse
+        cleanly (the inner ``?`` is rewritten first because outer ones
+        contain it).
+        """
+        # Locate `?` tokens that are real ternary markers (not part of
+        # `?.` or `??`).  Cangjie's optional chaining uses `?` too but we
+        # haven't emitted those yet.
+        result = list(toks)
+        # Find the *last* ternary `?` and rewrite outward.
+        changed = True
+        max_iter = 32  # protect against runaway loops
+        while changed and max_iter > 0:
+            changed = False
+            max_iter -= 1
+            for i in range(len(result) - 1, -1, -1):
+                t = result[i]
+                if not (t.kind == "op" and t.value == "?"):
+                    continue
+                # Skip `??` and `?.`
+                nxt = result[i + 1] if i + 1 < len(result) else None
+                if nxt and nxt.kind == "op" and nxt.value == "?":
+                    continue
+                if nxt and nxt.kind == "punct" and nxt.value == ".":
+                    continue
+                # Find matching ':' at the same paren/bracket level
+                depth = 0
+                colon_idx = -1
+                for j in range(i + 1, len(result)):
+                    v = result[j].value
+                    if result[j].kind == "punct" and v in "([{":
+                        depth += 1
+                    elif result[j].kind == "punct" and v in ")]}":
+                        depth -= 1
+                        if depth < 0:
+                            break
+                    elif depth == 0 and result[j].kind == "punct" and v == ":":
+                        colon_idx = j
+                        break
+                    elif depth == 0 and result[j].kind == "op" and v == "?":
+                        # Nested ternary — handle inner first next iteration.
+                        break
+                if colon_idx == -1:
+                    continue
+                # Find start of condition: scan backward to find expression boundary.
+                start = i - 1
+                d = 0
+                while start >= 0:
+                    rt = result[start]
+                    v = rt.value
+                    if rt.kind == "punct" and v in ")]}":
+                        d += 1
+                    elif rt.kind == "punct" and v in "([{":
+                        d -= 1
+                        if d < 0:
+                            break
+                    elif d == 0 and (
+                        (rt.kind == "punct" and v in (",", ";"))
+                        or (rt.kind == "kw" and v in ("return", "throw"))
+                    ):
+                        break
+                    start -= 1
+                cond_start = start + 1
+                # Find end of else branch: scan forward likewise.
+                end = colon_idx + 1
+                d = 0
+                while end < len(result):
+                    rt = result[end]
+                    v = rt.value
+                    if rt.kind == "punct" and v in "([{":
+                        d += 1
+                    elif rt.kind == "punct" and v in ")]}":
+                        d -= 1
+                        if d < 0:
+                            break
+                    elif d == 0 and rt.kind == "punct" and v in (",", ";"):
+                        break
+                    end += 1
+                # Slices: cond = [cond_start..i), then = [i+1..colon_idx), else = [colon_idx+1..end)
+                cond = result[cond_start:i]
+                then_part = result[i + 1:colon_idx]
+                else_part = result[colon_idx + 1:end]
+                replacement: List[Tok] = []
+                replacement.append(Tok("kw", "if"))
+                replacement.append(Tok("ws", " "))
+                replacement.append(Tok("punct", "("))
+                replacement.extend(_strip_trivia(cond))
+                replacement.append(Tok("punct", ")"))
+                replacement.append(Tok("ws", " "))
+                replacement.append(Tok("punct", "{"))
+                replacement.append(Tok("ws", " "))
+                replacement.extend(_strip_trivia(then_part))
+                replacement.append(Tok("ws", " "))
+                replacement.append(Tok("punct", "}"))
+                replacement.append(Tok("ws", " "))
+                replacement.append(Tok("kw", "else"))
+                replacement.append(Tok("ws", " "))
+                replacement.append(Tok("punct", "{"))
+                replacement.append(Tok("ws", " "))
+                replacement.extend(_strip_trivia(else_part))
+                replacement.append(Tok("ws", " "))
+                replacement.append(Tok("punct", "}"))
+                result = result[:cond_start] + replacement + result[end:]
+                self.rule_fires += 1
+                changed = True
+                break
+        return result
+
+    def _rewrite_function_exprs(self, toks: List[Tok]) -> List[Tok]:
+        """Rewrite `function (params): RetT { body }` (TS function-expression
+        used as a value) into a Cangjie lambda ``{ params => body }``.
+        """
+        out: List[Tok] = []
+        i = 0
+        while i < len(toks):
+            t = toks[i]
+            if t.kind == "kw" and t.value == "function":
+                # find '('
+                j = _next_sig(toks, i + 1)
+                # Optional name between `function` and `(` is dropped — anonymous lambda.
+                while j < len(toks) and toks[j].kind == "id":
+                    j = _next_sig(toks, j + 1)
+                if j >= len(toks) or not (toks[j].kind == "punct" and toks[j].value == "("):
+                    out.append(t)
+                    i += 1
+                    continue
+                pclose = _match_pair(toks, j, "(", ")")
+                if pclose == -1:
+                    out.append(t)
+                    i += 1
+                    continue
+                params = toks[j + 1:pclose]
+                after = pclose + 1
+                # optional `: RetType`
+                ann = _next_sig(toks, after)
+                if ann < len(toks) and toks[ann].kind == "punct" and toks[ann].value == ":":
+                    # skip until `{`
+                    k = ann + 1
+                    while k < len(toks) and not (toks[k].kind == "punct" and toks[k].value == "{"):
+                        k += 1
+                    after = k
+                else:
+                    after = ann
+                if after >= len(toks) or not (toks[after].kind == "punct" and toks[after].value == "{"):
+                    out.append(t)
+                    i += 1
+                    continue
+                bclose = _match_pair(toks, after, "{", "}")
+                if bclose == -1:
+                    out.append(t)
+                    i += 1
+                    continue
+                body = toks[after + 1:bclose]
+                # Rewrite params: comma-split & build name: T list
+                pp = _split_top_commas(params)
+                param_texts: List[str] = []
+                for p in pp:
+                    psig = _strip_trivia(p)
+                    if not psig:
+                        continue
+                    pname = psig[0].value
+                    type_str = "Int64"
+                    for kk, st_ in enumerate(psig):
+                        if st_.kind == "punct" and st_.value == ":":
+                            type_str = map_type_string(_to_text(psig[kk + 1:])) or "Any"
+                            break
+                    param_texts.append(f"{escape_id(pname)}: {type_str}")
+                # Recursively rewrite body as stmt list
+                rewritten_body = self._rewrite_stmt_list(body)
+                out.append(Tok("punct", "{"))
+                out.append(Tok("ws", " "))
+                if param_texts:
+                    out.append(Tok("id", ", ".join(param_texts)))
+                    out.append(Tok("ws", " "))
+                out.append(Tok("op", "=>"))
+                out.append(Tok("ws", " "))
+                out.extend(rewritten_body)
+                out.append(Tok("punct", "}"))
+                i = bclose + 1
+                self.rule_fires += 1
+                continue
+            out.append(t)
+            i += 1
         return out
 
     def _rewrite_string_concat(self, toks: List[Tok]) -> List[Tok]:
@@ -1544,6 +1749,50 @@ class Transformer:
         i = 0
         while i < len(toks):
             t = toks[i]
+            # `.substring(a, b)` → `[a..b]` (Cangjie String slice operator)
+            if (t.kind == "punct" and t.value == "."
+                    and i + 2 < len(toks)
+                    and toks[i + 1].kind in ("id", "kw") and toks[i + 1].value in ("substring", "substr")
+                    and toks[i + 2].kind == "punct" and toks[i + 2].value == "("):
+                close = _match_pair(toks, i + 2, "(", ")")
+                if close != -1:
+                    inner = toks[i + 3:close]
+                    args = _split_top_commas(inner)
+                    if len(args) == 2:
+                        a_txt = _to_text(self._rewrite_inline_expr_tokens(args[0], set())).strip()
+                        b_txt = _to_text(self._rewrite_inline_expr_tokens(args[1], set())).strip()
+                        out.append(Tok("punct", "["))
+                        out.append(Tok("id", f"{a_txt}..{b_txt}"))
+                        out.append(Tok("punct", "]"))
+                        i = close + 1
+                        self.rule_fires += 1
+                        continue
+                    if len(args) == 1:
+                        a_txt = _to_text(self._rewrite_inline_expr_tokens(args[0], set())).strip()
+                        out.append(Tok("punct", "["))
+                        out.append(Tok("id", f"{a_txt}.."))
+                        out.append(Tok("punct", "]"))
+                        i = close + 1
+                        self.rule_fires += 1
+                        continue
+            # `.slice(a, b)` (TS Array.slice / String.slice) — same treatment
+            if (t.kind == "punct" and t.value == "."
+                    and i + 2 < len(toks)
+                    and toks[i + 1].kind == "id" and toks[i + 1].value == "slice"
+                    and toks[i + 2].kind == "punct" and toks[i + 2].value == "("):
+                close = _match_pair(toks, i + 2, "(", ")")
+                if close != -1:
+                    inner = toks[i + 3:close]
+                    args = _split_top_commas(inner)
+                    if len(args) == 2:
+                        a_txt = _to_text(self._rewrite_inline_expr_tokens(args[0], set())).strip()
+                        b_txt = _to_text(self._rewrite_inline_expr_tokens(args[1], set())).strip()
+                        out.append(Tok("punct", "["))
+                        out.append(Tok("id", f"{a_txt}..{b_txt}"))
+                        out.append(Tok("punct", "]"))
+                        i = close + 1
+                        self.rule_fires += 1
+                        continue
             # `.set(k, v)` on a hash-map-like object  →  `[k] = v`
             if (t.kind == "punct" and t.value == "."
                     and i + 2 < len(toks)
@@ -1566,24 +1815,12 @@ class Transformer:
                         i = close + 1
                         self.rule_fires += 1
                         continue
-            # `.get(k)` on a hash-map-like object  →  `[k]` (Cangjie's
-            # indexer returns the value; for HashMap it returns ?V).
-            if (t.kind == "punct" and t.value == "."
-                    and i + 2 < len(toks)
-                    and toks[i + 1].kind in ("id", "kw") and toks[i + 1].value == "get"
-                    and toks[i + 2].kind == "punct" and toks[i + 2].value == "("):
-                close = _match_pair(toks, i + 2, "(", ")")
-                if close != -1:
-                    inner = toks[i + 3:close]
-                    args = _split_top_commas(inner)
-                    if len(args) == 1:
-                        k_txt = _to_text(self._rewrite_inline_expr_tokens(args[0], set())).strip()
-                        out.append(Tok("punct", "["))
-                        out.append(Tok("id", k_txt))
-                        out.append(Tok("punct", "]"))
-                        i = close + 1
-                        self.rule_fires += 1
-                        continue
+            # NOTE: we used to rewrite ``.get(k)`` to ``[k]`` here, but
+            # Cangjie's HashMap also exposes ``.get(k)`` (returning
+            # ``Option<V>``) and user-defined classes commonly define a
+            # ``get`` method.  Leaving the syntax untouched is correct
+            # for both.  (Indexer ``m[k]`` for HashMap still works
+            # naturally because TS users rarely write ``m[k]``.)
             # Method rename via knowledge base
             if (t.kind == "punct" and t.value == "."
                     and i + 1 < len(toks) and toks[i + 1].kind in ("id", "kw")
@@ -2025,12 +2262,10 @@ class Transformer:
             opener.append(out[i])
             i += 1
         header_str = _to_text(opener)
-        # `abstract class` → `abstract open class`
-        header_str = header_str.replace("abstract class", "abstract open class")
+        # `abstract class` is fine as-is; we don't add `open` (it's implied).
         if "abstract" in header_str:
             if not hasattr(self, "_abstract_classes"):
                 self._abstract_classes = set()
-            # extract class name token after `class `
             m_abs = re.search(r"class\s+([A-Za-z_]\w*)", header_str)
             if m_abs:
                 self._abstract_classes.add(m_abs.group(1))
@@ -2142,6 +2377,37 @@ class Transformer:
             return []
         name_tok = sig[k]
         name = name_tok.value
+        # getter/setter (`get foo() { ... }` / `set foo(v) { ... }`) — flatten
+        # to plain methods named after the property since Cangjie's `prop`
+        # declaration requires a backing field; flat methods avoid that
+        # complexity.  We rename them to ``getFoo`` / ``setFoo`` so that
+        # call-sites which read ``obj.foo`` still need rewriting (we do that
+        # in :meth:`_rewrite_method_calls` below).
+        if name in ("get", "set") and k + 1 < len(sig) and sig[k + 1].kind == "id":
+            prop_name = sig[k + 1].value
+            new_name = ("get" if name == "get" else "set") + prop_name[0].upper() + prop_name[1:]
+            # Reconstruct member with new method name in place of `get NAME`/`set NAME`
+            # Find indices in m
+            # Locate name_tok and the following id in m
+            kw_idx = next((j for j, t in enumerate(m)
+                           if t.kind == "kw" and t.value == name), -1)
+            if kw_idx >= 0 and kw_idx + 1 < len(m):
+                # Replace m[kw_idx..kw_idx+1] with single id token = new_name.
+                # But there may be whitespace between them; consume up to id.
+                end = kw_idx + 1
+                while end < len(m) and m[end].kind != "id":
+                    end += 1
+                m = list(m)
+                m[kw_idx:end + 1] = [Tok("id", new_name)]
+                # Fall through – continue normal method handling.
+                sig = _strip_trivia(m)
+                # Re-skip modifiers
+                k = 0
+                while k < len(sig) and sig[k].kind == "kw" and sig[k].value in (
+                        "public", "private", "protected", "static", "readonly",
+                        "abstract", "override"):
+                    k += 1
+                name = sig[k].value if k < len(sig) else new_name
         # constructor → init
         if name == "constructor":
             # find '(' onwards
@@ -2320,6 +2586,78 @@ class Transformer:
             out_lines.append("func min(a: Int64, b: Int64): Int64 { if (a <= b) { a } else { b } }")
         return "\n".join(out_lines)
 
+    def _infer_float_params(self, text: str) -> str:
+        """Promote ``Int64`` params/returns to ``Float64`` when the
+        function body contains float literals or float-only stdlib calls.
+
+        We walk balanced ``func name(...): T { ... }`` blocks and apply
+        a conservative substitution to each one in isolation.
+        """
+        result: List[str] = []
+        i = 0
+        n = len(text)
+        FLOAT_MARKERS = re.compile(r"\b\d+\.\d|\bsqrt\(|\bpow\(")
+        while i < n:
+            m = re.search(r"\bfunc\s+[A-Za-z_]\w*\s*\(", text[i:])
+            if not m:
+                result.append(text[i:])
+                break
+            start = i + m.start()
+            result.append(text[i:start])
+            # locate matching ')' of the signature
+            popen = i + m.end() - 1
+            depth = 1
+            k = popen + 1
+            while k < n and depth > 0:
+                c = text[k]
+                if c == "(":
+                    depth += 1
+                elif c == ")":
+                    depth -= 1
+                k += 1
+            sig_close = k - 1  # index of ')'
+            # optional `: RetType` then `{`
+            brace = text.find("{", sig_close)
+            if brace == -1:
+                result.append(text[start:])
+                break
+            # matching '}'
+            d = 1
+            kk = brace + 1
+            in_str = None
+            while kk < n and d > 0:
+                ch = text[kk]
+                if in_str:
+                    if ch == "\\" and kk + 1 < n:
+                        kk += 2
+                        continue
+                    if ch == in_str:
+                        in_str = None
+                elif ch == '"':
+                    in_str = '"'
+                elif ch == "{":
+                    d += 1
+                elif ch == "}":
+                    d -= 1
+                kk += 1
+            body_close = kk - 1
+            sig = text[start:brace]
+            body = text[brace:body_close + 1]
+            # detect float usage in body (ignoring strings — a simple
+            # strip is good enough for our purposes since we only care
+            # about clear float markers in code)
+            body_no_str = re.sub(r'"(?:\\.|[^"\\])*"', '""', body)
+            if FLOAT_MARKERS.search(body_no_str):
+                # promote `: Int64` → `: Float64` in signature AND in
+                # the body's local `let X: Int64 = ...` declarations.
+                sig_new = re.sub(r":\s*Int64\b", ": Float64", sig)
+                body_new = re.sub(r":\s*Int64\b", ": Float64", body)
+                result.append(sig_new + body_new)
+            else:
+                result.append(sig + body)
+            i = body_close + 1
+        return "".join(result)
+
     def _postprocess(self, text: str) -> str:
         """Polish the rendered Cangjie source so it reads as idiomatic code.
 
@@ -2343,6 +2681,44 @@ class Transformer:
         text = re.sub(r"\bexport\s+default\s*", "", text)
         text = re.sub(r"\bexport\s+", "", text)
 
+        # ---- `Array<T>(n).fill(v)` → `Array<T>(n, repeat: v)` (Cangjie API)
+        text = re.sub(
+            r"\bArray<([^<>]+)>\(([^()]+)\)\.fill\(([^()]+)\)",
+            r"Array<\1>(\2, repeat: \3)",
+            text,
+        )
+        # ---- ``x == None`` / ``x != None`` won't type-check directly on
+        # an ``Option<T>`` because the bare ``None`` has no element type;
+        # rewrite to the idiomatic helpers.
+        text = re.sub(
+            r"(\b(?:this\.)?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*==\s*None\b",
+            r"\1.isNone()",
+            text,
+        )
+        text = re.sub(
+            r"(\b(?:this\.)?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*!=\s*None\b",
+            r"\1.isSome()",
+            text,
+        )
+        # ---- Int64 cast around `floor(...)`/`ceil(...)`/`round(...)`.
+        # In TS, ``Math.floor`` returns an integer-valued number; the
+        # user generally wants it back as ``Int64``.  Cangjie's
+        # ``floor``/``ceil``/``round`` return ``Float64``, so wrap.
+        # We do this *unconditionally* — wrapping a value that's
+        # already Int64 with ``Int64(...)`` is a harmless no-op.
+        text = re.sub(
+            r"\b(floor|ceil|round)\((?P<body>(?:[^()]|\([^()]*\))*)\)",
+            lambda m: f"Int64({m.group(1)}({m.group('body')}))",
+            text,
+        )
+
+        # ---- Float64 inference: when a function body uses a float
+        # literal (digit.digit) or float math builtins (sqrt/pow), the
+        # ``number`` parameters that we conservatively typed ``Int64``
+        # are almost certainly meant to be ``Float64``.  Walk each
+        # ``func`` block and patch its signature/body atomically.
+        text = self._infer_float_params(text)
+
         # ---- Mark only the classes that are actually inherited ----
         opens = {n.split("<", 1)[0].strip()
                  for n in getattr(self, "_open_parents", set())}
@@ -2360,9 +2736,31 @@ class Transformer:
                 return f"{prefix}open class {name}"
             return m.group(0)
 
+        # The replacement is comment-aware: skip matches that are inside
+        # a `// ...` line comment or a `/* ... */` block comment.
+        def _is_in_comment(s: str, pos: int) -> bool:
+            # block comment
+            last_open = s.rfind("/*", 0, pos)
+            if last_open >= 0:
+                last_close = s.rfind("*/", last_open, pos)
+                if last_close < 0:
+                    return True
+            # line comment
+            line_start = s.rfind("\n", 0, pos) + 1
+            line = s[line_start:pos]
+            # ignore "//" inside strings on the line — best-effort
+            if "//" in line and '"' not in line.split("//", 1)[0]:
+                return True
+            return False
+
+        def _safe_replace(m: re.Match) -> str:
+            if _is_in_comment(text, m.start()):
+                return m.group(0)
+            return _class_open_replace(m)
+
         text = re.sub(
-            r"(?P<prefix>(?:\b(?:open|abstract)\b\s+)*)class\s+(?P<name>[A-Za-z_][\w<>,\s]*?)(?=\s*[<{:])",
-            _class_open_replace,
+            r"(?P<prefix>(?:\b(?:open|abstract)\b\s+)*)\bclass\s+(?P<name>[A-Za-z_]\w*)\b",
+            _safe_replace,
             text,
         )
 

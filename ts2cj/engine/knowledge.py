@@ -95,9 +95,9 @@ METHOD_RENAME = {
     "lastIndexOf": ("lastIndexOf",  "method"),
     "replace":     ("replace",      "method"),
     "concat":      ("concat",       "method"),
-    "slice":       ("slice",        "method"),
-    "substring":   ("slice",        "method"),
-    "substr":      ("slice",        "method"),
+    "slice":       ("slice",        "method"),     # handled specially → [a..b]
+    "substring":   ("substring",    "method"),     # handled specially → [a..b]
+    "substr":      ("substring",    "method"),     # handled specially → [a..b]
     "split":       ("split",        "method"),
     # Array iteration (these become higher-order calls)
     "forEach":     ("forEach",      "method"),
@@ -107,10 +107,13 @@ METHOD_RENAME = {
     "find":        ("first",        "method"),
     "some":        ("any",          "method"),
     "every":       ("all",          "method"),
-    "push":        ("append",       "method"),
-    "pop":         ("remove",       "method"),
-    "shift":       ("remove",       "method"),
+    "push":        ("push",         "method"),    # leave alone (user-defined)
+    "pop":         ("pop",          "method"),    # leave alone (user-defined)
+    "shift":       ("removeFirst",  "method"),
     "unshift":     ("prepend",      "method"),
+    "has":         ("contains",     "method"),    # HashSet / HashMap
+    "delete":      ("remove",       "method"),
+    "clear":       ("clear",        "method"),
     "join":        ("toString",     "method"),
     "reverse":     ("reverse",      "method"),
     "sort":        ("sort",         "method"),
