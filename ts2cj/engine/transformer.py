@@ -1791,7 +1791,7 @@ class Transformer:
             if t.kind == "punct":
                 if t.value == "(":
                     depth_p += 1
-                elif t.kind == "punct" and t.value == ")":
+                elif t.value == ")":
                     if depth_p == 0:
                         break
                     depth_p -= 1

@@ -215,10 +215,10 @@ The aggregate report is dropped at `tests/log.md` and looks like:
 
 - **Conversion success: 100 % (30/30)**
 - **Cangjie compile success: 100 % (30/30)**
-- **End-to-end output match: 93 % (28/30)**
+- **End-to-end output match: 97 % (29/30)**
 - **Average quality score: 0.99**
 
-The two non-matching cases are:
+The one non-matching case is:
 
 | Case            | Symptom                          | Root cause |
 |-----------------|----------------------------------|-----------|

@@ -253,7 +253,7 @@ def main() -> int:
     print(f"=== ts2cj test summary ===")
     print(f"cases:          {n}")
     print(f"converted:      {n_conv} ({100*n_conv/n:.0f}%)")
-    print(f"cangjie compile:{n_cj} ({100*n_cj/n:.0f}%)")
+    print(f"cangjie compile: {n_cj} ({100*n_cj/n:.0f}%)")
     print(f"output match:   {n_match} ({100*n_match/n:.0f}%)")
     print(f"output partial: {n_pmatch}")
     print(f"avg score:      {avg:.2f}")
