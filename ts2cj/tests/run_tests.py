@@ -68,6 +68,11 @@ class CaseResult:
         return s
 
 
+def _strip_ansi(s: str) -> str:
+    import re as _re
+    return _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", s)
+
+
 def _run(cmd, **kw):
     return subprocess.run(cmd, capture_output=True, text=True, **kw)
 
@@ -116,7 +121,7 @@ def _typecheck_ts(ts_path: Path) -> bool:
 
 def _compile_cj(cj_path: Path, out_path: Path) -> tuple:
     res = _run(["cjc", str(cj_path), "-o", str(out_path)])
-    return res.returncode == 0, (res.stderr or res.stdout)
+    return res.returncode == 0, _strip_ansi(res.stderr or res.stdout)
 
 
 def _run_binary(bin_path: Path, stdin_path: Path | None) -> tuple:
