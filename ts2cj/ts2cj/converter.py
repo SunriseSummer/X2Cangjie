@@ -1445,6 +1445,12 @@ def convert_source(ts_source: str, wrap_main: bool = True) -> ConversionResult:
 
     body_text = "\n\n".join(p for p in parts if p)
 
+    # Cosmetic: collapse spaces around generic angle brackets so output
+    # reads as ``HashMap<String, Int64>`` rather than the spaced form
+    # produced by the generic token renderer.  We only do this for the
+    # well-known generic-bearing identifiers to avoid touching ``a < b``.
+    body_text = _tighten_generic_spacing(body_text)
+
     # Inject imports if needed.  Cangjie's collections live in
     # ``std.collection``; sorting routines in ``std.sort``.
     headers: List[str] = []
@@ -1453,3 +1459,31 @@ def convert_source(ts_source: str, wrap_main: bool = True) -> ConversionResult:
     header = ("\n".join(headers) + "\n\n") if headers else ""
     result.source = header + body_text + ("\n" if body_text and not body_text.endswith("\n") else "")
     return result
+
+
+_GENERIC_NAMES = (
+    "ArrayList", "HashMap", "HashSet", "Array", "Map", "Set",
+    "Option", "Iterator", "List", "Queue", "Stack", "Box",
+)
+
+
+def _tighten_generic_spacing(text: str) -> str:
+    """Collapse ``Name < T, U >`` → ``Name<T, U>`` for known generic names.
+
+    Operates iteratively to handle nested generics like
+    ``HashMap < String, ArrayList < Int64 > >``.
+    """
+    name_alt = "|".join(_GENERIC_NAMES)
+    pat_open = re.compile(rf"\b({name_alt})\s+<\s*")
+    # The closing ``>`` may be preceded by a space we want to remove.
+    pat_close = re.compile(r"([\w\)>\]])\s+>")
+    # ``HashMap<T> (`` → ``HashMap<T>(`` (constructor invocation).
+    pat_call = re.compile(rf"\b({name_alt})(<[^<>\n]*(?:<[^<>\n]*>[^<>\n]*)*>)\s+\(")
+    for _ in range(6):  # generics are rarely nested deeper than this
+        new = pat_open.sub(r"\1<", text)
+        new = pat_close.sub(r"\1>", new)
+        new = pat_call.sub(r"\1\2(", new)
+        if new == text:
+            break
+        text = new
+    return text

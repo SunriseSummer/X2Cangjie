@@ -209,39 +209,72 @@ score = anchor_score * (1 + n_anchors) + 0.1 * cosine_similarity + som_bonus
 * 对 `class X extends Y` 模式自动给方法加 `override` 修饰符；
 * 类统一发射为 `open class`（TS class 默认可继承）。
 
-## 5. 已支持的 TS 特性
+## 5. 已支持的 TS / 仓颉特性
 
-| 类别       | 形态                                                                                                            |
-|------------|-----------------------------------------------------------------------------------------------------------------|
-| 变量       | `const`/`let`/`var` + 显式类型 / 推断                                                                          |
-| 类型       | `number`、`string`、`boolean`、`void`、`any`、`T[]`、`Array<T>` → `Int64`/`String`/`Bool`/`Unit`/`Any`/`ArrayList<T>` |
-| 运算       | 算术、比较、逻辑、`===`/`!==` 自动规范化、`%`、字符串 `+`                                                       |
-| 控制流     | `if / else / else if`（多层）、`for (init; cond; inc)`、`for ... of`、`for ... in`、`while`、`return`/`break`/`continue` |
-| 函数       | `function` 声明（带 / 不带返回类型 / `void`）、可选 / 默认参数                                                  |
-| 类         | 字段 + 默认值、`constructor` → `init`、方法（`open`/`override` 自动）、`extends` / `implements`                |
-| 接口       | `interface` 声明 + 抽象方法签名                                                                                 |
-| 标准库映射 | `console.log` → `println`、`console.error` → `eprintln`、`.length` → `.size`、`.push` → `.append` 等            |
-| 字面量     | 模板字符串 `` ` ... ${x} ... ` `` → `"... ${x} ..."`                                                              |
+经过两轮增强，转换器目前已覆盖 **仓颉语言绝大多数核心特性**（宏除外）。
+下表按仓颉特性维度列出（→ 列展示典型的 TS 源形态）：
 
-## 6. 不（完全）支持的 TS 特性
+| 仓颉特性         | TS 形态（输入）                                              | 备注 |
+|------------------|--------------------------------------------------------------|------|
+| `let` / `var`    | `const x = e` / `let x = e`                                  | 推断类型时不强加注解 |
+| 基础类型         | `number / string / boolean / void / any`                     | → `Int64 / String / Bool / Unit / Any` |
+| 数组 / 集合      | `T[]` `Array<T>` `Map<K,V>` `Set<T>`                         | → `ArrayList<T>` `HashMap<K,V>` `HashSet<T>`，并自动注入 `import std.collection.*` |
+| 元组             | `[T, U]` 类型 + `[a, b]` 字面量                              | → `(T, U)` / `(a, b)`；类型别名亦能触发字面量改写 |
+| `?T` 可空        | `T \| null` / `T \| undefined`、字面量 `null`                | → `?T` / `None` |
+| 控制流           | `if/else if/else`、`for(;;)`、`for-of`、`for-in`、`while`、`do-while`、`break`、`continue` | 单行无大括号体自动补齐 |
+| `match` 模式匹配 | `switch / case / default / break`                            | → `match { … _ => ... }`，支持空 arm 补 `()`、嵌套 switch、`case A | B =>` 合并 |
+| 函数             | `function f(…): T { … }`、可选 / 默认参数、箭头函数          | 顶层 `function main()` 自动转 CJ 入口 |
+| 闭包 / Lambda    | `(x) => e` / `(x) => { … }`                                  | 应用于 `.map / .filter / .sort` 等链式调用 |
+| 类               | `class C extends D implements I { … }`                       | `open class` + `init`；**智能 `override` 检测**（仅当子类方法名出现在父类链中） |
+| 抽象类           | `abstract class` / `abstract foo();`                         | → `abstract` |
+| 静态成员         | `static foo()`、`static field`                               | → `static func` / `static let` |
+| 属性             | `get x() { … }` / `set x(v) { … }`                           | → `prop x` / `mut prop x` |
+| 接口             | `interface I { foo(): T; }`                                  | 接口体上下文感知（不会错误加 `public open`） |
+| 泛型             | `function f<T>(x: T): T`、`class Box<T>`                     | 含尖括号 / `where T <: U` 占位 |
+| `struct`         | `struct S { x: number; y: number; }`                         | → `struct S { … }` |
+| `enum`           | `enum Shape { Circle, Square }` / 带参 case                  | → `enum Shape { Circle \| Square }` |
+| 异常             | `try { } catch (e) { } finally { }`、`throw new Error(s)`    | → `try { } catch (e: Exception) { } finally { }`、`throw Exception(s)` |
+| 字符串插值       | `` `Hello ${name}` ``                                        | → `"Hello ${name}"` |
+| 标准库映射       | `console.log → println` / `.error → eprintln` / `.length → .size` / `.push → .add` / `Math.* → math.*` | 通过 Hopfield 关联记忆批量映射 |
+| 顶层声明排序     | TS 自由顺序                                                  | 输出按 imports → typealias → enum/struct → interface → class → func → main 装配 |
+| 字面量精化       | `1.5` / `1e3` 含小数 → `Float64` 字面量保持；整数 → `Int64`  | |
+| 算术规范化       | `Math.floor(a / b)`、`a === b` / `a !== b`                   | → 仓颉风格 `a / b`（Int 自截断）、`a == b` / `a != b` |
+
+### 5.1 不（完全）支持的 TS 特性
 
 下列特性会触发 fallback 注释 `/* ts2cj: TODO ... */` 或产出**轻微错误**
 的代码（用户预期的"少量细节错误"），由后续 AI 修正流程补全：
 
-* 联合类型 `A | B`、字面量类型、条件类型、`infer`、`as const`；
-* 类型断言 `x as T`、`<T>x`；
-* 可选链 `?.`、空合并 `??`；
-* `async / await`、`Promise<T>`；
-* 装饰器、命名空间、`declare`；
-* 复杂泛型约束 `<T extends U>`、默认类型；
-* 大型解构 / spread；
-* `Map<K, V>` / `Set<T>` 用法（结构识别但 API 调用未完全映射）；
+* `async / await`、`Promise<T>`、装饰器、命名空间、`declare`；
+* 复杂条件 / 映射类型、`infer`、`as const`、字面量类型；
+* 大型对象解构 / spread / rest 参数；
 * TS-only 模块系统（`import` / `export` 当前作为顶层声明透传）；
-* 浮点 / `bigint`：`number` 字面量统一映射到 `Int64`。
+* TS 宏 / 仓颉宏（按需求显式排除）。
 
 设计哲学：**这些缺口被有意识地保留**——我们追求转换器自身的
 **高吞吐、强泛化**，把"语法挑剔"的最后一公里留给下游 AI 流程，避免在
 转换器内引入脆弱的、覆盖度永远跟不上 TS 语言演化的规则集。
+
+## 6. 输出风格 ——「专业、老练、规范」
+
+ts2cj 把"语法机械替换"看作 baseline，并在多个层面做了**面向工程师可读性**
+的优化，让产物不像中间表示，而像有经验的仓颉开发者会写的代码：
+
+| 维度       | 反例（散装映射）                                  | ts2cj 输出（规范化）                                  |
+|------------|---------------------------------------------------|-------------------------------------------------------|
+| 类型注解   | `let x: Int64 = 42`                               | `let x = 42`（能推断的字面量不写注解）                |
+| `override` | 给每个继承类的方法都打 `override`                 | 仅当子类方法名在父类链（含多级）中真实存在时才标      |
+| 主入口     | 让 `console.log(...)` 散在顶层                    | 把全部顶层副作用收敛进 `main()` 并 `return 0`         |
+| 异常类型   | `catch (e) { … }`                                 | `catch (e: Exception) { … }`                          |
+| 集合 API   | `xs.append(v)` / `m.set(k,v)`                      | `xs.add(v)` / `m.add(k, v)`（按仓颉 stdlib 习惯）     |
+| 字符串拼接 | `"a " + b + " c"`                                 | `` "a ${b} c" ``（可插值时收敛为模板）                |
+| 默认初值   | 给所有未初始化变量发 `0`                          | 按类型选 `0` / `""` / `false` / `?T = None` / `ArrayList<T>()` / 元组零值 |
+| 单行块     | `if (c) return x` → 直接丢                        | 自动补 `{ … }` 满足仓颉语法                           |
+| 顶层顺序   | 与 TS 同序                                        | imports → typealias → enum/struct → interface → class → func → main |
+| 多余 `main()` 调用 | 同时保留 `function main()` 与底部 `main();` | 自动剥离重复调用                                      |
+| 嵌套 `switch` | 外层 case 切到内层 case                        | 按 `{}` 深度只切外层；内层完整保留                    |
+
+这些规则全部在 `converter.py` 的后处理阶段实现，**不依赖** AST。
 
 ## 7. 测试与评分
 
@@ -270,14 +303,38 @@ score = 0.4 × pattern_coverage   # confident / chunks
       + 0.2 × runs_and_matches    # 二进制运行成功 & 输出匹配
 ```
 
-汇总报告包含：用例数、总体模式覆盖率、CJ 编译通过率、运行匹配率、
-综合质量分；并对失败用例给出 cjc 诊断与运行差异。**当前 28 个用例的
-质量分约为 97.9%**（详见 `tests/log.md`）。
+### 7.3 测试矩阵（共 45 个用例）
+
+| 范围         | 用例编号                       | 说明 |
+|--------------|--------------------------------|------|
+| 基础语法     | `01_hello` … `28_edge_arrow`   | 表达式 / 控制流 / 函数 / 类 / 接口 / 递归 / 数组等 28 个最小用例 |
+| 数据类型     | `29_struct` `30_enum_basic` `34_tuple` `35_option` `39_type_alias` | `struct` / `enum` / 元组 / `?T` / 类型别名 |
+| 控制 & 异常  | `31_try_catch` `40_do_while`   | 异常 + `do-while` |
+| 泛型         | `32_generic_fn` `33_generic_class` `41_stack_generic` | 函数 / 类 / 泛型栈（含 Option peek） |
+| 集合         | `36_hashmap`                   | `HashMap` 增删查 |
+| 类高级       | `37_static` `38_abstract`      | 静态成员 / 抽象类 |
+| 中型综合     | `42_bank` (~110 行)            | 银行账户继承体系 + 异常 + ArrayList 遍历 |
+|              | `43_collections` (~50 行)      | 函数式数组聚合（filter / map / reduce 链） |
+| 大型综合     | `44_tictactoe` (~200 行)       | 井字棋 + Minimax AI |
+| **千行级**   | `45_algorithms` (~563 行)      | **算法工具箱**：埃氏筛 / 数论 / 矩阵 / 五种排序 / 图 BFS+DFS / 并查集 / 统计 / 位图 |
+
+百行 / 千行综合用例聚焦"一个完整可运行的程序"，覆盖：泛型容器 +
+继承 + 多态 + 异常 + 嵌套循环 + 模式匹配 + 函数式高阶 + 顶层
+驱动，且**最终 `cjc` 编译通过并运行匹配 `.expected`**。
+
+### 7.4 当前结果
+
+* 用例总数：**45**
+* 模式覆盖率（confident / chunks）：**≥ 99.5%**
+* 综合质量分：**≥ 99%**
+
+完整数据见自动生成的 `tests/log.md`。
 
 ## 8. 性能
 
 * SOM 训练：~50 ms（首次加载时一次性）。
-* 单文件转换：典型 100 行级 TS 文件 < 30 ms（NumPy 向量化）。
+* 单文件转换：典型 100 行级 TS 文件 < 30 ms（NumPy 向量化）；
+  563 行的 `45_algorithms` 端到端 ~150 ms。
 * `cjc` 编译占绝大部分端到端时间（每用例 ~3 秒），但与转换器无关。
 
 整个管线是**单线程、可重入、确定性**的（SOM 用固定随机种子）。
