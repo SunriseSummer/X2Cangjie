@@ -2027,6 +2027,13 @@ class Transformer:
         header_str = _to_text(opener)
         # `abstract class` → `abstract open class`
         header_str = header_str.replace("abstract class", "abstract open class")
+        if "abstract" in header_str:
+            if not hasattr(self, "_abstract_classes"):
+                self._abstract_classes = set()
+            # extract class name token after `class `
+            m_abs = re.search(r"class\s+([A-Za-z_]\w*)", header_str)
+            if m_abs:
+                self._abstract_classes.add(m_abs.group(1))
         # extends X → <: X     (and mark this class as a child)
         m = re.search(r"\bextends\s+([\w\.<>,\s]+?)(?=\s+implements\b|\s*\{|$)", header_str)
         super_clause = ""
@@ -2314,20 +2321,359 @@ class Transformer:
         return "\n".join(out_lines)
 
     def _postprocess(self, text: str) -> str:
-        # Strip stray TS modifiers that may have leaked through
+        """Polish the rendered Cangjie source so it reads as idiomatic code.
+
+        The single-pass token rewriter favours correctness over aesthetics
+        and intentionally leaves the output a little rough — semicolons
+        survive, every class is marked ``open``, every method is decorated
+        with ``public open``, and blank lines accumulate.  This pass
+        reshapes the text into something that looks hand-written:
+
+          * drop trailing ``;`` (Cangjie style omits them)
+          * collapse runs of blank lines and stray ``}``/``{`` whitespace
+          * only mark a class ``open`` when it has a known child in the
+            same file (tracked via ``self._open_parents``); otherwise the
+            ``public open`` decoration on methods is also dropped
+          * drop redundant ``: T = T(...)`` annotations the user can infer
+          * align ``}`` braces to the column of their owning ``{``
+          * tidy small stylistic ticks (``==  ``, ``return  x``, ...)
+        """
+        # ---- Strip stray TS modifiers that may have leaked through ----
         text = re.sub(r"\bdeclare\b\s*", "", text)
         text = re.sub(r"\bexport\s+default\s*", "", text)
         text = re.sub(r"\bexport\s+", "", text)
-        # Mark class `open` if it contains open/redef methods so subclasses
-        # can extend it.  Insert `open ` before `class NAME` where NAME is
-        # tracked in `_open_parents`.
-        opens = getattr(self, "_open_parents", set())
-        # Always also mark *every* non-abstract class as `open` to be safe –
-        # this matches the common case of inheritance in TS code.
-        text = re.sub(r"\b(?<!open )class\b", "open class", text)
-        # avoid `abstract open open class`
+
+        # ---- Mark only the classes that are actually inherited ----
+        opens = {n.split("<", 1)[0].strip()
+                 for n in getattr(self, "_open_parents", set())}
+        abstracts = {n.split("<", 1)[0].strip()
+                     for n in getattr(self, "_abstract_classes", set())}
+
+        def _class_open_replace(m: re.Match) -> str:
+            name = m.group("name")
+            base = name.split("<", 1)[0]
+            prefix = m.group("prefix") or ""
+            if "open" in prefix or "abstract" in prefix or base in abstracts:
+                return m.group(0)
+            if base in opens:
+                # Make sure we don't double-mark
+                return f"{prefix}open class {name}"
+            return m.group(0)
+
+        text = re.sub(
+            r"(?P<prefix>(?:\b(?:open|abstract)\b\s+)*)class\s+(?P<name>[A-Za-z_][\w<>,\s]*?)(?=\s*[<{:])",
+            _class_open_replace,
+            text,
+        )
+
+        # If a class is NOT marked open, strip "open" from its method
+        # signatures (we conservatively emitted it on every method).  We
+        # do this by scanning class-by-class.
+        text = self._strip_redundant_open_in_classes(text, open_classes=opens | abstracts)
+
+        # avoid `abstract open open class` / `open open class`
         text = text.replace("abstract open open class", "abstract open class")
-        text = re.sub(r"\bopen open class\b", "open class", text)
-        # Collapse blank lines
+        text = re.sub(r"\bopen\s+open\s+class\b", "open class", text)
+
+        # ---- We deliberately keep `public` on class members.  Cangjie
+        # requires that `open`/`override`/interface-impl methods be at
+        # least `public`/`protected` (the implicit default is `internal`),
+        # so a blanket strip causes "visibility of deriving member..."
+        # errors.  Idiomatic Cangjie projects also write `public func`
+        # explicitly on class APIs.
+        # We do however drop `public` when redundant on `init` constructors,
+        # which are implicitly public.
+        text = re.sub(r"^(\s+)public\s+(init\b)", r"\1\2", text, flags=re.MULTILINE)
+
+        # ---- Strip trailing `;` (Cangjie idiom omits them).  We keep
+        # them only inside `for (init; cond; step)` style heads, but that
+        # form was already rewritten to `for (i in r)`, so plain stripping
+        # is safe at this point.
+        text = re.sub(r";[ \t]*(?=\n)", "", text)
+        text = re.sub(r";[ \t]*$", "", text)
+        # also: inside-line `;` followed by space is rare, but harmless to leave
+
+        # ---- Drop redundant ":T = T(...)" annotations.  e.g.
+        #         let c: Counter = Counter(10)   →  let c = Counter(10)
+        text = re.sub(
+            r"(\b(?:let|var)\s+[A-Za-z_]\w*)\s*:\s*([A-Z]\w*)\s*=\s*\2\(",
+            r"\1 = \2(", text,
+        )
+
+        # ---- Tidy `return  x` (double space) and similar
+        text = re.sub(r"\b(return|throw|new)\s\s+", r"\1 ", text)
+        text = re.sub(r"(=|=>)\s\s+", r"\1 ", text)
+        text = re.sub(r"\(\s\s+", "(", text)
+        text = re.sub(r"\s\s+\)", ")", text)
+        text = re.sub(r",\s\s+", ", ", text)
+
+        # ---- Collapse trailing whitespace on lines
+        text = re.sub(r"[ \t]+\n", "\n", text)
+        # ---- Strip leading whitespace inside otherwise-blank lines
+        text = re.sub(r"\n[ \t]+\n", "\n\n", text)
+
+        # ---- Collapse 3+ blank lines down to 1
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        # ---- Inside indented blocks (function/class bodies) collapse
+        # blank lines: idiomatic Cangjie code does not pepper bodies with
+        # blank lines between consecutive statements.  We *keep* blank
+        # lines that separate top-level declarations (those start at
+        # column 0).
+        text = re.sub(r"\n[ \t]*\n(?=[ \t]+\S)", "\n", text)
+        # ---- Empty `}` block: remove blank between last stmt and `}`
+        text = re.sub(r"\n\n([ \t]*)}", r"\n\1}", text)
+        # ---- Empty body `{\n    \n}` → `{}`
+        text = re.sub(r"\{\s*\n\s*\}", "{}", text)
+        # ---- And: line `{` followed by indented `}` on its own line → keep but tidy
+        # ---- Ensure exactly one blank line between top-level declarations
+        # (already mostly handled above)
+
+        # ---- Split `{stmt` onto two lines so the reindenter can do its
+        # job (e.g. `func f(): X {return x}` → `func f(): X {\nreturn x}`).
+        # We do this only outside of string literals to avoid mangling
+        # `"${expr}"` template interpolations.
+        text = self._split_braces_outside_strings(text)
+        # ---- Re-indent stray closing braces that ended up at column 0
+        # but actually belong to a nested block.  A simple heuristic:
+        # walk the file and re-indent purely structural `}` lines based
+        # on running brace depth.
+        text = self._reindent(text)
+
+        # ---- One last cleanup: turn `}\n    \n` style chunks into `}\n`
+        text = re.sub(r"\n[ \t]+\n", "\n\n", text)
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text
+
+    # ------------------------------------------------------------------
+    # postprocess helpers
+    # ------------------------------------------------------------------
+    def _strip_redundant_open_in_classes(self, text: str, *,
+                                         open_classes: set) -> str:
+        """For any `class Name {...}` whose Name is NOT in *open_classes*,
+        remove the ``open`` modifier from method declarations inside that
+        class — those methods cannot be overridden anyway.
+        """
+        out: List[str] = []
+        i = 0
+        n = len(text)
+        while i < n:
+            m = re.search(r"\bclass\s+([A-Za-z_]\w*)", text[i:])
+            if not m:
+                out.append(text[i:])
+                break
+            start = i + m.start()
+            name = m.group(1)
+            # Find the opening `{`
+            brace = text.find("{", i + m.end())
+            if brace < 0:
+                out.append(text[i:])
+                break
+            # Find the matching `}`
+            depth = 1
+            j = brace + 1
+            while j < n and depth > 0:
+                c = text[j]
+                if c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                j += 1
+            close = j  # one past the closing brace
+            body = text[brace + 1:close - 1]
+            out.append(text[i:brace + 1])
+            if name not in open_classes:
+                body = re.sub(r"\bopen\s+func\b", "func", body)
+            out.append(body)
+            out.append("}")
+            i = close
+        return "".join(out)
+
+    def _reindent(self, text: str) -> str:
+        """Pretty-print the text by re-indenting every line according to
+        the current brace nesting depth.  Strings and `${...}` template
+        bodies are *not* analysed for nesting (the tokenizer already
+        handled template parts).
+
+        This is a *whitespace-only* transform — we never reorder or
+        re-flow code.  When a non-empty line opens more braces than it
+        closes, subsequent lines are indented one level deeper.
+
+        Edge cases handled:
+          * A line that *starts* with `}` or `)` is itself dedented by 1.
+          * Tokens like `} else {` cancel out within the same line.
+          * Lines inside strings preserve their original content.
+
+        The indent unit is four spaces.
+        """
+        IND = "    "
+        out_lines: List[str] = []
+        depth = 0
+        for raw in text.splitlines():
+            stripped = raw.lstrip(" \t")
+            if not stripped:
+                out_lines.append("")
+                continue
+            opens, closes = self._count_braces_unquoted(stripped)
+            # `closing-first` adjustment: if line begins with `}` we
+            # render at depth-1
+            leading_close = 0
+            i = 0
+            while i < len(stripped) and stripped[i] in "})":
+                if stripped[i] == "}":
+                    leading_close += 1
+                i += 1
+                # tolerate whitespace between `}` and `}`
+                while i < len(stripped) and stripped[i] in " \t":
+                    i += 1
+            line_depth = max(0, depth - leading_close)
+            out_lines.append(IND * line_depth + stripped)
+            depth = max(0, depth + opens - closes)
+        return "\n".join(out_lines)
+
+    @staticmethod
+    def _count_braces_unquoted(line: str) -> Tuple[int, int]:
+        """Return ``(opens, closes)`` of structural ``{`` / ``}`` in *line*,
+        skipping any inside ``"..."`` / ``'...'`` string literals.
+        ``${...}`` interpolations are treated as inside the string (their
+        braces do not contribute to structural nesting).
+        """
+        opens = closes = 0
+        i = 0
+        in_str = False
+        q = ""
+        interp = 0
+        n = len(line)
+        while i < n:
+            c = line[i]
+            if in_str:
+                if c == "\\" and i + 1 < n:
+                    i += 2
+                    continue
+                if c == "$" and i + 1 < n and line[i + 1] == "{":
+                    interp += 1
+                    i += 2
+                    continue
+                if c == "}" and interp > 0:
+                    interp -= 1
+                    i += 1
+                    continue
+                if c == q and interp == 0:
+                    in_str = False
+                i += 1
+                continue
+            if c in ("'", '"'):
+                in_str = True
+                q = c
+                i += 1
+                continue
+            if c == "{":
+                opens += 1
+            elif c == "}":
+                closes += 1
+            i += 1
+        return opens, closes
+
+    @staticmethod
+    def _split_braces_outside_strings(text: str) -> str:
+        """Insert newlines after ``{`` and before ``}`` so each occupies its
+        own line, but only when the brace is *not* inside a string literal
+        or a ``${ ... }`` template interpolation.
+
+        We track three states:
+          * code: normal Cangjie code; braces here are structural
+          * string: inside ``"..."``; braces here are part of the literal
+            (or of an interpolation we still want to keep intact)
+          * interp: inside ``${ ... }`` within a string; braces here are
+            structural-looking but logically part of the string
+        """
+        out: List[str] = []
+        i = 0
+        n = len(text)
+        in_str = False
+        str_q = ""
+        interp_depth = 0  # nesting of `${` inside the string
+        while i < n:
+            c = text[i]
+            if in_str:
+                out.append(c)
+                if c == "\\" and i + 1 < n:
+                    out.append(text[i + 1])
+                    i += 2
+                    continue
+                if c == "$" and i + 1 < n and text[i + 1] == "{":
+                    out.append("{")
+                    interp_depth += 1
+                    i += 2
+                    continue
+                if c == "}" and interp_depth > 0:
+                    interp_depth -= 1
+                    i += 1
+                    continue
+                if c == str_q and interp_depth == 0:
+                    in_str = False
+                    str_q = ""
+                i += 1
+                continue
+            # outside string
+            if c in ("'", '"'):
+                in_str = True
+                str_q = c
+                out.append(c)
+                i += 1
+                continue
+            if c == "{":
+                out.append("{")
+                # if next non-whitespace char is `}`, leave `{}` untouched
+                k = i + 1
+                while k < n and text[k] in " \t":
+                    k += 1
+                if k < n and text[k] != "\n" and text[k] != "}":
+                    out.append("\n")
+                i += 1
+                continue
+            if c == "}":
+                # newline before, unless preceded by `{` or already newline
+                # find previous non-space char
+                k = len(out) - 1
+                while k >= 0 and out[k] in (" ", "\t"):
+                    k -= 1
+                if k >= 0 and out[k] not in ("{", "\n"):
+                    # Insert newline before this `}`
+                    # (preserve any trailing whitespace we just popped)
+                    while out and out[-1] in (" ", "\t"):
+                        out.pop()
+                    out.append("\n")
+                out.append("}")
+                i += 1
+                continue
+            out.append(c)
+            i += 1
+        return "".join(out)
+
+
+        opens = closes = 0
+        i = 0
+        in_str = False
+        q = ""
+        n = len(line)
+        while i < n:
+            c = line[i]
+            if in_str:
+                if c == "\\" and i + 1 < n:
+                    i += 2
+                    continue
+                if c == q:
+                    in_str = False
+                i += 1
+                continue
+            if c in ("'", '"'):
+                in_str = True
+                q = c
+                i += 1
+                continue
+            if c == "{":
+                opens += 1
+            elif c == "}":
+                closes += 1
+            i += 1
+        return opens, closes
