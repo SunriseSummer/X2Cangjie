@@ -241,6 +241,18 @@ CHUNK_PATTERNS: List[Pattern] = [
         ("I", "START", "END", "BODY"),
     ),
     Pattern(
+        "for_classic_assign",
+        "for ( $I = $START ; $I < $END ; $I ++ ) { $BODY }",
+        "for ($I in $START..$END) {\n$BODY\n}",
+        ("I", "START", "END", "BODY"),
+    ),
+    Pattern(
+        "for_classic_assign_le",
+        "for ( $I = $START ; $I <= $END ; $I ++ ) { $BODY }",
+        "for ($I in $START..=$END) {\n$BODY\n}",
+        ("I", "START", "END", "BODY"),
+    ),
+    Pattern(
         "for_of",
         "for ( const $I of $XS ) { $BODY }",
         "for ($I in $XS) {\n$BODY\n}",
@@ -488,6 +500,18 @@ CHUNK_PATTERNS: List[Pattern] = [
         "field_typed_no_init",
         "$NAME : $TY ;",
         "var $NAME: $TY",
+        ("NAME", "TY"),
+    ),
+    Pattern(
+        "let_typed_no_init",
+        "let $NAME : $TY ;",
+        "var $NAME: $TY = $DEFAULT",
+        ("NAME", "TY"),
+    ),
+    Pattern(
+        "var_typed_no_init",
+        "var $NAME : $TY ;",
+        "var $NAME: $TY = $DEFAULT",
         ("NAME", "TY"),
     ),
     Pattern(

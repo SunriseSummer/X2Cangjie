@@ -520,7 +520,16 @@ def _bind_slots(
             if j >= len(chunk):
                 return None
             i = j  # leave the anchor for the LIT branch
-        bindings[val] = slot_tokens
+        # Enforce slot consistency: a slot mentioned multiple times in the
+        # pattern must bind to the same token sequence each time.
+        if val in bindings:
+            prev = bindings[val]
+            if len(prev) != len(slot_tokens) or any(
+                a.value != b.value for a, b in zip(prev, slot_tokens)
+            ):
+                return None
+        else:
+            bindings[val] = slot_tokens
         e += 1
 
     if i != len(chunk):
@@ -564,6 +573,27 @@ def _render_tokens(tokens: List[Token]) -> str:
                 out.append(" ")
         out.append(t.value)
     return "".join(out)
+
+
+def _default_value_for(ty: str) -> str:
+    """Return a sensible Cangjie default value literal for ``ty``."""
+
+    ty = ty.strip()
+    if ty.startswith("?"):
+        return "None"
+    if ty.startswith("ArrayList<") or ty.startswith("Array<"):
+        return ty + "()"
+    if ty.startswith("HashMap<") or ty.startswith("HashSet<"):
+        return ty + "()"
+    if ty.startswith("("):  # tuple
+        # Build a default tuple of zeros / empty strings.
+        inner = ty[1:-1]
+        parts = [_default_value_for(p.strip()) for p in _split_top_level(inner, ",")]
+        return "(" + ", ".join(parts) + ")"
+    return {
+        "Int64": "0", "Int32": "0", "Float64": "0.0", "Float32": "0.0",
+        "Bool": "false", "String": "\"\"", "Rune": "r' '",
+    }.get(ty, ty + "()")  # last-resort: try a no-arg constructor
 
 
 def _is_word(s: str) -> bool:
@@ -654,6 +684,20 @@ def _convert_chunk(chunk: List[Token]) -> Optional[str]:
         if result is None:
             continue
         bindings, anchor_score = result
+        # Reject pattern matches where a slot we know must be a plain
+        # identifier (a function/class/var ``NAME``) has accidentally
+        # absorbed a control-flow keyword.  This protects against the
+        # ``method_no_ret`` pattern over-greedily matching ``for (...) {…}``.
+        if "NAME" in bindings:
+            first = bindings["NAME"][0] if bindings["NAME"] else None
+            if first is not None and first.kind == "KEYWORD" and first.value in (
+                "for", "while", "if", "else", "do", "switch", "case", "default",
+                "return", "throw", "try", "catch", "finally", "break",
+                "continue", "new", "typeof",
+                "let", "const", "var", "function", "class", "interface",
+                "enum", "struct", "type", "abstract", "import", "export",
+            ):
+                continue
         n_anchors = sum(1 for k, _ in pat_tokens if k == "LIT")
         sim = cosine(chunk_emb, engine.pattern_embeddings[idx])
         # Specificity reward: a pattern that ties down more anchor tokens is
@@ -706,6 +750,13 @@ def _emit(pat: Pattern, bindings: dict) -> str:
         lp = _convert_lambda_params(bindings["PARAMS"])
         out = out.replace("$LAMBDA_PARAMS", lp)
 
+    # ``$DEFAULT`` slot: pick a Cangjie-appropriate default value based
+    # on the (already-emitted) type slot ``$TY``.  Used by the
+    # uninitialised ``let x: T;`` patterns.
+    if "$DEFAULT" in out and "TY" in bindings:
+        ty_text = _convert_type(bindings["TY"]).strip()
+        out = out.replace("$DEFAULT", _default_value_for(ty_text))
+
     iface_like = pat.name in (
         "interface_decl", "interface_decl_extends", "interface_generic_decl",
     )
@@ -746,12 +797,41 @@ def _emit(pat: Pattern, bindings: dict) -> str:
     if pat.name in (
         "class_decl_extends", "class_decl_impl", "class_generic_decl_extends",
     ):
-        # Methods that have the same name as a parent method must be marked
-        # ``override`` in Cangjie.  We conservatively mark every method as
-        # override when there's an inheritance relationship — when a method
-        # does not actually override anything the downstream AI pass / user
-        # can remove the modifier.
-        out = out.replace("public open func", "public override func")
+        # Override detection.  We track each class's method set so a
+        # subclass only marks ``override`` on methods that actually
+        # exist in the parent.
+        name = _convert_expr(bindings.get("NAME", [])).strip()
+        base_text = _convert_type(bindings.get("BASE", [])).strip() if "BASE" in bindings else ""
+        # Strip generic args from the parent for lookup purposes.
+        base = re.sub(r"<.*$", "", base_text).strip()
+        my_methods = _scan_method_names(bindings.get("BODY", []))
+        _CLASS_METHODS[name] = my_methods
+        _CLASS_PARENT[name] = base
+        # Walk up the parent chain collecting their method sets.
+        parent_methods: set = set()
+        cur = base
+        seen = set()
+        while cur and cur not in seen:
+            seen.add(cur)
+            parent_methods |= _CLASS_METHODS.get(cur, set())
+            cur = _CLASS_PARENT.get(cur, "")
+        # For each ``public open func NAME`` line, decide whether to mark
+        # it ``override``.  Methods not present in any ancestor stay
+        # ``public open``.
+        def _mark(m: re.Match) -> str:
+            n = m.group(1)
+            if n in parent_methods:
+                return f"public override func {n}"
+            return f"public open func {n}"
+        out = re.sub(r"public open func (\w+)", _mark, out)
+    elif pat.name in ("class_decl", "class_generic_decl"):
+        # Plain class without extends — register methods for future
+        # subclasses' override analysis.
+        name = _convert_expr(bindings.get("NAME", [])).strip()
+        _CLASS_METHODS[name] = _scan_method_names(bindings.get("BODY", []))
+    elif pat.name == "abstract_class_decl":
+        name = _convert_expr(bindings.get("NAME", [])).strip()
+        _CLASS_METHODS[name] = _scan_method_names(bindings.get("BODY", []))
 
     # Tuple-literal fixup: when the variable's declared type is a tuple
     # (``$TY`` rendered starts with ``(``), the initializer ``[a, b, ...]``
@@ -772,10 +852,42 @@ def _emit(pat: Pattern, bindings: dict) -> str:
     return out
 
 
-# Registry of user-declared type aliases (built up over the course of a
-# single conversion; module-level state is fine as conversions are
-# single-threaded and short-lived).
+# Registries built up over the course of a single conversion.  Module-level
+# state is fine because conversions are single-threaded and short-lived.
 _TYPE_ALIASES: dict = {}
+_CLASS_METHODS: dict = {}   # class_name -> set of method names
+_CLASS_PARENT:  dict = {}   # class_name -> parent class name
+
+
+def _scan_method_names(tokens: List[Token]) -> set:
+    """Walk a class/interface body at top level and return the set of
+    method names declared.  Used for ``override`` analysis."""
+
+    names: set = set()
+    i, n = 0, len(tokens)
+    depth = 0
+    # Track positions of top-level ``$NAME ( ... )`` declarations.
+    while i < n:
+        t = tokens[i]
+        if t.value == "{":
+            depth += 1
+        elif t.value == "}":
+            depth -= 1
+        if depth != 0:
+            i += 1
+            continue
+        # candidate identifier
+        if t.kind in ("IDENT", "KEYWORD") and t.value not in (
+            ";", "public", "private", "protected", "static", "readonly",
+            "abstract", "constructor", "get", "set",
+        ):
+            # is the next token '(' ?
+            j = i + 1
+            if j < n and tokens[j].value == "(":
+                # we've found a method declaration ``name(...)``
+                names.add(t.value)
+        i += 1
+    return names
 
 
 def _apply_primitive_types(text: str) -> str:
@@ -1141,6 +1253,7 @@ def _convert_switch_body(tokens: List[Token]) -> str:
     i, n = 0, len(toks)
     cur_labels: List[List[Token]] = []
     cur_body: List[Token] = []
+    brace_depth = 0
 
     def flush():
         if cur_labels or cur_body:
@@ -1148,7 +1261,19 @@ def _convert_switch_body(tokens: List[Token]) -> str:
 
     while i < n:
         t = toks[i]
-        if t.kind == "KEYWORD" and t.value == "case":
+        # Track brace nesting — only ``case`` / ``default`` at the outer
+        # level start a new arm.  Inner switches keep their cases.
+        if t.kind == "PUNCT" and t.value == "{":
+            brace_depth += 1
+            cur_body.append(t)
+            i += 1
+            continue
+        if t.kind == "PUNCT" and t.value == "}":
+            brace_depth -= 1
+            cur_body.append(t)
+            i += 1
+            continue
+        if brace_depth == 0 and t.kind == "KEYWORD" and t.value == "case":
             # Start of a new case — if we already accumulated a body, flush it.
             if cur_body:
                 flush()
@@ -1163,7 +1288,7 @@ def _convert_switch_body(tokens: List[Token]) -> str:
             i += 1  # skip ":"
             cur_labels.append(lab)
             continue
-        if t.kind == "KEYWORD" and t.value == "default":
+        if brace_depth == 0 and t.kind == "KEYWORD" and t.value == "default":
             if cur_body:
                 flush()
                 cur_labels.clear()
@@ -1173,8 +1298,8 @@ def _convert_switch_body(tokens: List[Token]) -> str:
                 i += 1
             cur_labels.append([])  # empty = default
             continue
-        # Skip a trailing `break;` at body end.
-        if t.kind == "KEYWORD" and t.value == "break":
+        # Skip a trailing ``break;`` at top level of the current case body.
+        if brace_depth == 0 and t.kind == "KEYWORD" and t.value == "break":
             j = i + 1
             if j < n and toks[j].kind == "PUNCT" and toks[j].value == ";":
                 i = j + 1
@@ -1195,9 +1320,12 @@ def _convert_switch_body(tokens: List[Token]) -> str:
         else:
             label_str = " | ".join(_convert_expr(l) for l in labels if l)
         out_lines.append(f"    case {label_str} =>")
-        for ln in body_text.split("\n"):
-            if ln.strip():
-                out_lines.append(ln)
+        body_lines = [ln for ln in body_text.split("\n") if ln.strip()]
+        if not body_lines:
+            # Cangjie does not accept an empty match arm; emit ``()``.
+            out_lines.append("        ()")
+        else:
+            out_lines.extend(body_lines)
     return "\n".join(out_lines)
 
 
@@ -1243,6 +1371,8 @@ def convert_source(ts_source: str, wrap_main: bool = True) -> ConversionResult:
     rewritten, notes = _rewrite_token_stream(ts_source)
     tokens = tokenize(rewritten)
     _TYPE_ALIASES.clear()
+    _CLASS_METHODS.clear()
+    _CLASS_PARENT.clear()
 
     chunks = _segment_chunks(tokens)
     result = ConversionResult(source="", notes=notes)
