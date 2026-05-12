@@ -3791,6 +3791,7 @@ def _polish_cj_style(text: str) -> str:
 def convert_source(swift_source: str, wrap_main: bool = True) -> ConversionResult:
     """Convert a Swift source string into Cangjie source."""
 
+    global _PARENT_CLASS_NAMES
     rewritten, notes = _rewrite_source(swift_source)
     tokens = tokenize(rewritten)
     # Synthesise statement-terminating ``;`` tokens at top-level newlines.
@@ -3798,8 +3799,7 @@ def convert_source(swift_source: str, wrap_main: bool = True) -> ConversionResul
     _TYPE_ALIASES.clear()
     _CLASS_METHODS.clear()
     _CLASS_PARENT.clear()
-    _PARENT_CLASS_NAMES.clear()
-    _PARENT_CLASS_NAMES.update(_scan_parent_class_names(rewritten))
+    _PARENT_CLASS_NAMES = _scan_parent_class_names(rewritten)
     _ENUM_CASE_INFO.clear()
     _ENUM_CASE_INFO.update(_scan_enum_cases(rewritten))
 
