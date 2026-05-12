@@ -274,7 +274,6 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     src = _outside_strings_replace(
         src,
         [
-            (".count", ".size"),
             (".append(", ".add("),
             (".isEmpty", ".isEmpty()"),
             (".uppercased()", ".toAsciiUpper()"),
@@ -287,6 +286,10 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
             (" as?", " as"),
         ],
     )
+    # ``.count`` is a *property* in Swift (no parens), and Cangjie's
+    # collections expose ``.size`` for the same role.  We must NOT rewrite
+    # ``.count()`` here — that is almost certainly a user-defined method.
+    src = _outside_strings_regex(src, r"\.count(?!\w|\()", ".size")
     # 3. Word-boundary identifier swaps.
     src = _outside_strings_word_replace(
         src,
@@ -337,18 +340,33 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     #     space; rewrite to ``print("${a} ${b} ${c}")`` so the single-arg
     #     ``println`` we lower to can render the same output.
     src = _rewrite_multi_arg_print(src)
+    # 6d. Swift's ``print`` always writes a trailing newline; Cangjie's
+    #     ``print`` does not but ``println`` does.  Map every ``print(``
+    #     call site uniformly so behaviour matches.
+    src = _outside_strings_regex(src, r"\bprint\s*\(", "println(")
     # 7. Closures: ``{ x in body }``  →  ``{ x => body }``.
     #    Tight pattern: parameter list is identifiers (optionally typed) followed
     #    by ``in``; this never collides with ``for x in xs { ... }`` because the
-    #    ``in`` there sits *outside* a ``{...}`` body.
-    src = _outside_strings_regex(
-        src,
-        r"\{[ \t]*"
-        r"(\(?[A-Za-z_][\w]*(?:[ \t]*,[ \t]*[A-Za-z_][\w]*)*\)?"
+    #    ``in`` there sits *outside* a ``{...}`` body.  When the closure is
+    #    bound by ``=`` we additionally annotate bare params as ``Int64`` so
+    #    Cangjie can compile (``let f = { x => ... }`` has no surrounding
+    #    context for inference); in call-arg positions we leave the params
+    #    bare so the callee's higher-order parameter type can drive inference.
+    _closure_re = re.compile(
+        r"(?P<bind>=\s*)?\{[ \t]*"
+        r"(?P<params>\(?[A-Za-z_][\w]*(?:[ \t]*,[ \t]*[A-Za-z_][\w]*)*\)?"
         r"(?:[ \t]*:[ \t]*[A-Za-z_][\w<>\[\]\?,\. ]*)?)"
-        r"[ \t]+in\b",
-        r"{ \1 =>",
+        r"[ \t]+in\b"
     )
+
+    def _closure_repl(m: re.Match) -> str:
+        bind = m.group("bind") or ""
+        params = m.group("params")
+        if bind:
+            params = _annotate_closure_params(params)
+        return f"{bind}{{ {params} =>"
+
+    src = _outside_strings_regex(src, _closure_re.pattern, _closure_repl)
     # 8. ``guard cond else { B }`` is one Swift-only form; the rest of the
     #    function continues after the guard.  We rewrite it to an equivalent
     #    ``if (!(cond)) { B }`` early so the regular ``if`` pattern handles it.
@@ -473,7 +491,20 @@ def _rewrite_multi_arg_print(src: str) -> str:
                 parts = _split_top_level_str_aware(inner, ",")
                 if len(parts) >= 2:
                     parts = [p.strip() for p in parts if p.strip()]
-                    body = " ".join("${" + p + "}" for p in parts)
+                    # Build a single interpolated string.  String-literal args
+                    # are inlined verbatim (their content placed directly
+                    # inside the new string) so we don't generate nested
+                    # interpolations like ``${"x"}`` which the lexer rejects.
+                    pieces: List[str] = []
+                    for p in parts:
+                        if (
+                            len(p) >= 2 and p.startswith('"') and p.endswith('"')
+                            and p.count('"') == 2
+                        ):
+                            pieces.append(p[1:-1])
+                        else:
+                            pieces.append("${" + p + "}")
+                    body = " ".join(pieces)
                     out.append('print("' + body + '")')
                     i = j + 1
                     continue
@@ -659,7 +690,32 @@ def _rewrite_ternary(src: str) -> str:
     return "".join(out)
 
 
-def _outside_strings_regex(src: str, pattern: str, repl: str) -> str:
+def _annotate_closure_params(params: str) -> str:
+    """Add ``: Int64`` to each bare-identifier closure parameter.
+
+    Examples
+    --------
+    ``x``        →  ``x: Int64``
+    ``a, b``     →  ``a: Int64, b: Int64``
+    ``x: Int64`` →  ``x: Int64`` (already typed; passthrough)
+    """
+
+    params = params.strip()
+    if not params:
+        return params
+    if params.startswith("(") and params.endswith(")"):
+        params = params[1:-1].strip()
+    parts = [p.strip() for p in params.split(",") if p.strip()]
+    out: List[str] = []
+    for p in parts:
+        if ":" in p:
+            out.append(p)
+        else:
+            out.append(f"{p}: Int64")
+    return ", ".join(out)
+
+
+def _outside_strings_regex(src: str, pattern: str, repl) -> str:
     """Apply a regex substitution only outside string / comment regions.
 
     Builds a list of ``(text, is_code)`` segments, applies the substitution
@@ -1375,17 +1431,62 @@ _OVERLOADABLE_OPS = {
 }
 
 
+def _hoist_super_call(text: str) -> str:
+    """Move the ``super(...)`` line in an ``init`` body to the top.
+
+    Cangjie requires ``super(...)`` to be the first statement of an
+    initialiser; Swift permits (and in fact requires for subclass-field
+    initialisation) the reverse.  We locate the body block and lift any
+    ``super(...)`` statement to immediately follow the opening ``{``.
+    """
+
+    head_m = re.search(r"public\s+init\s*\([^)]*\)\s*\{\n", text)
+    if not head_m:
+        return text
+    body_start = head_m.end()
+    # Walk forward to the matching ``}``.
+    depth = 1
+    i = body_start
+    while i < len(text) and depth > 0:
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        i += 1
+    if depth != 0:
+        return text
+    body = text[body_start:i]
+    lines = body.split("\n")
+    super_idx = -1
+    for k, ln in enumerate(lines):
+        if re.match(r"\s*super\s*\(", ln):
+            super_idx = k
+            break
+    if super_idx <= 0:
+        return text
+    super_line = lines.pop(super_idx)
+    lines.insert(0, super_line)
+    new_body = "\n".join(lines)
+    return text[:body_start] + new_body + text[i:]
+
+
 def _rewrite_static_operator(text: str) -> str:
     """Rewrite a ``public static func OP(a: T, b: T): R { ... }`` block
     emitted by the ``static_method_*`` patterns into an idiomatic Cangjie
     operator overload ``public operator func OP(b: T): R { ... }`` where the
     first parameter's identifier is replaced by ``this`` throughout the body.
+
+    Cangjie operator overloads use positional parameters (the operator is
+    dispatched on the LHS receiver), so we also strip any ``!`` named-arg
+    markers our default param renderer may have inserted.
     """
 
     m = re.match(
         r"^(\s*)public static func "
-        r"(\S+?)\s*\(\s*([A-Za-z_]\w*)\s*:\s*([^,)]+?)\s*,\s*"
-        r"([A-Za-z_]\w*)\s*:\s*([^,)]+?)\s*\)\s*(?::\s*([^\{]+?))?\{\s*\n",
+        r"(\S+?)\s*\(\s*([A-Za-z_]\w*)\s*!?\s*:\s*([^,)]+?)\s*,\s*"
+        r"([A-Za-z_]\w*)\s*!?\s*:\s*([^,)]+?)\s*\)\s*(?::\s*([^\{]+?))?\{\s*\n",
         text,
         flags=re.DOTALL,
     )
@@ -1449,6 +1550,7 @@ def _emit(pat: Pattern, bindings: dict, ctx: Optional[str] = None) -> str:
     class_like = pat.name in (
         "class_decl", "class_decl_inherit", "class_generic_decl",
         "class_generic_decl_inherit", "extension_decl",
+        "final_class_decl", "final_class_decl_inherit", "public_class_decl",
     )
     if iface_like:
         sub_ctx = "iface"
@@ -1471,15 +1573,23 @@ def _emit(pat: Pattern, bindings: dict, ctx: Optional[str] = None) -> str:
             out = out.replace(f"${slot}", body_text)
         elif slot == "PARAMS":
             out = out.replace(f"${slot}", _convert_params(tokens))
-        elif slot in ("RET", "TY", "BASE"):
+        elif slot == "RET" or slot == "TY":
             out = out.replace(f"${slot}", _convert_type(tokens))
+        elif slot == "BASE":
+            # Multi-protocol inheritance: ``: Named, Priced`` (Swift) becomes
+            # ``<: Named & Priced`` in Cangjie.  We render every comma-
+            # separated piece individually.
+            text = _render_tokens(_strip_trailing_semicolon(tokens)).strip()
+            parts = [_convert_type_text(p.strip()) for p in _split_top_level(text, ",")]
+            out = out.replace(f"${slot}", " & ".join(parts))
         elif slot == "TPARAMS":
             out = out.replace(f"${slot}", _convert_type_params(tokens))
         else:
             out = out.replace(f"${slot}", _convert_expr(tokens))
 
     # Override / inheritance bookkeeping.
-    if pat.name in ("class_decl_inherit", "class_generic_decl_inherit"):
+    if pat.name in ("class_decl_inherit", "class_generic_decl_inherit",
+                    "final_class_decl_inherit"):
         name = _convert_expr(bindings.get("NAME", [])).strip()
         base_text = _convert_type(bindings.get("BASE", [])).strip() if "BASE" in bindings else ""
         base = re.sub(r"<.*$", "", base_text).strip()
@@ -1509,6 +1619,19 @@ def _emit(pat: Pattern, bindings: dict, ctx: Optional[str] = None) -> str:
         name = _convert_expr(bindings.get("NAME", [])).strip()
         _CLASS_METHODS[name] = _scan_method_names(bindings.get("BODY", []))
 
+    # In a ``final`` class, member methods must NOT carry the ``open``
+    # modifier (Cangjie warns and refuses subsequent overrides).  Strip
+    # ``open`` while preserving ``override`` where present.
+    if pat.name in ("final_class_decl", "final_class_decl_inherit"):
+        out = re.sub(r"\bpublic open override func\b", "public override func", out)
+        out = re.sub(r"\bpublic open func\b", "public func", out)
+
+    # In an ``extend`` body Cangjie forbids the ``open`` / ``override``
+    # modifiers — we have to drop them.
+    if pat.name == "extension_decl":
+        out = re.sub(r"\bpublic open (?:override )?func\b", "public func", out)
+        out = re.sub(r"\bopen (?:override )?func\b", "func", out)
+
     if pat.name == "typealias_decl" and "NAME" in bindings and "TY" in bindings:
         name = _convert_expr(bindings["NAME"]).strip()
         ty = _convert_type(bindings["TY"]).strip()
@@ -1535,6 +1658,13 @@ def _emit(pat: Pattern, bindings: dict, ctx: Optional[str] = None) -> str:
             and name_toks[0].value in _OVERLOADABLE_OPS
         ):
             out = _rewrite_static_operator(out)
+
+    # Cangjie requires ``super(...)`` to be the first statement in an
+    # initialiser; Swift requires the opposite (subclass fields first).
+    # When emitting an ``init`` body we lift any ``super(...)`` call to the
+    # top so the result type-checks.
+    if pat.name in ("init_decl", "init_no_params", "public_init_decl"):
+        out = _hoist_super_call(out)
 
 
     # Post-substitution: wrap bare collection literals to match a typed
@@ -1730,10 +1860,18 @@ def _convert_params(tokens: List[Token]) -> str:
             continue
         _ext, name, ty, default = m.group(1), m.group(2), m.group(3), m.group(4)
         ty_t = _convert_type_text(ty.strip())
+        # Swift function calls use labels by default (``f(x: 5)``) for any
+        # parameter that doesn't have a leading ``_`` to suppress the label.
+        # Cangjie's positional parameters won't accept that call form, so we
+        # emit a named (``!``) parameter unless the Swift form was
+        # explicitly positional (``_ name: Type``).
+        is_positional = _ext == "_"
         if default is not None:
             out_parts.append(f"{name}!: {ty_t} = {default.strip()}")
-        else:
+        elif is_positional:
             out_parts.append(f"{name}: {ty_t}")
+        else:
+            out_parts.append(f"{name}!: {ty_t}")
     return ", ".join(out_parts)
 
 

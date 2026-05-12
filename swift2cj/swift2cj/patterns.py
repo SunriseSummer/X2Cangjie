@@ -352,6 +352,12 @@ CHUNK_PATTERNS: List[Pattern] = [
         ("PARAMS", "BODY"),
     ),
     Pattern(
+        "public_init_decl",
+        "public init ( $PARAMS ) { $BODY }",
+        "public init($PARAMS) {\n$BODY\n}",
+        ("PARAMS", "BODY"),
+    ),
+    Pattern(
         "init_throws_decl",
         "init ( $PARAMS ) throws { $BODY }",
         "public init($PARAMS) {\n$BODY\n}",
