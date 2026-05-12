@@ -1,0 +1,11 @@
+a = [1,2,3]
+a depth = 2  nodes = 4
+b = {"active":true,"id":42,"name":"widget","tags":["red","blue"]}
+b depth = 3
+b nodes = 7
+nested = {"errors":[],"ok":true,"user":{"name":"alice","scores":[80,95,70]}}
+nested depth = 4
+nested nodes = 9
+mix = [{"k":1},{"k":2},null,"end"]
+mix depth = 3
+mix nodes = 7

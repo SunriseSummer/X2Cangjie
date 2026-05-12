@@ -312,6 +312,15 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
             (" as?", " as"),
         ],
     )
+    # Swift ``Array.insert(elem, at: i)`` → Cangjie ``ArrayList.add(elem, at: i)``.
+    # Match only when followed by ``, at:`` so user methods named ``insert`` keep
+    # working.  The element expression is opaque; we accept anything up to the
+    # ``, at:`` separator at brace depth 0.
+    src = _outside_strings_regex(
+        src,
+        r"\.insert\(([^()]*?),\s*at\s*:",
+        r".add(\1, at:",
+    )
     # ``.count`` is a *property* in Swift (no parens), and Cangjie's
     # collections expose ``.size`` for the same role.  We must NOT rewrite
     # ``.count()`` here — that is almost certainly a user-defined method.
@@ -351,6 +360,11 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     #    analogue — strip the dot when the preceding character isn't part
     #    of an expression on the left (i.e. it's not a member access).
     src = _strip_leading_enum_dot(src)
+    # 4b. Empty array literals at enum-case call sites need explicit container
+    #     construction: ``JV.arr([])`` → ``JV.arr(ArrayList<JV>())``.  Case
+    #     names are looked up via embedding-cosine for modest robustness.
+    _ec_payloads = _scan_enum_case_payloads(src)
+    src = _wrap_enum_case_empty_literals(src, _ec_payloads)
     # 5. Tuple element access: Swift uses ``t.0`` / ``t.1``; Cangjie uses
     #    ``t[0]`` / ``t[1]``.  The left side must be a letter/underscore/
     #    ``)``/``]`` — never a digit (so that ``3.14`` is preserved).
@@ -1203,6 +1217,23 @@ def _replace_empty_array_dict_assign(src: str) -> str:
             rf"\b{re.escape(name)}\[([^\[\]]+)\]\s*=\s*\[\]",
             rf"{name}[\1] = {empty_init}",
         )
+        # ``name.get(<key>) ?? []``  →  ``name.get(<key>) ?? V()`` so that the
+        # nil-coalesce fallback has the same container type as the success arm.
+        # Cangjie cannot promote an empty Array literal to ArrayList here.
+        src = _outside_strings_regex(
+            src,
+            rf"\b{re.escape(name)}\.get\(([^()]*)\)\s*\?\?\s*\[\]",
+            rf"{name}.get(\1) ?? {empty_init}",
+        )
+        # Same rewrite for the subscript form that may appear inside string
+        # interpolation: ``${name[k] ?? []}`` → ``${name.get(k) ?? V()}``.
+        def _inside(text: str, _n=name, _e=empty_init) -> str:
+            return re.sub(
+                rf"\b{re.escape(_n)}\[([^\[\]]+)\]\s*\?\?\s*\[\]",
+                rf"{_n}.get(\1) ?? {_e}",
+                text,
+            )
+        src = _rewrite_inside_interpolations(src, _inside)
     return src
 
 
@@ -1300,7 +1331,21 @@ def _wrap_call_site_array_literals(src: str) -> str:
                     i += 1
                     continue
                 if not _is_pair_free(inner):
-                    # Dictionary literal — leave alone.
+                    # Dictionary literal.  Wrap at call-site / return positions
+                    # as ``HashMap([(k, v), ...])`` so Cangjie can infer the
+                    # element type from context.  Empty ``[:]`` and type-position
+                    # literals are not affected.
+                    if prev in ("(", ",") or _ends_with_word(out, "return"):
+                        # Recurse into the inner text so nested dict/array
+                        # literals are also wrapped before we form the pairs.
+                        inner_rec = _wrap_call_site_array_literals(
+                            "(" + inner + ")"
+                        )[1:-1]
+                        pairs = _convert_dict_literal_to_pairs(inner_rec)
+                        if pairs is not None:
+                            out.append(f"HashMap([{pairs}])")
+                            i = j + 1
+                            continue
                     out.append(ch)
                     i += 1
                     continue
@@ -1313,7 +1358,14 @@ def _wrap_call_site_array_literals(src: str) -> str:
                 # We require prev to be one of ``(``, ``,``, ``=`` (paren)
                 # but skip ``= [` where ``let_inferred`` will already wrap.
                 if prev in ("(", ",") or _ends_with_word(out, "return"):
-                    out.append(f"ArrayList<{elem_ty}>([{inner}])")
+                    # Recurse into the inner so that nested call-site
+                    # literals (dicts inside arrays, arrays inside dicts) are
+                    # wrapped too.  The "(" .. ")" padding keeps the prev-char
+                    # context inside the recursive call coherent.
+                    inner_rec = _wrap_call_site_array_literals(
+                        "(" + inner + ")"
+                    )[1:-1]
+                    out.append(f"ArrayList<{elem_ty}>([{inner_rec}])")
                     i = j + 1
                     continue
                 out.append(ch)
@@ -1350,14 +1402,142 @@ def _guess_elem_type_extended(inner: str) -> str:
         p = p.strip()
         if not p:
             continue
-        m = re.match(r"^([A-Z][A-Za-z_0-9]*)\s*\(", p)
-        if not m:
-            return ""
-        nm = m.group(1)
+        m = re.match(r"^([A-Z][A-Za-z_0-9]*(?:\.[A-Za-z_][A-Za-z_0-9]*)?)\s*\(", p)
+        if m:
+            nm = m.group(1)
+        else:
+            # Allow bare ``Enum.case`` (no parens) as a valid member of the
+            # same enum — useful for heterogeneous payloads (``.null`` etc).
+            m2 = re.match(
+                r"^([A-Z][A-Za-z_0-9]*)\.[A-Za-z_][A-Za-z_0-9]*\s*$", p
+            )
+            if not m2:
+                return ""
+            nm = m2.group(1)
+        # For ``Enum.case(...)`` constructions, the *container* element type
+        # is the enum itself, not the case label.
+        if "." in nm:
+            nm = nm.split(".", 1)[0]
         if ctor_name and ctor_name != nm:
             return ""
         ctor_name = nm
     return ctor_name
+
+
+def _scan_enum_case_payloads(src: str) -> dict:
+    """Like :func:`_scan_enum_cases` but additionally records each case's
+    **translated** payload type list.
+
+    Returns ``{ (EnumName, case_name): [payload_type_text, ...] }`` where each
+    payload type has already been mapped through :func:`_convert_type_text`
+    (so ``[Int]`` becomes ``ArrayList<Int64>`` etc).
+    """
+
+    out: dict = {}
+    enum_re = re.compile(r"\benum\s+([A-Za-z_]\w*)(?:\s*:\s*[^{]+)?\s*\{")
+    case_re = re.compile(r"\bcase\s+([A-Za-z_]\w*)(\s*\([^)]*\))?")
+    pos = 0
+    while True:
+        m = enum_re.search(src, pos)
+        if not m:
+            break
+        enum_name = m.group(1)
+        brace_start = m.end() - 1
+        depth = 1
+        j = brace_start + 1
+        n = len(src)
+        while j < n and depth > 0:
+            c = src[j]
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+            j += 1
+        body = src[brace_start + 1:j - 1]
+        for cm in case_re.finditer(body):
+            cn = cm.group(1)
+            params = cm.group(2) or ""
+            inner = params.strip()
+            payload_types: List[str] = []
+            if inner.startswith("(") and inner.endswith(")"):
+                inner_body = inner[1:-1].strip()
+                if inner_body:
+                    for p in _split_top_level(inner_body, ","):
+                        p = p.strip()
+                        # ``label: Type`` or just ``Type``.
+                        if ":" in p:
+                            p = p.split(":", 1)[1].strip()
+                        payload_types.append(_convert_type_text(p))
+            out[(enum_name, cn)] = payload_types
+        pos = j
+    return out
+
+
+def _enum_case_similarity_match(
+    case_payloads: dict, enum_name: str, case_text: str
+) -> Optional[List[str]]:
+    """Look up ``(enum_name, case_text)`` in *case_payloads*.
+
+    On exact miss, fall back to an embedding-cosine nearest-match within the
+    same enum: gives modest robustness to capitalisation drift / small
+    misnamings, without resorting to brittle hand-coded aliases.  Returns the
+    payload type list or ``None`` if no acceptable match exists.
+    """
+
+    if (enum_name, case_text) in case_payloads:
+        return case_payloads[(enum_name, case_text)]
+    candidates = [k for k in case_payloads if k[0] == enum_name]
+    if not candidates:
+        return None
+    try:
+        from .embedding import embed_token, cosine  # local import to keep cycle-free
+        qv = embed_token(case_text)
+        best, best_s = None, -1.0
+        for k in candidates:
+            s = cosine(qv, embed_token(k[1]))
+            if s > best_s:
+                best_s, best = s, k
+        # Only accept very high similarity to avoid false collapses.
+        if best is not None and best_s >= 0.95:
+            return case_payloads[best]
+    except Exception:
+        return None
+    return None
+
+
+def _wrap_enum_case_empty_literals(src: str, case_payloads: dict) -> str:
+    """For every recorded ``Enum.case(...)`` whose payload is a single
+    container type (``ArrayList<…>`` or ``HashMap<…>``), rewrite the
+    *empty* literal forms ``Enum.case([])`` and ``Enum.case([:])`` so the
+    fallback constructs an explicitly-typed empty container.
+
+    Cangjie has no context-free coercion from ``Array``/``[]`` to
+    ``ArrayList``, so the call site must produce the concrete type itself.
+    The lookup uses :func:`_enum_case_similarity_match` so out-of-vocabulary
+    case spellings still resolve when they're embedding-close to a known one.
+    """
+
+    if not case_payloads:
+        return src
+    pat = re.compile(
+        r"\b([A-Z][A-Za-z_0-9]*)\.([A-Za-z_]\w*)\s*\(\s*(\[\])\s*\)"
+    )
+
+    def _repl(m: "re.Match") -> str:
+        enum_name = m.group(1)
+        case_text = m.group(2)
+        payloads = _enum_case_similarity_match(
+            case_payloads, enum_name, case_text
+        )
+        if not payloads or len(payloads) != 1:
+            return m.group(0)
+        ty = payloads[0]
+        if ty.startswith("ArrayList<") or ty.startswith("HashMap<") \
+                or ty.startswith("HashSet<"):
+            return f"{enum_name}.{case_text}({ty}())"
+        return m.group(0)
+
+    return _outside_strings_regex(src, pat.pattern, _repl)
 
 
 def _scan_optional_names(src: str) -> set:
@@ -2436,6 +2616,95 @@ def _is_pair_free(s: str) -> bool:
         elif ch == ":" and depth == 0:
             return False
     return True
+
+
+def _convert_dict_literal_to_pairs(inner: str) -> Optional[str]:
+    """Convert the inner text of a Swift dictionary literal ``"k1": v1, "k2": v2``
+    into a comma-separated list of tuples ``("k1", v1), ("k2", v2)`` suitable
+    for ``HashMap([...])``.  Returns ``None`` if the literal is empty (``[:]``),
+    malformed, or looks like a *type* literal (``[Key: Value]`` with both
+    halves bare type identifiers) rather than a value literal.  String literals
+    and nested brackets are honoured."""
+
+    # Split top-level commas (depth-0 only).
+    pieces: List[str] = []
+    cur: List[str] = []
+    depth = 0
+    in_str = False
+    i = 0
+    n = len(inner)
+    while i < n:
+        ch = inner[i]
+        if in_str:
+            cur.append(ch)
+            if ch == "\\" and i + 1 < n:
+                cur.append(inner[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                in_str = False
+            i += 1
+            continue
+        if ch == '"':
+            in_str = True
+            cur.append(ch)
+            i += 1
+            continue
+        if ch in "([{":
+            depth += 1
+            cur.append(ch)
+        elif ch in ")]}":
+            depth = max(depth - 1, 0)
+            cur.append(ch)
+        elif ch == "," and depth == 0:
+            pieces.append("".join(cur).strip())
+            cur = []
+        else:
+            cur.append(ch)
+        i += 1
+    last = "".join(cur).strip()
+    if last:
+        pieces.append(last)
+    if not pieces:
+        return None
+    # Split each piece at the *first* top-level colon into key, value.
+    out: List[str] = []
+    for piece in pieces:
+        depth = 0
+        in_str = False
+        split_at = -1
+        for k, ch in enumerate(piece):
+            if in_str:
+                if ch == "\\" and k + 1 < len(piece):
+                    continue
+                if ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+                continue
+            if ch in "([{":
+                depth += 1
+            elif ch in ")]}":
+                depth = max(depth - 1, 0)
+            elif ch == ":" and depth == 0:
+                split_at = k
+                break
+        if split_at < 0:
+            return None
+        key = piece[:split_at].strip()
+        val = piece[split_at + 1:].strip()
+        if not key or not val:
+            return None
+        # Type-literal guard: ``[Key: Value]`` where both halves are bare
+        # identifiers (no quotes, parens, dots or call syntax) is almost
+        # certainly a *type* (enum payload, parameter annotation), not a
+        # dictionary value.  Skip wrapping in that case.
+        if (re.fullmatch(r"[A-Za-z_]\w*", key)
+                and re.fullmatch(r"[A-Za-z_]\w*", val)):
+            return None
+        out.append(f"({key}, {val})")
+    return ", ".join(out)
 
 
 def _guess_elem_type(inner: str) -> str:
