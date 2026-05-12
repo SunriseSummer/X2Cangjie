@@ -1,0 +1,13 @@
+expr1 = ((a & b) | (!a & !b))
+a=T b=T -> true
+a=T b=F -> false
+a=F b=F -> true
+expr2 = !!x
+simplified = x
+expr3 simplified = a
+expr4 simplified = b
+expr5 simplified = F
+big = (((((F | a) | b) | c) | d) | e)
+big simplified = ((((a | b) | c) | d) | e)
+big with c=T -> true
+big with nothing -> false

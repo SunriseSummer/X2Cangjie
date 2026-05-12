@@ -397,6 +397,13 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     #     Whether the param-list parser sees it or not, Cangjie has no
     #     ``inout`` and reference types pass by reference anyway.
     src = _outside_strings_regex(src, r"\binout\b\s*", "")
+    # 6b-iv-b.  Swift's ``default: break`` (or ``case X: break``) inside a
+    #     ``switch`` is a no-op early-exit; Cangjie's ``match`` arms must be
+    #     expressions and ``break`` outside a loop is illegal.  Replace bare
+    #     ``break`` in those spots with the unit value ``()``.
+    src = _outside_strings_regex(
+        src, r"(\bdefault\s*:\s*)break\b", r"\1()"
+    )
     # 6b-iii-b.  Swift dictionary subscript returns ``T?``; in Cangjie the
     #     HashMap subscript returns ``T`` (and throws on miss).  The
     #     Optional-aware ``dict[k] ?? default`` idiom must be rewritten to
@@ -416,6 +423,12 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
         r"(?<!\blet )(?<!\bvar )\b([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*=\s*\[\]",
         r"\1.clear()",
     )
+    # 6b-v.  Array literal used as a function argument / return value.
+    #     Swift infers element type from context; Cangjie does not implicitly
+    #     coerce ``Array<T>`` to ``ArrayList<T>``.  Detect a non-empty,
+    #     homogeneous, non-type, non-dict literal at call-site positions and
+    #     wrap it as ``ArrayList<T>([…])``.
+    src = _wrap_call_site_array_literals(src)
     # 6c. Multi-argument ``print(a, b, c)`` — Swift joins args with a single
     #     space; rewrite to ``print("${a} ${b} ${c}")`` so the single-arg
     #     ``println`` we lower to can render the same output.
@@ -442,6 +455,11 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     def _closure_repl(m: re.Match) -> str:
         bind = m.group("bind") or ""
         params = m.group("params")
+        # Cangjie multi-arg closure params must NOT be parenthesised:
+        # ``{ a, b => … }``, not ``{ (a, b) => … }``.
+        params = params.strip()
+        if params.startswith("(") and params.endswith(")"):
+            params = params[1:-1].strip()
         if bind:
             params = _annotate_closure_params(params)
         return f"{bind}{{ {params} =>"
@@ -1019,6 +1037,160 @@ def _outside_strings_regex(src: str, pattern: str, repl) -> str:
         re.sub(pattern, repl, text) if is_code else text
         for text, is_code in segs
     )
+
+
+def _wrap_call_site_array_literals(src: str) -> str:
+    """Find ``[…]`` array literals appearing in call-site / return-value
+    positions (preceded by ``(``, ``,`` or ``return``) and wrap them as
+    ``ArrayList<T>([…])`` when the element type can be inferred from
+    homogeneous literal members.  Skips string interior, type-position
+    literals (``: [Int]``), dictionary literals (``[k: v]``) and empty
+    literals (``[]`` — there is no context-free type to choose).
+    """
+
+    out: List[str] = []
+    i, n = 0, len(src)
+    in_string = False
+    string_kind = None
+    while i < n:
+        ch = src[i]
+        if not in_string:
+            if ch == '"':
+                if src[i:i + 3] == '"""':
+                    end = src.find('"""', i + 3)
+                    end = n if end == -1 else end + 3
+                    out.append(src[i:end])
+                    i = end
+                    continue
+                # Single-line string — pass through.
+                j = i + 1
+                while j < n and src[j] != '"':
+                    if src[j] == "\\" and j + 1 < n:
+                        j += 2
+                        continue
+                    j += 1
+                out.append(src[i:j + 1])
+                i = j + 1
+                continue
+            if ch == "/" and i + 1 < n and src[i + 1] in ("/", "*"):
+                if src[i + 1] == "/":
+                    end = src.find("\n", i)
+                    end = n if end == -1 else end
+                else:
+                    end = src.find("*/", i)
+                    end = n if end == -1 else end + 2
+                out.append(src[i:end])
+                i = end
+                continue
+            if ch == "[":
+                # Look at the previous non-space char.
+                k = len(out) - 1
+                prev = ""
+                while k >= 0 and out[k] in (" ", "\t", "\n"):
+                    k -= 1
+                if k >= 0:
+                    prev = out[k]
+                # Subscript ``foo[x]`` — prev is identifier letter / ``)`` / ``]``.
+                if prev and (prev.isalnum() or prev == "_" or prev in ")]"):
+                    out.append(ch)
+                    i += 1
+                    continue
+                # Type position: preceded by ``:`` (annotation) — skip.
+                if prev == ":":
+                    out.append(ch)
+                    i += 1
+                    continue
+                # Balanced-bracket scan for the closing ``]``.
+                depth = 1
+                j = i + 1
+                in_str2 = False
+                while j < n and depth > 0:
+                    c = src[j]
+                    if in_str2:
+                        if c == "\\" and j + 1 < n:
+                            j += 2
+                            continue
+                        if c == '"':
+                            in_str2 = False
+                    else:
+                        if c == '"':
+                            in_str2 = True
+                        elif c == "[":
+                            depth += 1
+                        elif c == "]":
+                            depth -= 1
+                            if depth == 0:
+                                break
+                    j += 1
+                if depth != 0:
+                    out.append(ch)
+                    i += 1
+                    continue
+                inner = src[i + 1:j]
+                stripped = inner.strip()
+                if not stripped:
+                    out.append(ch)
+                    i += 1
+                    continue
+                if not _is_pair_free(inner):
+                    # Dictionary literal — leave alone.
+                    out.append(ch)
+                    i += 1
+                    continue
+                elem_ty = _guess_elem_type_extended(inner)
+                if not elem_ty:
+                    out.append(ch)
+                    i += 1
+                    continue
+                # Only wrap at call-site / return / assignment-to-non-decl.
+                # We require prev to be one of ``(``, ``,``, ``=`` (paren)
+                # but skip ``= [` where ``let_inferred`` will already wrap.
+                if prev in ("(", ",") or _ends_with_word(out, "return"):
+                    out.append(f"ArrayList<{elem_ty}>([{inner}])")
+                    i = j + 1
+                    continue
+                out.append(ch)
+                i += 1
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _ends_with_word(out: List[str], word: str) -> bool:
+    """Return True iff the trailing tokens in *out* form ``…<word>\\s*``."""
+
+    s = "".join(out[-(len(word) + 16):])
+    s = s.rstrip()
+    if not s.endswith(word):
+        return False
+    pre = s[:-len(word)]
+    return pre == "" or not (pre[-1].isalnum() or pre[-1] == "_")
+
+
+def _guess_elem_type_extended(inner: str) -> str:
+    """Like :func:`_guess_elem_type` but also recognises homogeneous
+    ``ClassName(...)`` constructor calls."""
+
+    direct = _guess_elem_type(inner)
+    if direct:
+        return direct
+    parts = _split_top_level(inner, ",")
+    if not parts:
+        return ""
+    ctor_name = ""
+    for p in parts:
+        p = p.strip()
+        if not p:
+            continue
+        m = re.match(r"^([A-Z][A-Za-z_0-9]*)\s*\(", p)
+        if not m:
+            return ""
+        nm = m.group(1)
+        if ctor_name and ctor_name != nm:
+            return ""
+        ctor_name = nm
+    return ctor_name
 
 
 def _scan_optional_names(src: str) -> set:

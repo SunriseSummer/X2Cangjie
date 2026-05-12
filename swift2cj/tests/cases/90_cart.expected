@@ -1,0 +1,19 @@
+cart1:
+  A1 x5 = 500
+  B1 x4 = 200
+  X9 x1 = 250
+  -- 10% off fruit -70
+  gross=950 discount=70 net=880
+cart2:
+  M1 x2 = 600
+  X9 x2 = 500
+  -- flat -100 over 1000 -100
+  -- flat -50 over 500 -50
+  gross=1100 discount=150 net=950
+cart3:
+  A1 x12 = 1200
+  B1 x2 = 100
+  -- bulk A1≥10 -8/each -96
+  -- 5% off fruit -65
+  gross=1300 discount=161 net=1139
+cart4 (no discount): net=750
