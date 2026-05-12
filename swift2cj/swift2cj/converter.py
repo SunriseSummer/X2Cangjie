@@ -320,7 +320,7 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     # ``, at:`` separator at brace depth 0.
     src = _outside_strings_regex(
         src,
-        r"\.insert\(([^()]*?),\s*at\s*:",
+        r"\.insert\(((?:[^()]|\([^()]*\))*?),\s*at\s*:",
         r".add(\1, at:",
     )
     # ``.count`` is a *property* in Swift (no parens), and Cangjie's
@@ -462,6 +462,12 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     #     Cangjie — the type is undetermined.  Look up the dict's declared
     #     value type and instantiate an empty container.
     src = _replace_empty_array_dict_assign(src)
+    # 6b-iv-d. HashMap subscript returns ``V`` in Cangjie, not ``Option<V>``.
+    #     Swift dictionary lookup returns an Optional and commonly appears as
+    #     ``dict[key] ?? default`` or ``let maybe = dict[key]`` before
+    #     ``if let``.  Rewrite those read contexts to ``dict.get(key)`` for
+    #     known dictionary receivers (including parameters and fields).
+    src = _rewrite_known_dict_subscript_reads(src)
     # 6b-v.  Array literal used as a function argument / return value.
     #     Swift infers element type from context; Cangjie does not implicitly
     #     coerce ``Array<T>`` to ``ArrayList<T>``.  Detect a non-empty,
@@ -1380,6 +1386,72 @@ def _replace_empty_array_dict_assign(src: str) -> str:
     return src
 
 
+def _scan_dict_names(src: str) -> set:
+    """Return variable / parameter / field names declared as Swift dictionaries.
+
+    This is intentionally name-based and lightweight; it powers several
+    Swift-dictionary → Cangjie-HashMap rewrites before tokenisation.
+    """
+
+    names: set = set()
+    decl_re = re.compile(
+        r"\b(?:var|let)\s+([A-Za-z_]\w*)\s*:\s*\[([^\[\]:]+):\s*((?:\[[^\]]*\]|[^\[\]])+)\]"
+    )
+    for m in decl_re.finditer(src):
+        names.add(m.group(1))
+    param_re = re.compile(
+        r"(?:[(,]\s*(?:_\s+)?)([A-Za-z_]\w*)\s*:\s*\[([^\[\]:]+):\s*((?:\[[^\]]*\]|[^\[\]])+)\]"
+    )
+    for m in param_re.finditer(src):
+        names.add(m.group(1))
+    return names
+
+
+def _rewrite_known_dict_subscript_reads(src: str) -> str:
+    """Rewrite read-context dictionary subscripts to ``.get``.
+
+    Swift ``dict[key]`` is optional; Cangjie ``HashMap`` subscript is not.
+    For known dictionary receivers we therefore rewrite:
+
+    * ``dict[key] ?? fallback`` → ``dict.get(key) ?? fallback``
+    * ``let tmp = dict[key]``   → ``let tmp = dict.get(key)``
+
+    and apply the coalescing form inside string interpolations as well.
+    """
+
+    names = _scan_dict_names(src)
+    if not names:
+        return src
+    alt = "|".join(sorted(re.escape(n) for n in names))
+    # Nil-coalescing reads, including ``${m[k] ?? d}`` through the
+    # interpolation-aware pass below.
+    coalesce_pat = rf"\b({alt})\[([^\[\]]+)\]\s*\?\?"
+    src = _outside_strings_regex(src, coalesce_pat, r"\1.get(\2) ??")
+    # Same shape when the key expression itself contains string literals, e.g.
+    # ``walls["${r},${c}"] ?? false``.  The generic outside-string splitter
+    # cannot match across the quoted key, so use a string-literal-aware key
+    # pattern here.
+    quoted_key_pat = re.compile(
+        rf"\b({alt})\[((?:[^\[\]\"]|\"(?:\\.|[^\"\\])*\")*)\]\s*\?\?"
+    )
+    src = quoted_key_pat.sub(r"\1.get(\2) ??", src)
+
+    def _inside(inner: str, _pat=coalesce_pat) -> str:
+        return re.sub(_pat, r"\1.get(\2) ??", inner)
+
+    src = _rewrite_inside_interpolations(src, _inside)
+    # Optional-preserving temporary bindings, but only when immediately used by
+    # Swift's optional-binding syntax.  Plain ``let a = dict[key]`` in Swift is
+    # often used when the key is known to exist; rewriting every such binding to
+    # Option would degrade downstream member access quality.
+    src = _outside_strings_regex(
+        src,
+        rf"\b((?:let|var)\s+([A-Za-z_]\w*)\s*=\s*)({alt})\[([^\[\]]+)\](\s*\n\s*if\s+let\s+[A-Za-z_]\w*\s*=\s*\2\b)",
+        r"\1\3.get(\4)\5",
+    )
+    return src
+
+
 def _wrap_call_site_array_literals(src: str) -> str:
     """Find ``[…]`` array literals appearing in call-site / return-value
     positions (preceded by ``(``, ``,`` or ``return``) and wrap them as
@@ -1729,6 +1801,23 @@ def _scan_optional_names(src: str) -> set:
         for m in call_rhs_re.finditer(src):
             if m.group(2) in opt_funcs:
                 names.add(m.group(1))
+    # Swift dictionary subscript reads produce Optional values.  Track
+    # temporaries such as ``let j = jobs[name]`` (or after the rewrite above,
+    # ``let j = jobs.get(name)``) so later ``if let jj = j`` compiles as an
+    # Optional binding.
+    dict_names = _scan_dict_names(src)
+    if dict_names:
+        dict_alt = "|".join(sorted(re.escape(n) for n in dict_names))
+        for m in re.finditer(
+            rf"\b(?:let|var)\s+([A-Za-z_]\w*)\s*=\s*(?:{dict_alt})\[[^\[\]]+\]",
+            src,
+        ):
+            names.add(m.group(1))
+        for m in re.finditer(
+            rf"\b(?:let|var)\s+([A-Za-z_]\w*)\s*=\s*(?:{dict_alt})\.get\(",
+            src,
+        ):
+            names.add(m.group(1))
     changed = True
     while changed:
         changed = False
@@ -2779,11 +2868,14 @@ def _emit(pat: Pattern, bindings: dict, ctx: Optional[str] = None) -> str:
             inner = m.group(1).strip()
             # Skip dictionary literals (``k: v``) — let user type them.
             if ":" not in inner or _is_pair_free(inner):
-                elem_ty = _guess_elem_type(inner)
+                elem_ty = _guess_elem_type_extended(inner)
                 if elem_ty:
+                    inner_rec = _wrap_call_site_array_literals(
+                        "(" + inner + ")"
+                    )[1:-1]
                     out = (
                         out[:m.start()]
-                        + f"= ArrayList<{elem_ty}>([{inner}])"
+                        + f"= ArrayList<{elem_ty}>([{inner_rec}])"
                         + out[m.end():]
                     )
     return out
@@ -3394,6 +3486,37 @@ def _tighten_generic_spacing(text: str) -> str:
     return text
 
 
+def _polish_cj_style(text: str) -> str:
+    """Apply small Cangjie-style whitespace polish to generated code.
+
+    This intentionally stays conservative and string-aware: it does not try to
+    be a formatter, but fixes the most visible non-professional artefacts from
+    token rendering (``a> b``, ``a&&!b``, ``if(cond)``) while preserving generic
+    type arguments such as ``ArrayList<Int64>``.
+    """
+
+    protected: List[str] = []
+    name_alt = "|".join(_GENERIC_NAMES)
+
+    def _mask_generic(m: "re.Match") -> str:
+        protected.append(m.group(0))
+        return f"__SWIFT2CJ_GENERIC_{len(protected) - 1}__"
+
+    masked = re.sub(
+        rf"\b(?:{name_alt})<[^<>\n]*(?:<[^<>\n]*>[^<>\n]*)*>",
+        _mask_generic,
+        text,
+    )
+    masked = _outside_strings_regex(masked, r"\b(if|while|for|match)\(", r"\1 (")
+    masked = _outside_strings_regex(masked, r"}\s*else\s*{", r"} else {")
+    masked = _outside_strings_regex(masked, r"(?<=[\w\]\)])\s*(==|!=|<=|>=|&&|\|\|)\s*(?=[!\w\(\[])", r" \1 ")
+    masked = _outside_strings_regex(masked, r"(?<=[\w\]\)])\s*([<>])\s*(?=[\w\(\[])", r" \1 ")
+    masked = _outside_strings_regex(masked, r"&&\s*!", r"&& !")
+    for i, original in enumerate(protected):
+        masked = masked.replace(f"__SWIFT2CJ_GENERIC_{i}__", original)
+    return masked
+
+
 def convert_source(swift_source: str, wrap_main: bool = True) -> ConversionResult:
     """Convert a Swift source string into Cangjie source."""
 
@@ -3482,6 +3605,7 @@ def convert_source(swift_source: str, wrap_main: bool = True) -> ConversionResul
 
     body_text = "\n\n".join(p for p in parts if p)
     body_text = _tighten_generic_spacing(body_text)
+    body_text = _polish_cj_style(body_text)
 
     headers: List[str] = []
     if _NEEDS_COLLECTION.search(body_text):
