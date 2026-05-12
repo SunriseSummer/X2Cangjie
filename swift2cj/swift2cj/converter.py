@@ -2039,6 +2039,24 @@ def _scan_enum_cases(src: str) -> dict:
     return cases
 
 
+def _scan_parent_class_names(src: str) -> set:
+    """Return Swift class names that appear as a superclass.
+
+    The converter templates historically emitted every class and method as
+    ``open``.  A simple non-local scan lets leaf classes use Cangjie's default
+    internal visibility while preserving ``open`` only for classes that need to
+    support subclass overriding.
+    """
+
+    parents: set = set()
+    class_re = re.compile(
+        r"\bclass\s+[A-Za-z_]\w*(?:\s*<[^>{}]*>)?\s*:\s*([A-Za-z_]\w*)"
+    )
+    for m in class_re.finditer(src):
+        parents.add(m.group(1))
+    return parents
+
+
 _LEADING_ENUM_DOT_RE = re.compile(r"(?<![A-Za-z0-9_)\]!?])\.([A-Za-z_]\w*)")
 
 
@@ -2714,6 +2732,7 @@ _TYPE_ALIASES: dict = {}
 _CLASS_METHODS: dict = {}
 _ENUM_CASE_INFO: dict = {}
 _CLASS_PARENT: dict = {}
+_PARENT_CLASS_NAMES: set = set()
 _OVERLOADABLE_OPS = {
     "+", "-", "*", "/", "%", "**",
     "==", "!=", "<", ">", "<=", ">=",
@@ -2939,6 +2958,10 @@ def _emit(pat: Pattern, bindings: dict, ctx: Optional[str] = None) -> str:
     elif pat.name in ("class_decl", "class_generic_decl"):
         name = _convert_expr(bindings.get("NAME", [])).strip()
         _CLASS_METHODS[name] = _scan_method_names(bindings.get("BODY", []))
+        if name not in _PARENT_CLASS_NAMES:
+            out = re.sub(r"\bopen class\b", "class", out, count=1)
+            out = re.sub(r"\bpublic open func\b", "func", out)
+            out = re.sub(r"\bpublic init\b", "init", out)
 
     # In a ``final`` class, member methods must NOT carry the ``open``
     # modifier (Cangjie warns and refuses subsequent overrides).  Strip
@@ -3631,6 +3654,7 @@ _NEEDS_COLLECTION = re.compile(r"\b(ArrayList|HashMap|HashSet)\b")
 _GENERIC_NAMES = (
     "ArrayList", "HashMap", "HashSet", "Array", "Map", "Set",
     "Option", "Iterator", "List", "Queue", "Stack", "Box",
+    "Equatable", "Hashable", "Comparable",
 )
 
 
@@ -3675,6 +3699,10 @@ def _polish_cj_style(text: str) -> str:
     masked = _outside_strings_regex(masked, r"(?<=[\w\]\)])\s*(==|!=|<=|>=|&&|\|\|)\s*(?=[!\w\(\[])", r" \1 ")
     masked = _outside_strings_regex(masked, r"(?<=[\w\]\)])\s*([<>])\s*(?=[\w\(\[])", r" \1 ")
     masked = _outside_strings_regex(masked, r"&&\s*!", r"&& !")
+    masked = _outside_strings_regex(masked, r"\boperator func (==|!=|<=|>=|<|>)\s+\(", r"operator func \1(")
+    masked = _outside_strings_regex(masked, r"(?<=[=(,\[:])\s*-\s+(?=\d)", r"-")
+    masked = _outside_strings_regex(masked, r"=\s*-(?=\d)", r"= -")
+    masked = _outside_strings_regex(masked, r"\breturn\s+-\s+(?=\d)", r"return -")
     for i, original in enumerate(protected):
         masked = masked.replace(f"__SWIFT2CJ_GENERIC_{i}__", original)
     return masked
@@ -3690,6 +3718,8 @@ def convert_source(swift_source: str, wrap_main: bool = True) -> ConversionResul
     _TYPE_ALIASES.clear()
     _CLASS_METHODS.clear()
     _CLASS_PARENT.clear()
+    _PARENT_CLASS_NAMES.clear()
+    _PARENT_CLASS_NAMES.update(_scan_parent_class_names(rewritten))
     _ENUM_CASE_INFO.clear()
     _ENUM_CASE_INFO.update(_scan_enum_cases(rewritten))
 
