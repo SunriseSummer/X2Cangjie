@@ -1573,10 +1573,20 @@ def _rewrite_string_iteration_char_comparisons(src: str) -> str:
     alt = "|".join(sorted(re.escape(v) for v in char_vars))
 
     def _byte_for_literal(lit: str) -> str:
-        try:
-            text = bytes(lit[1:-1], "utf-8").decode("unicode_escape")
-        except Exception:
-            text = lit[1:-1]
+        raw = lit[1:-1]
+        if raw.startswith("\\"):
+            escapes = {
+                "\\0": "\0",
+                "\\t": "\t",
+                "\\n": "\n",
+                "\\r": "\r",
+                "\\\"": "\"",
+                "\\'": "'",
+                "\\\\": "\\",
+            }
+            text = escapes.get(raw, raw)
+        else:
+            text = raw
         if len(text) != 1:
             return lit
         if ord(text) > 255:
@@ -3791,7 +3801,8 @@ def _polish_cj_style(text: str) -> str:
 def convert_source(swift_source: str, wrap_main: bool = True) -> ConversionResult:
     """Convert a Swift source string into Cangjie source."""
 
-    global _PARENT_CLASS_NAMES
+    global _TYPE_ALIASES, _CLASS_METHODS, _CLASS_PARENT, _PARENT_CLASS_NAMES
+    global _ENUM_CASE_INFO
     rewritten, notes = _rewrite_source(swift_source)
     tokens = tokenize(rewritten)
     # Synthesise statement-terminating ``;`` tokens at top-level newlines.
