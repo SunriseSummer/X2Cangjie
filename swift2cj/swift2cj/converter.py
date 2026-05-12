@@ -275,7 +275,6 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
         src,
         [
             (".append(", ".add("),
-            (".isEmpty", ".isEmpty()"),
             (".uppercased()", ".toAsciiUpper()"),
             (".lowercased()", ".toAsciiLower()"),
             # Swift super-constructor call ``super.init(...)`` → ``super(...)``.
@@ -290,6 +289,10 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     # collections expose ``.size`` for the same role.  We must NOT rewrite
     # ``.count()`` here — that is almost certainly a user-defined method.
     src = _outside_strings_regex(src, r"\.count(?!\w|\()", ".size")
+    # ``.isEmpty`` likewise: in Swift it's a property; Cangjie exposes
+    # ``isEmpty()`` as a method.  Add ``()`` only when not already followed
+    # by ``(`` (e.g. ``.isEmpty()`` user-method call).
+    src = _outside_strings_regex(src, r"\.isEmpty(?!\w|\()", ".isEmpty()")
     # 3. Word-boundary identifier swaps.
     src = _outside_strings_word_replace(
         src,
@@ -516,6 +519,78 @@ def _rewrite_multi_arg_print(src: str) -> str:
 _PROBE_DONE = True
 
 
+def _rewrite_interpolations_for_ternary(s: str) -> str:
+    """Recursively rewrite ternaries that live inside ``${...}`` interpolation
+    expressions of a Cangjie string literal.  Cangjie has no native ``?:``
+    operator, so any such ternary must be lowered to an ``if`` expression
+    before lexing.
+    """
+
+    out: List[str] = []
+    i, n = 0, len(s)
+    while i < n:
+        if i + 1 < n and s[i] == "$" and s[i + 1] == "{":
+            depth = 1
+            j = i + 2
+            while j < n and depth > 0:
+                if s[j] == "{":
+                    depth += 1
+                elif s[j] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            inner = s[i + 2:j]
+            inner_rewritten = _rewrite_ternary_in_expr(inner)
+            out.append("${" + inner_rewritten + "}")
+            i = j + 1
+            continue
+        out.append(s[i])
+        i += 1
+    return "".join(out)
+
+
+def _rewrite_ternary_in_expr(expr: str) -> str:
+    """Rewrite a bare ``a ? b : c`` (no nested ``?:``, no strings, no
+    brackets crossing) inside a Cangjie expression.
+
+    Matches a single top-level ternary; we look for ``?`` followed by ``:``
+    where neither side contains another ``?``.
+    """
+
+    # Find top-level ``?`` (paren/bracket depth 0).
+    depth = 0
+    qpos = -1
+    for k, ch in enumerate(expr):
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth = max(depth - 1, 0)
+        elif ch == "?" and depth == 0:
+            qpos = k
+            break
+    if qpos < 0:
+        return expr
+    # Find the matching ``:`` at the same depth.
+    depth = 0
+    cpos = -1
+    for k in range(qpos + 1, len(expr)):
+        ch = expr[k]
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth = max(depth - 1, 0)
+        elif ch == ":" and depth == 0:
+            cpos = k
+            break
+    if cpos < 0:
+        return expr
+    cond = expr[:qpos].strip()
+    then = expr[qpos + 1:cpos].strip()
+    else_ = expr[cpos + 1:].strip()
+    return f"if ({cond}) {{ {then} }} else {{ {else_} }}"
+
+
 def _rewrite_ternary(src: str) -> str:
     """Translate Swift ternary ``a ? b : c`` into a Cangjie ``if`` expression.
 
@@ -534,20 +609,49 @@ def _rewrite_ternary(src: str) -> str:
     out: List[str] = []
     i, n = 0, len(src)
     while i < n:
-        # Skip strings & comments verbatim.
+        # Skip strings & comments verbatim — but DO process ``${...}``
+        # interpolation expressions inside them, since those are evaluated
+        # as Cangjie code at runtime and can contain ternaries.
         if src[i] == '"':
             if src[i:i + 3] == '"""':
                 end = src.find('"""', i + 3)
                 end = n if end == -1 else end + 3
+                out.append(_rewrite_interpolations_for_ternary(src[i:end]))
+                i = end
+                continue
             else:
+                # Walk over the string, recognising ``${...}`` blocks as
+                # code that may contain its own quotes / braces.
                 j = i + 1
                 while j < n and src[j] != '"':
                     if src[j] == "\\" and j + 1 < n:
                         j += 2
                         continue
+                    if src[j] == "$" and j + 1 < n and src[j + 1] == "{":
+                        depth = 1
+                        k = j + 2
+                        while k < n and depth > 0:
+                            ch = src[k]
+                            if ch == "{":
+                                depth += 1
+                            elif ch == "}":
+                                depth -= 1
+                                if depth == 0:
+                                    break
+                            elif ch == '"':
+                                # Skip nested string literal.
+                                k += 1
+                                while k < n and src[k] != '"':
+                                    if src[k] == "\\" and k + 1 < n:
+                                        k += 2
+                                        continue
+                                    k += 1
+                            k += 1
+                        j = k + 1 if k < n else n
+                        continue
                     j += 1
                 end = j + 1
-            out.append(src[i:end])
+            out.append(_rewrite_interpolations_for_ternary(src[i:end]))
             i = end
             continue
         if src[i] == "/" and i + 1 < n and src[i + 1] in ("/", "*"):

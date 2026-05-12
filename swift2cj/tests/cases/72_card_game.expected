@@ -1,0 +1,24 @@
+deck size = 52
+first = 2C
+last = AS
+score: 13 7 12
+deal-round-1
+play(p=0, c=3)
+play(p=1, c=5)
+finish(winner=0)
+Alice: [2C 5C 8C JC AC] score=40
+Bob: [3C 6C 9C QC 2D] score=32
+Carol: [4C 7C TC KC 3D] score=37
+winner index = 0
+winner name = Alice
+stack size = 3
+stack empty = no
+0
+10
+5
+10 -5 6
+black
+red
+Q-face
+3-no
+done

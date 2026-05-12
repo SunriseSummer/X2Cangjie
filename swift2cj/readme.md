@@ -21,7 +21,7 @@ swift2cj/
 │   ├── patterns.py        # Swift↔Cangjie 模式库（约 90 条）
 │   └── converter.py       # 顶层管线：chunk → 模式选择 → 槽位绑定 → 渲染
 └── tests/
-    ├── cases/             # 55 个 Swift 测试用例 + 期望输出
+    ├── cases/             # 72 个 Swift 测试用例 + 期望输出（含 100 行 / 200 行 / 300+ 行规模）
     ├── run_tests.py       # 一键 swiftc + cjc + diff + 写 log.md
     ├── generated/         # 测试时生成的 .cj / 二进制（被 .gitignore 排除）
     └── log.md             # 由 run_tests.py 自动生成的覆盖率 / 评分报告
@@ -125,15 +125,39 @@ python tests/run_tests.py
 ### 2.4 关键文本前置改写
 
 `converter.py::_rewrite_source` 在词法之前做一组"非语义敏感"的文本替换，
-它们都尊重字符串字面量边界（`_outside_strings_*`）：
+它们都尊重字符串字面量边界（`_outside_strings_*`），并能感知 `${...}` 插值
+块为代码段递归处理：
 
 * `\(expr)` → `${expr}`（支持嵌套括号、转义、三引号串保留）
 * `nil` → `None`、`self` → `this`、`try`（前缀）→ 空
 * `super.init(` → `super(`
-* `.count` → `.size`、`.append(` → `.add(`、`.uppercased()` → `.toAsciiUpper()` 等
+* `.count` → `.size`（仅当不是方法调用）、`.isEmpty` → `.isEmpty()`、
+  `.append(` → `.add(`、`.uppercased()` → `.toAsciiUpper()` 等
 * 枚举 leading-dot：`(?<![A-Za-z0-9_)\]])\.(?=[A-Za-z_])` → 去掉点
 * 元组成员：`(?<=[A-Za-z_\)\]])\.(\d+)` → `[\1]`
 * 强解包：`x!` → `x`（不影响 `!=` 与一元 `!`）
+* **闭包**：`{ x in body }` → `{ x => body }`；在 `let f = {...}` 处自动给
+  bare 参数追加 `: Int64`，调用参位置则不加（让 callee 类型驱动推断）
+* **guard**：`guard cond else { B }` → `if (!(cond)) { B }`，含 `guard let`
+* **三元**：`a ? b : c` → `(if (a) { b } else { c })`，并能感知 `${...}` 插值
+* **switch 解构**：`case .v(let a, let b):` → `case v(a, b) =>`（深度感知 +
+  剥离 `let`）
+* **枚举原始值**：`enum X: Int { case a = 1 }` → `enum X { | a | ... }`
+* **运算符重载**：`static func +(a: T, b: T) -> R { ... }` → 
+  `public operator func +(b: T): R { ... }`，并把首参替换为 `this`
+* **多协议继承**：`: A, B` → `<: A & B`
+* **命名参数**：用户写的 `init(x: T)` / `func f(x: T)` 默认翻成 `x!: T`，
+  `_ x: T` 仍是位置参 —— 这样 Swift 调用站点的标签形 `Foo(x: 1)` 在 Cangjie 端
+  也能 work
+* **super 提升**：`init` 体内的 `super(...)` 自动提到首行（Cangjie 要求）
+* **多参 print**：`print(a, b, c)` → `println("${a} ${b} ${c}")`（字符串字面
+  量直接内联避免嵌套插值），并把所有 `print(...)` 统一映射为 `println(...)`
+* **mutating / lazy / weak / unowned / required / @discardableResult / @objc**
+  等 Swift-only 修饰符自动剥离
+* 空数组字面量 `ArrayList<T>([])` 收紧为 `ArrayList<T>()`
+* 一元减号去多余空格 `- 1` → `-1`
+* `final class` / `public class` 模式；final 类移除多余 `open` 修饰符；
+  `extend` 块剥离 `open`/`override` 修饰符
 
 ### 2.5 上下文敏感的模式门控
 
@@ -209,18 +233,22 @@ optional arguments:
 
 | 指标 | 数值 |
 |---|---|
-| 用例总数 | 55 |
-| 模式覆盖率 | **100.00 %** (231 / 231 chunk) |
-| Swift 类型检查通过 | **55 / 55** |
-| Cangjie 编译通过 | **55 / 55** |
-| 运行输出匹配 | **55 / 55** |
+| 用例总数 | 72 |
+| 模式覆盖率 | **100.00 %** |
+| Swift 类型检查通过 | **72 / 72** |
+| Cangjie 编译通过 | **72 / 72** |
+| 运行输出匹配 | **72 / 72** |
 | 综合质量分 | **100.00 %** |
 
 测试覆盖范围：基础类型 / 算术 / 比较 / 布尔逻辑、`if-else-if-else` 任意深度链、
 `while` / `repeat-while` / `for-in` 两种区间、函数（普通、递归、泛型、`throws`）、
-类（含继承 / 多级继承 / `override`）、结构体（含 memberwise init）、枚举（含
-`switch` 多标签 / `default`）、协议、`[T]` / `[K:V]` 集合、元组、`typealias`、
-方法链、堆栈与统计类等组合场景。
+类（含继承 / 多级继承 / `override` / `final` / 多协议 `&` 复合）、结构体（含
+memberwise init）、枚举（含 `switch` 多标签 / `default` / 关联值 / 原始值 /
+`case .v(let a, let b)` 解构）、协议、`[T]` / `[K:V]` 集合、元组、`typealias`、
+方法链、堆栈与统计类、**闭包/Lambda**、**运算符重载**（`+ - * / == < >`）、
+**guard 与三元**、**try/catch + 自定义 Exception 子类**、**`extend` 扩展**、
+**`Bag<T>` / `Stack<T>` 等泛型容器**、以及百行 / 200 行 / 300+ 行级的综合
+程序（`70_shapes_large.swift`、`71_inventory_large.swift`、`72_card_game.swift`）。
 
 ## 5. 已知简化与后续 AI 可修正方向
 
