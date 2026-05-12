@@ -1423,6 +1423,17 @@ def _rewrite_known_dict_subscript_reads(src: str) -> str:
     if not names:
         return src
     alt = "|".join(sorted(re.escape(n) for n in names))
+    # Optional tests on dictionary reads.
+    src = _outside_strings_regex(
+        src,
+        rf"\b({alt})\[([^\[\]]+)\]\s*==\s*(?:nil|None)\b",
+        r"\1.get(\2).isNone()",
+    )
+    src = _outside_strings_regex(
+        src,
+        rf"\b({alt})\[([^\[\]]+)\]\s*!=\s*(?:nil|None)\b",
+        r"\1.get(\2).isSome()",
+    )
     # Nil-coalescing reads, including ``${m[k] ?? d}`` through the
     # interpolation-aware pass below.
     coalesce_pat = rf"\b({alt})\[([^\[\]]+)\]\s*\?\?"
