@@ -304,7 +304,72 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     #    analogue — strip the dot when the preceding character isn't part
     #    of an expression on the left (i.e. it's not a member access).
     src = _strip_leading_enum_dot(src)
+    # 5. Tuple element access: Swift uses ``t.0`` / ``t.1``; Cangjie uses
+    #    ``t[0]`` / ``t[1]``.  The left side must be a letter/underscore/
+    #    ``)``/``]`` — never a digit (so that ``3.14`` is preserved).
+    src = _outside_strings_regex(src, r"(?<=[A-Za-z_\)\]])\.(\d+)", r"[\1]")
+    # 6. Swift force-unwrap of Optional (``x!``).  Cangjie returns concrete
+    #    values from indexable lookups in our test domain, so we simply drop
+    #    the trailing ``!`` when it isn't part of ``!=`` or a unary
+    #    boolean-not operator.
+    src = _outside_strings_regex(
+        src, r"([A-Za-z_0-9\)\]])\!(?!=)", r"\1",
+    )
     return src, notes
+
+
+def _outside_strings_regex(src: str, pattern: str, repl: str) -> str:
+    """Apply a regex substitution only outside string / comment regions.
+
+    Builds a list of ``(text, is_code)`` segments, applies the substitution
+    only to ``is_code=True`` chunks, and rejoins.
+    """
+
+    segs: List[Tuple[str, bool]] = []
+    i, n = 0, len(src)
+    buf: List[str] = []
+    while i < n:
+        ch = src[i]
+        if ch == '"':
+            if buf:
+                segs.append(("".join(buf), True))
+                buf = []
+            if src[i:i + 3] == '"""':
+                end = src.find('"""', i + 3)
+                end = n if end == -1 else end + 3
+                segs.append((src[i:end], False))
+                i = end
+                continue
+            j = i + 1
+            while j < n and src[j] != '"':
+                if src[j] == "\\" and j + 1 < n:
+                    j += 2
+                    continue
+                j += 1
+            segs.append((src[i:j + 1], False))
+            i = j + 1
+            continue
+        if ch == "/" and i + 1 < n and src[i + 1] in ("/", "*"):
+            if buf:
+                segs.append(("".join(buf), True))
+                buf = []
+            if src[i + 1] == "/":
+                end = src.find("\n", i)
+                end = n if end == -1 else end
+            else:
+                end = src.find("*/", i)
+                end = n if end == -1 else end + 2
+            segs.append((src[i:end], False))
+            i = end
+            continue
+        buf.append(ch)
+        i += 1
+    if buf:
+        segs.append(("".join(buf), True))
+    return "".join(
+        re.sub(pattern, repl, text) if is_code else text
+        for text, is_code in segs
+    )
 
 
 _LEADING_ENUM_DOT_RE = re.compile(r"(?<![A-Za-z0-9_)\]])\.(?=[A-Za-z_])")
@@ -650,12 +715,35 @@ def _strip_trailing_semicolon(tokens: List[Token]) -> List[Token]:
     return tokens
 
 
-def _default_value_for(ty: str) -> str:
-    """Pick a Cangjie default-value literal for ``ty``."""
+_PRIMITIVE_DEFAULTS = {
+    "Int64": "0", "Int32": "0", "Int16": "0", "Int8": "0",
+    "UInt64": "0", "UInt32": "0", "UInt16": "0", "UInt8": "0",
+    "Float64": "0.0", "Float32": "0.0",
+    "Bool": "false", "String": "\"\"", "Rune": "r' '",
+}
 
+
+def _scalar_default(ty: str) -> Optional[str]:
     ty = ty.strip()
     if ty.startswith("?"):
         return "None"
+    return _PRIMITIVE_DEFAULTS.get(ty)
+
+
+def _default_value_for(ty: str) -> str:
+    """Pick a Cangjie default-value literal for ``ty``.
+
+    For unknown / generic types returns the type name itself + ``()`` as a
+    best-effort fallback; callers should generally prefer
+    :func:`_scalar_default` and fall through to leaving the field
+    uninitialised (which then forces the synthetic memberwise constructor
+    to set it).
+    """
+
+    ty = ty.strip()
+    s = _scalar_default(ty)
+    if s is not None:
+        return s
     if ty.startswith("ArrayList<") or ty.startswith("Array<"):
         return ty + "()"
     if ty.startswith("HashMap<") or ty.startswith("HashSet<"):
@@ -664,12 +752,7 @@ def _default_value_for(ty: str) -> str:
         inner = ty[1:-1]
         parts = [_default_value_for(p.strip()) for p in _split_top_level(inner, ",")]
         return "(" + ", ".join(parts) + ")"
-    return {
-        "Int64": "0", "Int32": "0", "Int16": "0", "Int8": "0",
-        "UInt64": "0", "UInt32": "0",
-        "Float64": "0.0", "Float32": "0.0",
-        "Bool": "false", "String": "\"\"", "Rune": "r' '",
-    }.get(ty, ty + "()")
+    return ty + "()"
 
 
 def _split_top_level(s: str, sep: str) -> List[str]:
@@ -940,8 +1023,14 @@ def _emit(pat: Pattern, bindings: dict, ctx: Optional[str] = None) -> str:
         return ""
 
     if "$DEFAULT" in out and "TY" in bindings:
-        ty_text = _convert_type(bindings["TY"]).strip()
-        out = out.replace("$DEFAULT", _default_value_for(ty_text))
+        # Field declarations of type ``var x: T`` (no user default) get no
+        # declaration-site initialiser.  The synthesised memberwise
+        # constructor — produced by :func:`_ensure_memberwise_init` — is
+        # responsible for assigning every such field.  This matches Swift
+        # semantics: a stored property with no default value must be set
+        # before the instance is used, and Swift's implicit memberwise
+        # ``init`` is what does so.
+        out = out.replace(" = $DEFAULT", "")
 
     iface_like = pat.name in ("protocol_decl", "protocol_decl_inherit")
     struct_like = pat.name in ("struct_decl", "struct_impl_decl")
@@ -996,7 +1085,11 @@ def _emit(pat: Pattern, bindings: dict, ctx: Optional[str] = None) -> str:
         def _mark(m: re.Match) -> str:
             n = m.group(1)
             if n in parent_methods:
-                return f"public override func {n}"
+                # Re-mark as ``open override`` so further subclasses may
+                # override this method as well — Cangjie's ``override``
+                # alone does NOT keep the method open for additional
+                # overrides.
+                return f"public open override func {n}"
             return f"public open func {n}"
 
         out = re.sub(r"public open func (\w+)", _mark, out)
@@ -1070,10 +1163,44 @@ def _scan_method_names(tokens: List[Token]) -> set:
     return names
 
 
-_FIELD_LINE_RE = re.compile(
-    r"^\s*(?:public\s+|private\s+|static\s+)*(var|let)\s+([A-Za-z_]\w*)\s*:\s*([^=\n]+?)(?:\s*=\s*([^\n]+))?\s*$",
-    re.MULTILINE,
-)
+def _scan_class_fields(body: str) -> List[Tuple[str, str, str, Optional[str]]]:
+    """Return ``(kw, name, ty, default_or_None)`` for every TOP-LEVEL field
+    declaration in *body* (i.e. brace-depth == 0).
+
+    A regex-only scan is unreliable because it picks up ``let i: Int = ...``
+    declarations *inside* method bodies; here we walk character-by-character
+    and only inspect lines at brace depth 0.
+    """
+
+    fields: List[Tuple[str, str, str, Optional[str]]] = []
+    depth = 0
+    i, n = 0, len(body)
+    line_start = 0
+    while i <= n:
+        ch = body[i] if i < n else "\n"
+        if ch == "{":
+            depth += 1
+            i += 1
+            continue
+        if ch == "}":
+            depth -= 1
+            i += 1
+            continue
+        if ch == "\n":
+            if depth == 0:
+                line = body[line_start:i]
+                m = re.match(
+                    r"^\s*(?:public\s+|private\s+|protected\s+|static\s+)*"
+                    r"(var|let)\s+([A-Za-z_]\w*)\s*:\s*([^=\n]+?)"
+                    r"(?:\s*=\s*(.+?))?\s*$",
+                    line,
+                )
+                if m:
+                    fields.append((m.group(1), m.group(2), m.group(3).strip(),
+                                   m.group(4)))
+            line_start = i + 1
+        i += 1
+    return fields
 
 
 def _ensure_memberwise_init(class_text: str) -> str:
@@ -1081,29 +1208,35 @@ def _ensure_memberwise_init(class_text: str) -> str:
 
     Swift gives structs an implicit memberwise initialiser; Cangjie has no
     such mechanism so we emit one explicitly using the declared fields.
-    Constructor body assigns ``this.FIELD = FIELD`` for every var/let field.
+    Fields that already carry a default value at the declaration site are
+    omitted from the init signature — Cangjie keeps the declaration-site
+    initialiser in scope when a constructor doesn't reassign that field.
+
+    If *every* field has a default, no synthesis is performed: Cangjie's
+    implicit zero-arg constructor is sufficient.
     """
 
-    if "public init(" in class_text or "init(" in class_text:
+    if re.search(r"\b(public\s+)?init\s*\(", class_text):
         return class_text
-    # Find the body between the first ``{`` and the last ``}``.
     m = re.search(r"\{\n(.*)\n\}\s*$", class_text, flags=re.DOTALL)
     if not m:
         return class_text
     body = m.group(1)
-    fields = _FIELD_LINE_RE.findall(body)
+    fields = _scan_class_fields(body)
+    fields_no_default = [f for f in fields if f[3] is None]
     if not fields:
+        return class_text
+    if not fields_no_default:
         return class_text
     params = []
     assigns = []
-    for _kw, name, ty, _default in fields:
-        params.append(f"{name}!: {ty.strip()}")
+    for _kw, name, ty, _default in fields_no_default:
+        params.append(f"{name}!: {ty}")
         assigns.append(f"        this.{name} = {name}")
     init_text = (
         "    public init(" + ", ".join(params) + ") {\n"
         + "\n".join(assigns) + "\n    }"
     )
-    # Append the init at the end of the body.
     new_body = body.rstrip() + "\n" + init_text
     return class_text[:m.start()] + "{\n" + new_body + "\n}" + class_text[m.end():]
 

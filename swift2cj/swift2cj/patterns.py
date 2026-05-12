@@ -422,13 +422,13 @@ CHUNK_PATTERNS: List[Pattern] = [
     Pattern(
         "override_method_typed",
         "override func $NAME ( $PARAMS ) -> $RET { $BODY }",
-        "public override func $NAME($PARAMS): $RET {\n$BODY\n}",
+        "public open override func $NAME($PARAMS): $RET {\n$BODY\n}",
         ("NAME", "PARAMS", "RET", "BODY"),
     ),
     Pattern(
         "override_method_no_ret",
         "override func $NAME ( $PARAMS ) { $BODY }",
-        "public override func $NAME($PARAMS) {\n$BODY\n}",
+        "public open override func $NAME($PARAMS) {\n$BODY\n}",
         ("NAME", "PARAMS", "BODY"),
     ),
     # Protocol method declaration: ``func foo() -> T`` (no body).

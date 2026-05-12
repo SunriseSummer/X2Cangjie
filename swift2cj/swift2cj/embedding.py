@@ -61,7 +61,7 @@ def embed_token(value: str, kind: str = "") -> np.ndarray:
 def embed_sequence(tokens: Iterable) -> np.ndarray:
     """Bag-of-tokens embedding of a sequence (mean + L2 normalised).
 
-    Accepts an iterable of :class:`ts2cj.lexer.Token` objects or simple
+    Accepts an iterable of :class:`swift2cj.lexer.Token` objects or simple
     ``(kind, value)`` pairs.
     """
 
