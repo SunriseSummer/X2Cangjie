@@ -1258,6 +1258,11 @@ def _restore_user_count_members(src: str) -> str:
             classes_with_count.add(cname)
     if not classes_with_count:
         return src
+    # Within classes that own a user member named ``count``, ``self.count`` has
+    # already become ``self.size`` by the global collection-property rewrite.
+    # Restore the receiver forms used before/after the ``self`` → ``this``
+    # lowering.
+    src = _outside_strings_regex(src, r"\b(self|this)\.size\b(?!\w|\()", r"\1.count")
     # 2. Variables of those classes (``let x = Foo(…)`` / ``var x: Foo``).
     cls_alt = "|".join(re.escape(c) for c in classes_with_count)
     inst_names: set = set()
@@ -1404,6 +1409,17 @@ def _scan_dict_names(src: str) -> set:
     )
     for m in param_re.finditer(src):
         names.add(m.group(1))
+    dict_func_re = re.compile(
+        r"\bfunc\s+([A-Za-z_]\w*)\s*\([^)]*\)\s*->\s*\[[^\[\]:]+:\s*((?:\[[^\]]*\]|[^\[\]])+)\]"
+    )
+    dict_funcs = set(m.group(1) for m in dict_func_re.finditer(src))
+    if dict_funcs:
+        func_alt = "|".join(sorted(re.escape(n) for n in dict_funcs))
+        for m in re.finditer(
+            rf"\b(?:let|var)\s+([A-Za-z_]\w*)\s*=\s*(?:{func_alt})\s*\(",
+            src,
+        ):
+            names.add(m.group(1))
     return names
 
 
