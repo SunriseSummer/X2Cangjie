@@ -1,0 +1,11 @@
+queue size = 8
+W1 -> task(1 cost=3) finish=3
+W2 -> task(2 cost=6) finish=7
+W1 -> task(3 cost=9) finish=12
+W2 -> task(4 cost=12) finish=19
+W1 -> task(5 cost=15) finish=27
+W2 -> task(6 cost=18) finish=37
+W1 -> task(7 cost=21) finish=48
+W2 -> task(8 cost=24) finish=61
+W1 done=4 busyUntil=48
+W2 done=4 busyUntil=61

@@ -313,7 +313,15 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     # 5. Tuple element access: Swift uses ``t.0`` / ``t.1``; Cangjie uses
     #    ``t[0]`` / ``t[1]``.  The left side must be a letter/underscore/
     #    ``)``/``]`` — never a digit (so that ``3.14`` is preserved).
-    src = _outside_strings_regex(src, r"(?<=[A-Za-z_\)\]])\.(\d+)", r"[\1]")
+    src = _outside_strings_regex(src, r"\b([A-Za-z_]\w*)\.(\d+)\b", r"\1[\2]")
+    src = _outside_strings_regex(src, r"(?<=[\)\]])\.(\d+)\b", r"[\1]")
+    # 5b. Also apply tuple-element rewrite **inside** ``${...}`` interpolation
+    #     blocks, which `_outside_strings_regex` deliberately skips.
+    def _tup_rewrite(inner: str) -> str:
+        inner = re.sub(r"\b([A-Za-z_]\w*)\.(\d+)\b", r"\1[\2]", inner)
+        inner = re.sub(r"(?<=[\)\]])\.(\d+)\b", r"[\1]", inner)
+        return inner
+    src = _rewrite_inside_interpolations(src, _tup_rewrite)
     # 6. Swift force-unwrap of Optional (``x!``).  Cangjie returns concrete
     #    values from indexable lookups in our test domain, so we simply drop
     #    the trailing ``!`` when it isn't part of ``!=`` or a unary
@@ -321,6 +329,10 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     src = _outside_strings_regex(
         src, r"([A-Za-z_0-9\)\]])\!(?!=)", r"\1",
     )
+    # 6a-pre.  Swift bitwise-NOT operator ``~`` has no direct Cangjie spelling;
+    #     Cangjie uses unary ``!`` for *both* logical and bitwise negation on
+    #     integers.  Rewrite the operator outside of strings.
+    src = _outside_strings_regex(src, r"~", "!")
     # 6a. Drop Swift declaration modifiers that have no Cangjie analogue.
     #     ``mutating`` / ``nonmutating`` / ``lazy`` / ``@discardableResult`` / etc.
     src = _outside_strings_word_replace(
@@ -332,6 +344,7 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
             ("weak", ""),
             ("unowned", ""),
             ("required", ""),
+            ("indirect", ""),
             ("fileprivate", "private"),
             ("internal", "public"),
         ],
@@ -339,6 +352,15 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     # 6b. ``@discardableResult``, ``@objc``, ``@inlinable`` etc. — drop the
     #     whole attribute (line-prefix).
     src = _outside_strings_regex(src, r"@[A-Za-z_]\w*(?:\s*\([^)]*\))?", "")
+    # 6b-ii.  Swift's ``inout`` argument marker ``&name`` at call sites.
+    #     Cangjie passes reference-types (classes, ArrayList, HashMap…) by
+    #     reference already, so the sigil is dropped: ``f(&xs)`` → ``f(xs)``.
+    src = _outside_strings_regex(src, r"(?<=[\(,]\s)&(?=[A-Za-z_])", "")
+    src = _outside_strings_regex(src, r"(?<=[\(,])&(?=[A-Za-z_])", "")
+    # 6b-iii.  Strip ``inout`` keyword in parameter type positions globally.
+    #     Whether the param-list parser sees it or not, Cangjie has no
+    #     ``inout`` and reference types pass by reference anyway.
+    src = _outside_strings_regex(src, r"\binout\b\s*", "")
     # 6c. Multi-argument ``print(a, b, c)`` — Swift joins args with a single
     #     space; rewrite to ``print("${a} ${b} ${c}")`` so the single-arg
     #     ``println`` we lower to can render the same output.
@@ -519,6 +541,72 @@ def _rewrite_multi_arg_print(src: str) -> str:
 _PROBE_DONE = True
 
 
+def _rewrite_inside_interpolations(src: str, fn) -> str:
+    """Walk *src* and apply ``fn`` to the *contents* of every ``${...}``
+    interpolation block that lies inside a (single- or triple-quoted)
+    string literal.  Useful for rewrites that must visit the expressions
+    embedded in Cangjie string interpolations but otherwise treat string
+    literals as opaque.
+    """
+
+    out: List[str] = []
+    i, n = 0, len(src)
+    while i < n:
+        ch = src[i]
+        if ch == '"':
+            # Detect triple-quoted string.
+            triple = src[i:i + 3] == '"""'
+            close = '"""' if triple else '"'
+            j = i + len(close)
+            buf = [close]
+            while j < n:
+                if not triple and src[j] == "\\" and j + 1 < n:
+                    buf.append(src[j:j + 2])
+                    j += 2
+                    continue
+                if src[j:j + 3] == '"""' and triple:
+                    buf.append('"""')
+                    j += 3
+                    break
+                if src[j] == '"' and not triple:
+                    buf.append('"')
+                    j += 1
+                    break
+                if src[j] == "$" and j + 1 < n and src[j + 1] == "{":
+                    depth = 1
+                    k = j + 2
+                    while k < n and depth > 0:
+                        c = src[k]
+                        if c == "{":
+                            depth += 1
+                        elif c == "}":
+                            depth -= 1
+                            if depth == 0:
+                                break
+                        elif c == '"':
+                            # Skip a nested string literal in the expression.
+                            k += 1
+                            while k < n and src[k] != '"':
+                                if src[k] == "\\" and k + 1 < n:
+                                    k += 2
+                                    continue
+                                k += 1
+                        k += 1
+                    inner = src[j + 2:k]
+                    buf.append("${" + fn(inner) + "}")
+                    j = k + 1
+                    continue
+                buf.append(src[j])
+                j += 1
+            out.append("".join(buf))
+            i = j
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+
 def _rewrite_interpolations_for_ternary(s: str) -> str:
     """Recursively rewrite ternaries that live inside ``${...}`` interpolation
     expressions of a Cangjie string literal.  Cangjie has no native ``?:``
@@ -542,6 +630,11 @@ def _rewrite_interpolations_for_ternary(s: str) -> str:
                 j += 1
             inner = s[i + 2:j]
             inner_rewritten = _rewrite_ternary_in_expr(inner)
+            # Also rewrite tuple-element access inside the interpolation:
+            # ``${s1.0}`` → ``${s1[0]}``.  Cangjie has no ``.0`` syntax.
+            inner_rewritten = re.sub(
+                r"(?<=[A-Za-z_\)\]])\.(\d+)", r"[\1]", inner_rewritten
+            )
             out.append("${" + inner_rewritten + "}")
             i = j + 1
             continue
@@ -1802,7 +1895,73 @@ def _emit(pat: Pattern, bindings: dict, ctx: Optional[str] = None) -> str:
                     out = out[:m.start()] + f"= {ty_text}([{body}])" + out[m.end():]
                 else:
                     out = out[:m.start()] + f"= {ty_text}([{inner}])" + out[m.end():]
+    # Inferred bindings (``let xs = [1,2,3]``) — Swift infers ``Array<Int>``;
+    # Cangjie inference would land on ``Array<Int64>`` which has no ``.add`` /
+    # ``.remove``.  Promote homogeneous integer/float/string literals to the
+    # corresponding ``ArrayList<…>`` so the value behaves like a Swift Array.
+    if pat.name in ("let_inferred", "var_inferred"):
+        m = re.search(r"=\s*\[(.+?)\]\s*$", out, flags=re.DOTALL)
+        if m:
+            inner = m.group(1).strip()
+            # Skip dictionary literals (``k: v``) — let user type them.
+            if ":" not in inner or _is_pair_free(inner):
+                elem_ty = _guess_elem_type(inner)
+                if elem_ty:
+                    out = (
+                        out[:m.start()]
+                        + f"= ArrayList<{elem_ty}>([{inner}])"
+                        + out[m.end():]
+                    )
     return out
+
+
+def _is_pair_free(s: str) -> bool:
+    """Return True iff *s* (an array literal's inner text) does **not** look
+    like a dictionary literal (no top-level ``key: value`` separator)."""
+
+    depth = 0
+    for ch in s:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth = max(depth - 1, 0)
+        elif ch == ":" and depth == 0:
+            return False
+    return True
+
+
+def _guess_elem_type(inner: str) -> str:
+    """Inspect a homogeneous array-literal body and return the Cangjie element
+    type, or ``""`` if it cannot be determined unambiguously."""
+
+    parts = _split_top_level(inner, ",")
+    if not parts:
+        return ""
+    saw_float = False
+    saw_int = False
+    saw_str = False
+    saw_other = False
+    for p in parts:
+        p = p.strip()
+        if not p:
+            continue
+        if re.fullmatch(r"-?\d+", p):
+            saw_int = True
+        elif re.fullmatch(r"-?\d+\.\d+(?:[eE][+-]?\d+)?", p):
+            saw_float = True
+        elif p.startswith('"') and p.endswith('"'):
+            saw_str = True
+        else:
+            saw_other = True
+    if saw_other:
+        return ""
+    if saw_float and not saw_str:
+        return "Float64"
+    if saw_int and not saw_str and not saw_float:
+        return "Int64"
+    if saw_str and not saw_int and not saw_float:
+        return "String"
+    return ""
 
 
 def _scan_method_names(tokens: List[Token]) -> set:
@@ -1955,6 +2114,9 @@ def _convert_params(tokens: List[Token]) -> str:
         #   ``name: Type = default``
         #   ``inout name: Type``
         p = re.sub(r"^inout\s+", "", p)
+        # In Swift ``inout`` may also appear *after* the parameter label,
+        # e.g. ``visited: inout [Bool]``.  Strip it from the type as well.
+        p = re.sub(r":\s*inout\s+", ": ", p)
         m = re.match(
             r"^(?:(_|[A-Za-z_][\w]*)\s+)?([A-Za-z_][\w]*)\s*:\s*([^=]+?)\s*(?:=\s*(.+))?$",
             p,
@@ -2271,7 +2433,7 @@ def convert_source(swift_source: str, wrap_main: bool = True) -> ConversionResul
         i0 = 0
         while i0 < len(ch) and ch[i0].value in (
             "public", "private", "internal", "fileprivate", "open", "final",
-            "static",
+            "static", "indirect",
         ):
             i0 += 1
         first = ch[i0].value if i0 < len(ch) else ""
@@ -2290,7 +2452,15 @@ def convert_source(swift_source: str, wrap_main: bool = True) -> ConversionResul
                 rendered_chunks[-1] = cj
             top_level_decls.append(cj)
         elif first in ("let", "var"):
-            top_level_decls.append(cj)
+            # Swift top-level scripts run sequentially; if any imperative
+            # statement has *already* been emitted into ``main_body`` we
+            # must keep this binding *inside* ``main`` to preserve order
+            # (otherwise a top-level ``let t = m.transpose()`` would run
+            # *before* the earlier ``m.fillSequential()`` call).
+            if main_body:
+                main_body.append(cj)
+            else:
+                top_level_decls.append(cj)
         else:
             main_body.append(cj)
 

@@ -54,7 +54,7 @@ _TOKEN_SPEC: List[tuple] = [
     ("STRING_TRIPLE", r"\"\"\"[\s\S]*?\"\"\""),
     # Single-line string literal — Swift supports ``\(expr)`` interpolation.
     ("STRING",        r"\"(?:\\\(\s*[^)]*\)|\\.|[^\"\\\n])*\""),
-    ("NUMBER",        r"\d+\.\d+(?:[eE][+-]?\d+)?|\d+(?:[eE][+-]?\d+)?|0[xX][0-9a-fA-F]+"),
+    ("NUMBER",        r"0[bB][01_]+|0[oO][0-7_]+|0[xX][0-9a-fA-F_]+|\d+\.\d+(?:[eE][+-]?\d+)?|\d+(?:[eE][+-]?\d+)?"),
     # Multi-char punctuation.  ``...`` and ``..<`` are Swift range ops.
     ("PUNCT",         (
         r"\.\.<|\.\.\.|"
