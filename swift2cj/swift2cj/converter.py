@@ -1592,9 +1592,9 @@ def _rewrite_string_iteration_char_comparisons(src: str) -> str:
     src = re.sub(rf"\b({alt})\s*(==|!=)\s*(\"(?:\\.|[^\"\\])\")", _rhs, src)
     src = re.sub(rf"(\"(?:\\.|[^\"\\])\")\s*(==|!=)\s*\b({alt})\b", _lhs, src)
 
-    def _char_interp(inner: str, _chars=char_vars) -> str:
+    def _char_interp(inner: str, known_char_vars=char_vars) -> str:
         stripped = inner.strip()
-        if stripped in _chars:
+        if stripped in known_char_vars:
             return f"Rune({stripped})"
         return inner
 
@@ -3735,11 +3735,11 @@ _GENERIC_NAMES = (
     "ArrayList", "HashMap", "HashSet", "Array", "Map", "Set",
     "Option", "Iterator", "List", "Queue", "Stack", "Box",
 )
-_ANGLE_ARG_NAMES = _GENERIC_NAMES + ("Equatable", "Hashable", "Comparable")
+_ANGLE_BRACKET_TYPES = _GENERIC_NAMES + ("Equatable", "Hashable", "Comparable")
 
 
 def _tighten_generic_spacing(text: str) -> str:
-    name_alt = "|".join(_ANGLE_ARG_NAMES)
+    name_alt = "|".join(_ANGLE_BRACKET_TYPES)
     pat_open = re.compile(rf"\b({name_alt})\s+<\s*")
     pat_close = re.compile(r"([\w\)>\]])\s+>")
     pat_call = re.compile(rf"\b({name_alt})(<[^<>\n]*(?:<[^<>\n]*>[^<>\n]*)*>)\s+\(")
@@ -3763,7 +3763,7 @@ def _polish_cj_style(text: str) -> str:
     """
 
     protected: List[str] = []
-    name_alt = "|".join(_ANGLE_ARG_NAMES)
+    name_alt = "|".join(_ANGLE_BRACKET_TYPES)
 
     def _mask_generic(m: "re.Match") -> str:
         protected.append(m.group(0))
