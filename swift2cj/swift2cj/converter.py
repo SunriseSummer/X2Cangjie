@@ -1577,7 +1577,9 @@ def _rewrite_string_iteration_char_comparisons(src: str) -> str:
             text = bytes(lit[1:-1], "utf-8").decode("unicode_escape")
         except Exception:
             text = lit[1:-1]
-        if len(text) != 1 or ord(text) > 255:
+        if len(text) != 1:
+            return lit
+        if ord(text) > 255:
             return lit
         return f"UInt8({ord(text)})"
 
@@ -3732,12 +3734,12 @@ _NEEDS_COLLECTION = re.compile(r"\b(ArrayList|HashMap|HashSet)\b")
 _GENERIC_NAMES = (
     "ArrayList", "HashMap", "HashSet", "Array", "Map", "Set",
     "Option", "Iterator", "List", "Queue", "Stack", "Box",
-    "Equatable", "Hashable", "Comparable",
 )
+_ANGLE_ARG_NAMES = _GENERIC_NAMES + ("Equatable", "Hashable", "Comparable")
 
 
 def _tighten_generic_spacing(text: str) -> str:
-    name_alt = "|".join(_GENERIC_NAMES)
+    name_alt = "|".join(_ANGLE_ARG_NAMES)
     pat_open = re.compile(rf"\b({name_alt})\s+<\s*")
     pat_close = re.compile(r"([\w\)>\]])\s+>")
     pat_call = re.compile(rf"\b({name_alt})(<[^<>\n]*(?:<[^<>\n]*>[^<>\n]*)*>)\s+\(")
@@ -3761,7 +3763,7 @@ def _polish_cj_style(text: str) -> str:
     """
 
     protected: List[str] = []
-    name_alt = "|".join(_GENERIC_NAMES)
+    name_alt = "|".join(_ANGLE_ARG_NAMES)
 
     def _mask_generic(m: "re.Match") -> str:
         protected.append(m.group(0))
@@ -3778,7 +3780,7 @@ def _polish_cj_style(text: str) -> str:
     masked = _outside_strings_regex(masked, r"(?<=[\w\]\)])\s*([<>])\s*(?=[\w\(\[])", r" \1 ")
     masked = _outside_strings_regex(masked, r"&&\s*!", r"&& !")
     masked = _outside_strings_regex(masked, r"\boperator func (==|!=|<=|>=|<|>)\s+\(", r"operator func \1(")
-    masked = _outside_strings_regex(masked, r"(?<=[=(,\[:])\s*-\s+(?=\d)", r"-")
+    masked = _outside_strings_regex(masked, r"([=(,\[:])\s*-\s+(?=\d)", r"\1-")
     masked = _outside_strings_regex(masked, r"=\s*-(?=\d)", r"= -")
     masked = _outside_strings_regex(masked, r"\breturn\s+-\s+(?=\d)", r"return -")
     for i, original in enumerate(protected):
