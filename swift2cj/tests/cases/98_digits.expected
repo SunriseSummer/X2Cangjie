@@ -1,0 +1,9 @@
+121: reverse=121 palin=true sum=4 root=4
+123: reverse=321 palin=false sum=6 root=6
+909: reverse=909 palin=true sum=18 root=9
+1234: reverse=4321 palin=false sum=10 root=1
+1221: reverse=1221 palin=true sum=6 root=6
+99: reverse=99 palin=true sum=18 root=9
+--- range scan 100..120 for palindromes ---
+palindrome: 101
+palindrome: 111

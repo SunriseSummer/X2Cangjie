@@ -1,0 +1,13 @@
+e1 = ((x + 3) * (y - 2))
+nodes = 7
+e1 with x=5, y=10 -> 64
+e2 = (-(x * ((y / 2) + 1)))
+e2 -> -30
+trace len after e2 = 4
+e3 = ifz((x - 5) ? 100 : 200)
+e3 (x=5) -> 100
+e3 (x=6) -> 200
+e4 = (10 / (y - y))
+e4 -> 0
+trace contains div0? true
+e5 with empty env -> 42

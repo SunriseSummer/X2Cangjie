@@ -329,6 +329,11 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
         inner = re.sub(r"([A-Za-z_0-9\)\]])\!(?!=)", r"\1", inner)
         return inner
     src = _rewrite_inside_interpolations(src, _prop_rewrite)
+    # If any user class declares its own ``count`` member, the rewrite above
+    # over-fires on instances of that class.  Identify those instances by
+    # name and revert ``.size`` → ``.count`` on the affected receivers
+    # (applied AFTER the interpolation pass so both contexts are covered).
+    src = _restore_user_count_members(src)
     # 3. Word-boundary identifier swaps.
     src = _outside_strings_word_replace(
         src,
@@ -397,6 +402,11 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     #     Whether the param-list parser sees it or not, Cangjie has no
     #     ``inout`` and reference types pass by reference anyway.
     src = _outside_strings_regex(src, r"\binout\b\s*", "")
+    # 6b-iii-c.  Some Swift identifiers collide with Cangjie keywords
+    #     (``match``, ``where``, ``open`` …).  When the user has declared
+    #     a method/field with such a name we rename every usage in the
+    #     file with a trailing ``_`` to dodge the collision.
+    src = _rename_keyword_collisions(src)
     # 6b-iv-b.  Swift's ``default: break`` (or ``case X: break``) inside a
     #     ``switch`` is a no-op early-exit; Cangjie's ``match`` arms must be
     #     expressions and ``break`` outside a loop is illegal.  Replace bare
@@ -423,6 +433,10 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
         r"(?<!\blet )(?<!\bvar )\b([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*=\s*\[\]",
         r"\1.clear()",
     )
+    # 6b-iv-c.  ``dict[key] = []`` cannot stay as an empty Array literal in
+    #     Cangjie — the type is undetermined.  Look up the dict's declared
+    #     value type and instantiate an empty container.
+    src = _replace_empty_array_dict_assign(src)
     # 6b-v.  Array literal used as a function argument / return value.
     #     Swift infers element type from context; Cangjie does not implicitly
     #     coerce ``Array<T>`` to ``ArrayList<T>``.  Detect a non-empty,
@@ -465,6 +479,18 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
         return f"{bind}{{ {params} =>"
 
     src = _outside_strings_regex(src, _closure_re.pattern, _closure_repl)
+    # 7b. No-arg closures: ``return { body }``, ``= { body }``, etc. don't
+    #     contain an ``in`` so the rule above leaves them as-is.  Cangjie
+    #     requires explicit ``=>`` between params and body — for the
+    #     zero-arg case insert it directly after the opening brace.  We
+    #     only fire when there's no ``=>`` later on the same brace, no
+    #     ``in`` (already rewritten), and the preceding context is a
+    #     known expression position (``return`` / ``=`` / ``(`` / ``,``).
+    src = _outside_strings_regex(
+        src,
+        r"(\breturn|=|\(|,)(\s*)\{(?![^}\n]*=>)(\s*\n)",
+        r"\1\2{ =>\3",
+    )
     # 8. ``guard cond else { B }`` is one Swift-only form; the rest of the
     #    function continues after the guard.  We rewrite it to an equivalent
     #    ``if (!(cond)) { B }`` early so the regular ``if`` pattern handles it.
@@ -831,6 +857,17 @@ def _rewrite_ternary(src: str) -> str:
             i = end
             continue
         if src[i] == "?":
+            # Optional type marker (``T?``): if the ``?`` is followed by a
+            # type-position delimiter (``,`` ``)`` ``]`` ``}`` ``=`` ``>``
+            # ``;`` newline, optionally after whitespace), it cannot be a
+            # ternary — skip.
+            jcheck = i + 1
+            while jcheck < n and src[jcheck] in " \t":
+                jcheck += 1
+            if jcheck < n and src[jcheck] in ",)]}=>;\n":
+                out.append(src[i])
+                i += 1
+                continue
             # Try to match a ternary starting near here.  Find a ``:`` later
             # on the same line at the same paren/bracket level; ``?`` and ``:``
             # paired only when neither side touches a dict literal.
@@ -1039,6 +1076,136 @@ def _outside_strings_regex(src: str, pattern: str, repl) -> str:
     )
 
 
+def _restore_user_count_members(src: str) -> str:
+    """If any user-defined class declares a stored member named ``count``,
+    revert the global ``.count → .size`` rewrite for accesses targeting
+    instances of that class.  Identification is heuristic: classes that
+    declare ``var count`` or ``let count`` at the top of their body are
+    captured, then variables initialised from those classes' constructors
+    or annotated with their type are tracked, and ``.size`` is restored to
+    ``.count`` *only* for those receivers.  Also applies inside ``${…}``
+    interpolations.
+    """
+
+    # 1. Classes that declare ``count`` as a member.
+    classes_with_count: set = set()
+    cls_re = re.compile(r"\bclass\s+([A-Za-z_]\w*)(?:\s*[<:][^{]*)?\s*\{")
+    for m in cls_re.finditer(src):
+        cname = m.group(1)
+        brace_start = m.end() - 1
+        depth = 1
+        j = brace_start + 1
+        n = len(src)
+        while j < n and depth > 0:
+            c = src[j]
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+            j += 1
+        body = src[brace_start + 1:j - 1]
+        if re.search(r"\b(?:var|let)\s+count\b", body):
+            classes_with_count.add(cname)
+    if not classes_with_count:
+        return src
+    # 2. Variables of those classes (``let x = Foo(…)`` / ``var x: Foo``).
+    cls_alt = "|".join(re.escape(c) for c in classes_with_count)
+    inst_names: set = set()
+    for m in re.finditer(
+        rf"\b(?:let|var)\s+([A-Za-z_]\w*)\s*=\s*({cls_alt})\s*\(",
+        src,
+    ):
+        inst_names.add(m.group(1))
+    for m in re.finditer(
+        rf"\b(?:let|var)\s+([A-Za-z_]\w*)\s*:\s*({cls_alt})\b",
+        src,
+    ):
+        inst_names.add(m.group(1))
+    # Also class member ``var X: Foo`` declarations.
+    for m in re.finditer(
+        rf"\b(?:var|let)\s+([A-Za-z_]\w*)\s*:\s*({cls_alt})\b",
+        src,
+    ):
+        inst_names.add(m.group(1))
+    if not inst_names:
+        return src
+    # 3. Restore ``.size`` → ``.count`` on those receivers.
+    alt = "|".join(re.escape(n) for n in inst_names)
+    src = _outside_strings_regex(
+        src, rf"\b({alt})\.size\b(?!\w|\()", r"\1.count",
+    )
+    # Inside ``${…}`` interpolations too.
+    def _inner(inner: str, _alt=alt) -> str:
+        return re.sub(
+            rf"\b({_alt})\.size\b(?!\w|\()", r"\1.count", inner,
+        )
+    src = _rewrite_inside_interpolations(src, _inner)
+    return src
+
+
+_CJ_KEYWORDS_USER_COLLISION = ("match", "where", "init", "do", "try", "catch")
+
+
+def _rename_keyword_collisions(src: str) -> str:
+    """Swift permits identifiers (method names, fields, locals) that
+    collide with Cangjie reserved words such as ``match`` / ``where``.
+    When the source declares such an identifier, rename every textual
+    occurrence to ``<name>_`` so the emitted Cangjie compiles.  Only the
+    member-call form ``.<name>(`` / ``.<name>`` is touched along with
+    the declaration site, so ordinary control-flow keywords elsewhere
+    in the file are not disturbed.
+    """
+
+    for kw in _CJ_KEYWORDS_USER_COLLISION:
+        # Method/init declaration: ``func match(...)`` / ``init(...)``.
+        decl_re = re.compile(rf"\bfunc\s+{re.escape(kw)}\b")
+        if not decl_re.search(src):
+            continue
+        # Declaration.
+        src = _outside_strings_regex(src, rf"\bfunc\s+{re.escape(kw)}\b", f"func {kw}_")
+        # Call sites: ``x.match(...)`` and bare ``match(...)``.
+        src = _outside_strings_regex(
+            src, rf"(?<=\.)\b{re.escape(kw)}\b(?=\s*\()", f"{kw}_"
+        )
+        src = _outside_strings_regex(
+            src,
+            rf"(?<![A-Za-z0-9_.])\b{re.escape(kw)}\b(?=\s*\()",
+            f"{kw}_",
+        )
+    return src
+
+
+def _replace_empty_array_dict_assign(src: str) -> str:
+    """Find ``var/let X: [K: [V]] = …`` (or ``[K: V]`` where V is itself an
+    array type) declarations and rewrite any subsequent ``X[k] = []``
+    assignment so the empty literal is instantiated with the declared
+    value type.  ``X[k] = ArrayList<V>()`` for array values; nothing for
+    scalar values (the rewrite is no-op).
+    """
+
+    # Find dict declarations of the form ``[K: V]`` and remember X → V text.
+    val_ty: dict = {}
+    decl_re = re.compile(
+        r"\b(?:var|let)\s+([A-Za-z_]\w*)\s*:\s*\[([^\[\]:]+):\s*((?:\[[^\]]*\]|[^\[\]])+)\]"
+    )
+    for m in decl_re.finditer(src):
+        name = m.group(1).strip()
+        v_raw = m.group(3).strip()
+        v_translated = _convert_type_text(v_raw)
+        val_ty[name] = v_translated
+    if not val_ty:
+        return src
+    for name, vty in val_ty.items():
+        # Only meaningful when value type is a concrete container/class.
+        empty_init = f"{vty}()"
+        src = _outside_strings_regex(
+            src,
+            rf"\b{re.escape(name)}\[([^\[\]]+)\]\s*=\s*\[\]",
+            rf"{name}[\1] = {empty_init}",
+        )
+    return src
+
+
 def _wrap_call_site_array_literals(src: str) -> str:
     """Find ``[…]`` array literals appearing in call-site / return-value
     positions (preceded by ``(``, ``,`` or ``return``) and wrap them as
@@ -1239,17 +1406,16 @@ def _scan_optional_names(src: str) -> set:
 
 def _scan_enum_cases(src: str) -> dict:
     """Scan *src* for ``enum Name { case a; case b(...); … }`` declarations
-    and return a mapping ``case_name → enum_name`` for every case that
-    appears in **exactly one** enum.  Ambiguous case names (defined by
-    multiple enums) map to ``""`` so the caller can leave them alone.
+    and return a mapping ``case_name → (enum_name, arity)`` for every case
+    that appears in **exactly one** enum.  Ambiguous case names (defined by
+    multiple enums) map to ``("", 0)`` so the caller can leave them alone.
     """
 
     cases: dict = {}
     ambig: set = set()
 
-    # Find enum bodies via balanced-brace scan from each ``enum NAME {``.
     enum_re = re.compile(r"\benum\s+([A-Za-z_]\w*)(?:\s*:\s*[^{]+)?\s*\{")
-    case_re = re.compile(r"\bcase\s+([A-Za-z_]\w*)")
+    case_re = re.compile(r"\bcase\s+([A-Za-z_]\w*)(\s*\([^)]*\))?")
     pos = 0
     while True:
         m = enum_re.search(src, pos)
@@ -1270,13 +1436,21 @@ def _scan_enum_cases(src: str) -> dict:
         body = src[brace_start + 1:j - 1]
         for cm in case_re.finditer(body):
             cn = cm.group(1)
-            if cn in cases and cases[cn] != enum_name:
+            params = cm.group(2) or ""
+            arity = 0
+            inner = params.strip()
+            if inner.startswith("(") and inner.endswith(")"):
+                inner_body = inner[1:-1].strip()
+                if inner_body:
+                    arity = len(_split_top_level(inner_body, ","))
+            existing = cases.get(cn)
+            if existing and existing[0] != enum_name:
                 ambig.add(cn)
             else:
-                cases[cn] = enum_name
+                cases[cn] = (enum_name, arity)
         pos = j
     for a in ambig:
-        cases[a] = ""
+        cases[a] = ("", 0)
     return cases
 
 
@@ -1330,7 +1504,10 @@ def _strip_leading_enum_dot(src: str) -> str:
 
     def _repl(m: "re.Match") -> str:
         name = m.group(1)
-        enum_n = case_map.get(name, None)
+        v = case_map.get(name, None)
+        if v is None:
+            return name
+        enum_n, _ = v
         if enum_n:
             return f"{enum_n}.{name}"
         return name
@@ -1950,6 +2127,7 @@ def _is_body_slot(slot: str) -> bool:
 
 _TYPE_ALIASES: dict = {}
 _CLASS_METHODS: dict = {}
+_ENUM_CASE_INFO: dict = {}
 _CLASS_PARENT: dict = {}
 _OVERLOADABLE_OPS = {
     "+", "-", "*", "/", "%", "**",
@@ -2537,6 +2715,27 @@ def _convert_type_params(tokens: List[Token]) -> str:
 # --------------------------------------------------------------------------- #
 #  Enum / switch helpers                                                      #
 # --------------------------------------------------------------------------- #
+def _convert_enum_variant_payload(variant: str) -> str:
+    """For ``name(T, U)`` variants, translate each payload type via
+    :func:`_convert_type_text` so that array/dictionary surface forms
+    (``[T]``, ``[K: V]``) are converted just like field type annotations.
+    Variants without a payload are returned unchanged.
+    """
+
+    m = re.match(r"^([A-Za-z_]\w*)\s*\((.*)\)\s*$", variant, re.DOTALL)
+    if not m:
+        return variant
+    name = m.group(1)
+    payload = m.group(2)
+    parts = []
+    for p in _split_top_level(payload, ","):
+        p = p.strip()
+        if not p:
+            continue
+        parts.append(_convert_type_text(p))
+    return f"{name}({', '.join(parts)})"
+
+
 def _convert_enum_body(tokens: List[Token]) -> str:
     """Convert a Swift enum body into Cangjie ``| Var1 | Var2`` form.
 
@@ -2578,7 +2777,7 @@ def _convert_enum_body(tokens: List[Token]) -> str:
             for v in _split_top_level(text, ","):
                 v = v.strip()
                 if v:
-                    variants.append(v)
+                    variants.append(_convert_enum_variant_payload(v))
             continue
         i += 1
     if not variants:
@@ -2689,6 +2888,23 @@ def _convert_switch_body(tokens: List[Token]) -> str:
             # Strip Swift ``let `` binders inside enum-payload destructuring:
             # ``case rect(let w, let h)`` → ``case rect(w, h)``.
             label_str = re.sub(r"\blet\s+", "", label_str)
+            # If the label is a bare enum case ``Enum.case`` whose declared
+            # arity is > 0 (i.e. it has a payload) and no destructuring
+            # parens were supplied, Swift's shorthand means "match any
+            # payload".  Cangjie has no such shorthand — append ``(_, …, _)``.
+            def _addw(m: "re.Match") -> str:
+                full = m.group(0)
+                cname = m.group(2)
+                info = _ENUM_CASE_INFO.get(cname)
+                if info and info[1] > 0:
+                    placeholders = ", ".join("_" for _ in range(info[1]))
+                    return f"{full}({placeholders})"
+                return full
+            label_str = re.sub(
+                r"\b([A-Z][A-Za-z_0-9]*)\.([A-Za-z_]\w*)(?!\s*\()",
+                _addw,
+                label_str,
+            )
         out_lines.append(f"    case {label_str} =>")
         body_lines = [ln for ln in body_text.split("\n") if ln.strip()]
         if not body_lines:
@@ -2733,6 +2949,8 @@ def convert_source(swift_source: str, wrap_main: bool = True) -> ConversionResul
     _TYPE_ALIASES.clear()
     _CLASS_METHODS.clear()
     _CLASS_PARENT.clear()
+    _ENUM_CASE_INFO.clear()
+    _ENUM_CASE_INFO.update(_scan_enum_cases(rewritten))
 
     chunks = _segment_chunks(tokens)
     result = ConversionResult(source="", notes=notes)

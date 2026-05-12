@@ -1,0 +1,23 @@
+== bracket ==
+R1M1: Alpha(8) vs Bravo(5) -> Alpha [9-7]
+R1M2: Charlie(7) vs Delta(6) -> Charlie [10-9]
+R1M3: Echo(9) vs Foxtrot(4) -> Echo [9-8]
+R1M4: Golf(3) vs Hotel(10) -> Hotel [5-10]
+R2M5: Alpha(8) vs Charlie(7) -> Alpha [10-10]
+R2M6: Echo(9) vs Hotel(10) -> Hotel [13-14]
+R3M7: Alpha(8) vs Hotel(10) -> Alpha [12-12]
+== champion: Alpha ==
+== leaderboard ==
+Alpha skill=8 W=3 L=0
+Bravo skill=5 W=0 L=1
+Charlie skill=7 W=1 L=1
+Delta skill=6 W=0 L=1
+Echo skill=9 W=1 L=1
+Foxtrot skill=4 W=0 L=1
+Golf skill=3 W=0 L=1
+Hotel skill=10 W=2 L=1
+rounds played = 3
+== small bracket ==
+R1M1: X(5) vs Y(3) -> X [8-3]
+R2M2: X(5) vs Z(7) -> Z [8-10]
+== small champion: Z ==

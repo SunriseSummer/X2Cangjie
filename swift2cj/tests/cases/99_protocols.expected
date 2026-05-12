@@ -1,0 +1,10 @@
+== scene ==
+circle(r=2)
+square(s=3)
+tri(b=4, h=5)
+circle(r=1)
+total area = 34
+item count = 4
+label: C7
+label: S2
+label: T1x8
