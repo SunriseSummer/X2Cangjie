@@ -1,0 +1,6 @@
+stack=[1,2,3,4,5]
+size=5
+sum=15
+peek=Some(5)
+stack=[]
+isEmpty=true

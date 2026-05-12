@@ -1,0 +1,8 @@
+Account#1 (Alice): 1000
+Account#2 (Bob): 500
+Savings#3 (Carol): 2000 @5%
+Account#1 (Alice): 750
+Account#2 (Bob): 750
+Savings#3 (Carol): 2100 @5%
+total=3600
+caught insufficient funds
