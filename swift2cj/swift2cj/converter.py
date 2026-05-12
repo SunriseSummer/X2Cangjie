@@ -304,6 +304,8 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
             (".append(", ".add("),
             (".uppercased()", ".toAsciiUpper()"),
             (".lowercased()", ".toAsciiLower()"),
+            (".hasPrefix(", ".startsWith("),
+            (".hasSuffix(", ".endsWith("),
             # Swift super-constructor call ``super.init(...)`` → ``super(...)``.
             ("super.init(", "super("),
             # ``as!`` / ``as?`` Swift casts — keep ``as`` (Cangjie also has
@@ -325,6 +327,15 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     # collections expose ``.size`` for the same role.  We must NOT rewrite
     # ``.count()`` here — that is almost certainly a user-defined method.
     src = _outside_strings_regex(src, r"\.count(?!\w|\()", ".size")
+    # Swift's ``Array(<stringExpr>)`` converts a String to ``[Character]``.
+    # In Cangjie the corresponding shape is ``<stringExpr>.toRuneArray()``
+    # which returns an ``Array<Rune>``.  Apply when the call has a single
+    # identifier / dotted-path argument (the common case in test code).
+    src = _outside_strings_regex(
+        src,
+        r"\bArray\(\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*\)",
+        r"\1.toRuneArray()",
+    )
     # ``.isEmpty`` likewise: in Swift it's a property; Cangjie exposes
     # ``isEmpty()`` as a method.  Add ``()`` only when not already followed
     # by ``(`` (e.g. ``.isEmpty()`` user-method call).
@@ -457,6 +468,12 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     #     homogeneous, non-type, non-dict literal at call-site positions and
     #     wrap it as ``ArrayList<T>([…])``.
     src = _wrap_call_site_array_literals(src)
+    # 6b-vi.  Same wrap, but applied inside ``${…}`` interpolation blocks so
+    #     call-site array literals embedded in printed expressions also get
+    #     a concrete ``ArrayList<T>([…])`` constructor.
+    src = _rewrite_inside_interpolations(
+        src, lambda inner: _wrap_call_site_array_literals("(" + inner + ")")[1:-1]
+    )
     # 6c. Multi-argument ``print(a, b, c)`` — Swift joins args with a single
     #     space; rewrite to ``print("${a} ${b} ${c}")`` so the single-arg
     #     ``println`` we lower to can render the same output.
@@ -508,6 +525,13 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     # 8. ``guard cond else { B }`` is one Swift-only form; the rest of the
     #    function continues after the guard.  We rewrite it to an equivalent
     #    ``if (!(cond)) { B }`` early so the regular ``if`` pattern handles it.
+    #
+    #    Special form: ``guard let NAME = EXPR else { B }`` binds NAME from an
+    #    Optional.  Cangjie has no inverted Optional-binding, but a value-style
+    #    ``match`` works: ``let NAME = match (EXPR) { case Some(v) => v;
+    #    case None => B }``.  We handle this BEFORE the general ``guard``
+    #    rewrite so the literal ``let`` survives the binding form.
+    src = _rewrite_guard_let(src)
     src = _outside_strings_regex(
         src,
         r"\bguard[ \t]+(.+?)[ \t]+else[ \t]*\{",
@@ -531,12 +555,98 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
         r"(if \(let Some\([A-Za-z_]\w*\) <- [^\n{]+?)[ \t]*\{",
         r"\1) {",
     )
+    # ``if (let Some(x) <- m[k])`` where ``m`` is a known HashMap does not
+    # work in Cangjie — subscript returns ``V``, not ``Option<V>``.  Rewrite
+    # the inner subscript to ``.get(k)`` for any *declared* HashMap receiver
+    # so the Optional binding lines up with the value type.
+    src = _rewrite_optional_binding_dict_subscript(src)
     # 10. Ternary ``cond ? a : b`` → ``(if (cond) { a } else { b })``.
     #     Very conservative: we only match a ternary that lives on a single
     #     expression-line, doesn't touch dictionary literals (``[k:v]``), and
     #     whose ``a`` / ``b`` are simple parenthesisable expressions.
     src = _rewrite_ternary(src)
     return src, notes
+
+
+def _rewrite_guard_let(src: str) -> str:
+    """Rewrite ``guard let X = EXPR else { BODY }`` to a value-style match:
+
+        let X = match (EXPR) { case Some(v) => v; case None => BODY }
+
+    The Swift ``BODY`` typically diverges (return / throw / break), so the
+    ``None`` arm types fine.  We match the *whole* statement including its
+    closing brace, walking braces to keep nested ``{…}`` inside the else
+    body intact.
+    """
+
+    out: List[str] = []
+    pat = re.compile(
+        r"\bguard[ \t]+let[ \t]+([A-Za-z_]\w*)[ \t]*=[ \t]*(.+?)[ \t]+else[ \t]*\{"
+    )
+    i, n = 0, len(src)
+    while i < n:
+        m = pat.search(src, i)
+        if not m:
+            out.append(src[i:])
+            break
+        name = m.group(1)
+        expr = m.group(2).strip()
+        out.append(src[i:m.start()])
+        # Walk to find the matching closing brace of the else block.
+        depth = 1
+        j = m.end()
+        while j < n and depth > 0:
+            c = src[j]
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        body = src[m.end():j].strip()
+        out.append(
+            f"let {name} = match ({expr}) {{ case Some(v) => v; "
+            f"case None => ({body}) }}"
+        )
+        i = j + 1
+    return "".join(out)
+
+
+def _rewrite_optional_binding_dict_subscript(src: str) -> str:
+    """In ``if (let Some(x) <- RECV[KEY])`` rewrite ``RECV[KEY]`` →
+    ``RECV.get(KEY)`` when ``RECV`` (or its dotted field tail) refers to a
+    HashMap.  Cangjie's subscript on HashMap returns ``V`` (panics on miss),
+    not ``Option<V>``, so the Optional pattern would otherwise be unsound.
+
+    The receiver set is gathered from textual ``[K: V]`` declarations and
+    field initialisers of the form ``var X: [K: V] = [:]`` /
+    ``var X = HashMap...`` — best effort, name-keyed.
+    """
+
+    # Collect dict-typed receiver names.
+    dict_names: set = set()
+    decl_re = re.compile(
+        r"\b(?:var|let)\s+([A-Za-z_]\w*)\s*:\s*\[[^\[\]]+?:\s*"
+    )
+    for m in decl_re.finditer(src):
+        dict_names.add(m.group(1))
+    # Cangjie-shape declarations (after type conversion happened upstream).
+    decl_re2 = re.compile(
+        r"\b(?:var|let)\s+([A-Za-z_]\w*)\s*:\s*HashMap\s*<"
+    )
+    for m in decl_re2.finditer(src):
+        dict_names.add(m.group(1))
+    if not dict_names:
+        return src
+    alt = "|".join(sorted(re.escape(n) for n in dict_names))
+    # Match the receiver as ``(.<field>)*<name>`` — i.e. last segment is dict-typed.
+    pat = re.compile(
+        rf"(if \(let Some\([A-Za-z_]\w*\) <- )"
+        rf"((?:[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\.)?(?:{alt}))"
+        rf"\[([^\[\]]+)\]"
+    )
+    return _outside_strings_regex(src, pat.pattern, r"\1\2.get(\3)")
 
 
 def _split_top_level_str_aware(s: str, sep: str) -> List[str]:
@@ -944,10 +1054,23 @@ def _rewrite_ternary(src: str) -> str:
                         depth_s -= 1
                     elif c in "\n;,{":
                         break
+                    elif c == ":" and depth_p == 0 and depth_s == 0:
+                        # ``:`` at depth 0 is always a statement boundary —
+                        # type annotation, case label, dict key — and never
+                        # part of our ternary's condition (the matching ``:``
+                        # of THIS ``?`` lives forward of ``i``).
+                        break
                     elif c in "=" and depth_p == 0 and depth_s == 0:
-                        # left-hand side of ``=`` ends the condition.
-                        # But ``==`` / ``!=`` / ``<=`` / ``>=`` are operators.
-                        if cond_start - 2 >= 0 and src[cond_start - 2] in "=!<>":
+                        # left-hand side of ``=`` ends the condition.  We must
+                        # NOT terminate when ``=`` is part of a comparison /
+                        # compound-assign operator: ``==`` ``!=`` ``<=`` ``>=``.
+                        # The Cangjie case-arm arrow ``=>`` IS a terminator —
+                        # stop unconditionally for that one.
+                        prev_c = src[cond_start - 2] if cond_start - 2 >= 0 else ""
+                        next_c = src[cond_start] if cond_start < n else ""
+                        if next_c == ">":
+                            break
+                        if prev_c in "=!<>" or next_c == "=":
                             cond_start -= 1
                             continue
                         break
@@ -994,6 +1117,13 @@ def _rewrite_ternary(src: str) -> str:
                 # Quick sanity: cond/then/else must all be non-empty and the
                 # condition mustn't end with an "expression-incomplete" op.
                 if cond_text and then_text and else_text and not cond_text.endswith(("=", "+", "-", "*", "/", "%", "<", ">", "!")):
+                    # Recurse into the branches so nested ternaries are also
+                    # lowered.  ``_rewrite_ternary`` itself walks all depths
+                    # via its own paren/bracket tracking, so we re-invoke it
+                    # rather than the shallower ``_in_expr`` helper.
+                    then_text = _rewrite_ternary(then_text)
+                    else_text = _rewrite_ternary(else_text)
+                    cond_text = _rewrite_ternary(cond_text)
                     replacement = f"(if ({cond_text}) {{ {then_text} }} else {{ {else_text} }})"
                     # Splice: replace src[cond_start:end_pos] with replacement.
                     # ``out`` so far contains src[:i]; we need to rewind ``out``
@@ -1141,6 +1271,19 @@ def _restore_user_count_members(src: str) -> str:
         src,
     ):
         inst_names.add(m.group(1))
+    # Propagate through ``let|var Y = X`` chains so locals like ``var node =
+    # root`` inherit the receiver classification.  Fixed-point iteration
+    # since chains can have arbitrary length.
+    rhs_re = re.compile(
+        r"\b(?:let|var)\s+([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*)\b"
+    )
+    changed = True
+    while changed:
+        changed = False
+        for m in rhs_re.finditer(src):
+            if m.group(2) in inst_names and m.group(1) not in inst_names:
+                inst_names.add(m.group(1))
+                changed = True
     if not inst_names:
         return src
     # 3. Restore ``.size`` → ``.count`` on those receivers.
@@ -1574,6 +1717,18 @@ def _scan_optional_names(src: str) -> set:
     rhs_re = re.compile(
         r"\b(?:let|var)\s+([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*)\b"
     )
+    # Functions returning ``T?`` — their call sites yield Optional bindings.
+    opt_func_re = re.compile(
+        r"\bfunc\s+([A-Za-z_]\w*)\s*\([^)]*\)\s*->\s*[A-Za-z_][\w<>\[\], ]*\?"
+    )
+    opt_funcs: set = set(m.group(1) for m in opt_func_re.finditer(src))
+    call_rhs_re = re.compile(
+        r"\b(?:let|var)\s+([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*)\s*\("
+    )
+    if opt_funcs:
+        for m in call_rhs_re.finditer(src):
+            if m.group(2) in opt_funcs:
+                names.add(m.group(1))
     changed = True
     while changed:
         changed = False
@@ -2413,6 +2568,37 @@ def _emit(pat: Pattern, bindings: dict, ctx: Optional[str] = None) -> str:
     if pat.name in ("enum_decl", "enum_raw_decl"):
         name = _convert_expr(bindings.get("NAME", [])).strip()
         body = _convert_enum_body(bindings.get("BODY", []))
+        # When every variant is a *bare* name (no payload tuple), Swift's
+        # enum auto-synthesises ``==`` — Cangjie's does not.  Append a small
+        # ``Equatable`` impl so callers can use ``e == .case`` directly,
+        # mirroring Swift semantics.  The match exhausts the variants pairwise.
+        variant_names: List[str] = []
+        bare = True
+        for ln in body.split("\n"):
+            ln = ln.strip()
+            if not ln.startswith("|"):
+                continue
+            v = ln[1:].strip()
+            if "(" in v:
+                bare = False
+                break
+            if v:
+                variant_names.append(v)
+        if bare and len(variant_names) >= 1:
+            cmp_arms = "\n".join(
+                f"            case ({v}, {v}) => true" for v in variant_names
+            )
+            eq_impl = (
+                f"    public operator func ==(other: {name}): Bool {{\n"
+                f"        match ((this, other)) {{\n"
+                f"{cmp_arms}\n"
+                f"            case _ => false\n"
+                f"        }}\n"
+                f"    }}\n"
+                f"    public operator func !=(other: {name}): Bool {{ !(this == other) }}"
+            )
+            decl = f"enum {name} <: Equatable<{name}> {{\n{body}\n{eq_impl}\n}}"
+            return decl
         return out.replace("$NAME", name).replace("$ENUMBODY", body)
 
     if pat.name == "import_decl":

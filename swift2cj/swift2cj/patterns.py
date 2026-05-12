@@ -392,13 +392,13 @@ CHUNK_PATTERNS: List[Pattern] = [
     Pattern(
         "method_no_ret",
         "func $NAME ( $PARAMS ) { $BODY }",
-        "public open func $NAME($PARAMS) {\n$BODY\n}",
+        "public open func $NAME($PARAMS): Unit {\n$BODY\n}",
         ("NAME", "PARAMS", "BODY"),
     ),
     Pattern(
         "method_throws_no_ret",
         "func $NAME ( $PARAMS ) throws { $BODY }",
-        "public open func $NAME($PARAMS) {\n$BODY\n}",
+        "public open func $NAME($PARAMS): Unit {\n$BODY\n}",
         ("NAME", "PARAMS", "BODY"),
     ),
     Pattern(
