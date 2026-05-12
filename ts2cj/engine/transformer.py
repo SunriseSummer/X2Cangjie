@@ -2586,6 +2586,247 @@ class Transformer:
             out_lines.append("func min(a: Int64, b: Int64): Int64 { if (a <= b) { a } else { b } }")
         return "\n".join(out_lines)
 
+    # ---- post-process helpers ----
+
+    @staticmethod
+    def _match_close_paren(text: str, open_pos: int) -> int:
+        """Return the index of the ``)`` that matches the ``(`` at *open_pos*.
+
+        String/template literals are honoured so a stray ``)`` inside a
+        ``"..."`` doesn't fool the scanner.  Returns ``-1`` on mismatch.
+        """
+        if open_pos < 0 or open_pos >= len(text) or text[open_pos] != "(":
+            return -1
+        depth = 0
+        i = open_pos
+        n = len(text)
+        in_str: Optional[str] = None
+        while i < n:
+            c = text[i]
+            if in_str:
+                if c == "\\" and i + 1 < n:
+                    i += 2
+                    continue
+                if c == in_str:
+                    in_str = None
+                i += 1
+                continue
+            if c == '"' or c == "'":
+                in_str = c
+            elif c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+                if depth == 0:
+                    return i
+            i += 1
+        return -1
+
+    @staticmethod
+    def _match_close_brace(text: str, open_pos: int) -> int:
+        """Return the index of the ``}`` that matches ``{`` at *open_pos*.
+
+        Strings and ``${…}`` template interpolations are skipped so a
+        ``}`` inside a literal won't close the block.  Returns ``-1`` on
+        mismatch.
+        """
+        if open_pos < 0 or open_pos >= len(text) or text[open_pos] != "{":
+            return -1
+        depth = 0
+        i = open_pos
+        n = len(text)
+        in_str: Optional[str] = None
+        while i < n:
+            c = text[i]
+            if in_str:
+                if c == "\\" and i + 1 < n:
+                    i += 2
+                    continue
+                if c == in_str:
+                    in_str = None
+                i += 1
+                continue
+            if c == '"' or c == "'":
+                in_str = c
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    return i
+            i += 1
+        return -1
+
+    def _wrap_math_int_funcs(self, text: str) -> str:
+        """Wrap ``floor(...)``/``ceil(...)``/``round(...)`` calls in
+        ``Int64(...)``.  Uses a balanced-paren scan so deeply-nested
+        bodies (e.g. ``floor(Float64(a / gcd(a, b)))``) are handled.
+        Skips calls already wrapped — i.e. the immediately preceding
+        text is ``Int64(``.
+        """
+        out: List[str] = []
+        i = 0
+        n = len(text)
+        name_re = re.compile(r"(floor|ceil|round)\(")
+        while i < n:
+            m = name_re.match(text, i)
+            # check word boundary on the left
+            if m and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")):
+                name = m.group(1)
+                paren = i + len(name)
+                close = self._match_close_paren(text, paren)
+                if close == -1:
+                    out.append(text[i])
+                    i += 1
+                    continue
+                body = text[paren + 1:close]
+                # If immediately preceded by ``Int64(`` (ignoring spaces)
+                # the call is already wrapped — leave it alone.
+                left = text[:i].rstrip()
+                already = left.endswith("Int64(")
+                if already:
+                    out.append(f"{name}({body})")
+                else:
+                    out.append(f"Int64({name}({body}))")
+                i = close + 1
+                continue
+            out.append(text[i])
+            i += 1
+        return "".join(out)
+
+    def _hashmap_get_to_subscript(self, text: str) -> str:
+        """Rewrite ``<var>.get(<expr>)`` to ``<var>[<expr>]`` when ``<var>``
+        is a known ``HashMap``.  This avoids the ``Some(v)`` print
+        artefact that comes from Cangjie's ``HashMap.get`` returning
+        ``Option<V>``.
+        """
+        hashmap_vars = {
+            name for name, ty in self.var_types.items()
+            if isinstance(ty, str) and ty.startswith("HashMap<")
+        }
+        if not hashmap_vars:
+            return text
+        pat = re.compile(
+            r"(?<![A-Za-z_0-9.])(" + "|".join(re.escape(v) for v in hashmap_vars) + r")\.get\("
+        )
+        out: List[str] = []
+        i = 0
+        n = len(text)
+        while i < n:
+            m = pat.search(text, i)
+            if not m:
+                out.append(text[i:])
+                break
+            out.append(text[i:m.start()])
+            var = m.group(1)
+            paren = m.end() - 1  # position of '('
+            close = self._match_close_paren(text, paren)
+            if close == -1:
+                out.append(text[m.start():m.end()])
+                i = m.end()
+                continue
+            body = text[paren + 1:close]
+            out.append(f"{var}[{body.strip()}]")
+            i = close + 1
+        return "".join(out)
+
+    def _fix_immutable_param_reassign(self, text: str) -> str:
+        """For each ``func`` body, detect parameters that are reassigned
+        and rewrite the function so the param is renamed to ``_<name>``
+        and a fresh ``var <name> = _<name>`` is injected at the top of
+        the body.  Cangjie parameters are immutable; without this fix
+        idiomatic TS like ``b = a - Math.floor(a / b) * b`` won't
+        compile.
+        """
+        func_re = re.compile(r"\bfunc\s+[A-Za-z_]\w*\s*(?:<[^>]*>)?\s*\(")
+        pieces: List[str] = []
+        i = 0
+        n = len(text)
+        while i < n:
+            m = func_re.search(text, i)
+            if not m:
+                pieces.append(text[i:])
+                break
+            pieces.append(text[i:m.start()])
+            sig_open_paren = m.end() - 1
+            sig_close_paren = self._match_close_paren(text, sig_open_paren)
+            if sig_close_paren == -1:
+                pieces.append(text[m.start():])
+                break
+            # locate the body's opening brace (after optional ': RetType')
+            body_open = text.find("{", sig_close_paren)
+            if body_open == -1:
+                pieces.append(text[m.start():sig_close_paren + 1])
+                i = sig_close_paren + 1
+                continue
+            body_close = self._match_close_brace(text, body_open)
+            if body_close == -1:
+                pieces.append(text[m.start():])
+                break
+            params_text = text[sig_open_paren + 1:sig_close_paren]
+            body_text = text[body_open + 1:body_close]
+            param_names: List[str] = []
+            for part in params_text.split(","):
+                ps = part.strip()
+                if not ps:
+                    continue
+                pm = re.match(r"([A-Za-z_]\w*)", ps)
+                if pm:
+                    param_names.append(pm.group(1))
+            reassigned: List[str] = []
+            for name in param_names:
+                # Look for `name [op]= expr`, excluding `==`/`<=`/`>=`/
+                # `!=` and excluding member access like `this.name = ...`.
+                p = re.compile(
+                    r"(?<![A-Za-z_0-9.])"
+                    + re.escape(name)
+                    + r"\s*(?:\+|-|\*|/|%|&|\||\^)?=(?!=)"
+                )
+                hit = False
+                for mm in p.finditer(body_text):
+                    # skip `let name =`, `var name =`, `const name =`
+                    prefix = body_text[max(0, mm.start() - 12):mm.start()]
+                    if re.search(r"\b(let|var|const)\s+$", prefix):
+                        continue
+                    hit = True
+                    break
+                if hit:
+                    reassigned.append(name)
+            if not reassigned:
+                pieces.append(text[m.start():body_close + 1])
+                i = body_close + 1
+                continue
+            # Rename params in the signature.  Each occurrence is the
+            # parameter declaration, so a once-each substitution scoped
+            # to the params slice is precise.
+            new_params = params_text
+            for name in reassigned:
+                new_params = re.sub(
+                    r"\b" + re.escape(name) + r"\b",
+                    f"_{name}",
+                    new_params,
+                    count=1,
+                )
+            # Pick an indent that matches the existing body.
+            indent = "    "
+            for ln in body_text.splitlines():
+                stripped = ln.lstrip()
+                if stripped:
+                    indent = ln[:len(ln) - len(stripped)]
+                    break
+            prepend = "".join(f"{indent}var {n_} = _{n_}\n" for n_ in reassigned)
+            new_body = "\n" + prepend + body_text.lstrip("\n")
+            new_block = (
+                text[m.start():sig_open_paren + 1]
+                + new_params
+                + text[sig_close_paren:body_open + 1]
+                + new_body
+                + "}"
+            )
+            pieces.append(new_block)
+            i = body_close + 1
+        return "".join(pieces)
+
     def _infer_float_params(self, text: str) -> str:
         """Promote ``Int64`` params/returns to ``Float64`` when the
         function body contains float literals or float-only stdlib calls.
@@ -2706,11 +2947,26 @@ class Transformer:
         # ``floor``/``ceil``/``round`` return ``Float64``, so wrap.
         # We do this *unconditionally* — wrapping a value that's
         # already Int64 with ``Int64(...)`` is a harmless no-op.
-        text = re.sub(
-            r"\b(floor|ceil|round)\((?P<body>(?:[^()]|\([^()]*\))*)\)",
-            lambda m: f"Int64({m.group(1)}({m.group('body')}))",
-            text,
-        )
+        # Uses a balanced-paren scan so arbitrarily-nested call bodies
+        # (e.g. ``floor(Float64(a / gcd(a, b)))``) are matched correctly.
+        text = self._wrap_math_int_funcs(text)
+
+        # ---- HashMap`.get(k)` → `[k]` for variables typed as HashMap.
+        # Cangjie's ``HashMap.get(k)`` returns ``Option<V>`` (so prints
+        # as ``Some(v)``), whereas the indexer ``m[k]`` returns ``V``
+        # directly — much closer to the TS semantics that the user
+        # expected.  We only rewrite when ``m`` is *known* to be a
+        # ``HashMap<...>`` to avoid mangling user classes that define
+        # their own ``.get`` method.
+        text = self._hashmap_get_to_subscript(text)
+
+        # ---- Cangjie function parameters are immutable.  TS code that
+        # reassigns them (``b = a - …; a = t``) is otherwise rejected
+        # by ``cjc``.  Detect this case, rename the offending params to
+        # ``_<name>`` and inject ``var <name> = _<name>`` at the top of
+        # the body so the rest of the function (which uses the original
+        # names) continues to work unchanged.
+        text = self._fix_immutable_param_reassign(text)
 
         # ---- Float64 inference: when a function body uses a float
         # literal (digit.digit) or float math builtins (sqrt/pow), the

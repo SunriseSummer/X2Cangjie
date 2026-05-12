@@ -204,25 +204,26 @@ The aggregate report is dropped at `tests/log.md` and looks like:
 ```
 | Metric | Value |
 |---|---|
-| Total test cases       | 30    |
-| Converted successfully | 30/30 |
-| Cangjie compiled       | 30/30 |
-| Runtime output matches | 28/30 |
+| Total test cases       | 59    |
+| Converted successfully | 59/59 |
+| Cangjie compiled       | 59/59 |
+| Runtime output matches | 57/59 |
 | Average quality score  | 99/100 |
 ```
 
 ### Latest result
 
-- **Conversion success: 100 % (30/30)**
-- **Cangjie compile success: 100 % (30/30)**
-- **End-to-end output match: 97 % (29/30)**
+- **Conversion success: 100 % (59/59)**
+- **Cangjie compile success: 100 % (59/59)**
+- **End-to-end output match: 97 % (57/59)**
 - **Average quality score: 0.99**
 
-The one non-matching case is:
+The two non-matching cases are:
 
 | Case            | Symptom                          | Root cause |
 |-----------------|----------------------------------|-----------|
-| `03_arithmetic` | TS prints `3.3333…`, CJ prints `1` for `10/3` | TS `number` is double; we default to `Int64` so `/` becomes integer division. Add `: number = 0.0` annotation to force Float64. |
+| `03_arithmetic` | TS prints `3.3333…`, CJ prints `3` for `10/3` | TS `number` is double; we default to `Int64` so `/` becomes integer division. Add `: number = 0.0` annotation to force Float64. |
+| `52_float_math` | TS prints `3.14159265`, CJ prints `3.141593` | Cangjie's `Float64.toString()` uses a fixed 6-fraction-digit format whereas TS prints up to 15 significant digits. Cosmetic only — the computed values are identical. |
 
 (see `tests/log.md` for the live, per-case breakdown.)
 
