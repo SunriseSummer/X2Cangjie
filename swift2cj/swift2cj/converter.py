@@ -269,6 +269,10 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     notes: List[str] = []
     # 1. String interpolation first — operates inside string literals.
     src = _convert_string_interpolations(src)
+    # 1a-pre.  Swift iterates ``String`` as Character values.  Cangjie 1.x
+    #         string iteration yields bytes for ASCII text, so comparisons like
+    #         ``for ch in title { if ch == \"#\" ... }`` need byte literals.
+    src = _rewrite_string_iteration_char_comparisons(src)
     # 1a.  Scan for Optional-typed bindings/parameters so subsequent
     #      transforms can promote ``name!`` to ``name.getOrThrow()`` and
     #      ``name == nil`` / ``!= nil`` to ``isNone()`` / ``isSome()``.
@@ -1520,6 +1524,80 @@ def _scan_dict_names(src: str) -> set:
         ):
             names.add(m.group(1))
     return names
+
+
+def _rewrite_string_iteration_char_comparisons(src: str) -> str:
+    """Rewrite ASCII Character comparisons from Swift string iteration.
+
+    Swift ``for ch in someString`` binds ``ch`` as ``Character`` and permits
+    ``ch == "#"``.  Cangjie string iteration yields ``UInt8`` for ASCII text,
+    so the equivalent comparison is ``ch == UInt8(35)``.  We infer only loop
+    variables proven to come from ``String`` or ``[String]`` flows.
+    """
+
+    string_names: set = set()
+    string_arrays: set = set()
+    for m in re.finditer(r"\b(?:let|var)\s+([A-Za-z_]\w*)\s*:\s*String\b", src):
+        string_names.add(m.group(1))
+    for m in re.finditer(r"(?:[(,]\s*(?:_\s+)?)([A-Za-z_]\w*)\s*:\s*String\b", src):
+        string_names.add(m.group(1))
+    for m in re.finditer(r"\b(?:let|var)\s+([A-Za-z_]\w*)\s*:\s*\[\s*String\s*\]", src):
+        string_arrays.add(m.group(1))
+    for m in re.finditer(r"(?:[(,]\s*(?:_\s+)?)([A-Za-z_]\w*)\s*:\s*\[\s*String\s*\]", src):
+        string_arrays.add(m.group(1))
+    for m in re.finditer(r"\b(?:let|var)\s+([A-Za-z_]\w*)\s*=\s*\[([^\]]*)\]", src):
+        parts = [p.strip() for p in _split_top_level(m.group(2), ",") if p.strip()]
+        if parts and all(re.match(r'^"(?:\\.|[^"\\])*"$', p) for p in parts):
+            string_arrays.add(m.group(1))
+
+    char_vars: set = set()
+    loop_re = re.compile(r"\bfor\s+([A-Za-z_]\w*)\s+in\s+([^{\n]+)\{")
+    changed = True
+    while changed:
+        changed = False
+        for m in loop_re.finditer(src):
+            var = m.group(1)
+            expr = m.group(2).strip()
+            base = expr.split(".", 1)[0].strip()
+            if expr.startswith('"') or expr in string_names or base in string_names:
+                if var not in char_vars:
+                    char_vars.add(var)
+                    changed = True
+            elif expr in string_arrays or base in string_arrays:
+                if var not in string_names:
+                    string_names.add(var)
+                    changed = True
+    if not char_vars:
+        return src
+
+    alt = "|".join(sorted(re.escape(v) for v in char_vars))
+
+    def _byte_for_literal(lit: str) -> str:
+        try:
+            text = bytes(lit[1:-1], "utf-8").decode("unicode_escape")
+        except Exception:
+            text = lit[1:-1]
+        if len(text) != 1 or ord(text) > 255:
+            return lit
+        return f"UInt8({ord(text)})"
+
+    def _rhs(m: re.Match) -> str:
+        return f"{m.group(1)} {m.group(2)} {_byte_for_literal(m.group(3))}"
+
+    def _lhs(m: re.Match) -> str:
+        return f"{_byte_for_literal(m.group(1))} {m.group(2)} {m.group(3)}"
+
+    src = re.sub(rf"\b({alt})\s*(==|!=)\s*(\"(?:\\.|[^\"\\])\")", _rhs, src)
+    src = re.sub(rf"(\"(?:\\.|[^\"\\])\")\s*(==|!=)\s*\b({alt})\b", _lhs, src)
+
+    def _char_interp(inner: str, _chars=char_vars) -> str:
+        stripped = inner.strip()
+        if stripped in _chars:
+            return f"Rune({stripped})"
+        return inner
+
+    src = _rewrite_inside_interpolations(src, _char_interp)
+    return src
 
 
 def _rewrite_known_dict_subscript_reads(src: str) -> str:
