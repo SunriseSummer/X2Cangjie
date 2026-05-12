@@ -315,14 +315,9 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
         ],
     )
     # Swift ``Array.insert(elem, at: i)`` → Cangjie ``ArrayList.add(elem, at: i)``.
-    # Match only when followed by ``, at:`` so user methods named ``insert`` keep
-    # working.  The element expression is opaque; we accept anything up to the
-    # ``, at:`` separator at brace depth 0.
-    src = _outside_strings_regex(
-        src,
-        r"\.insert\(((?:[^()]|\([^()]*\))*?),\s*at\s*:",
-        r".add(\1, at:",
-    )
+    # Use a small balanced scanner instead of a regex so nested call arguments
+    # like ``xs.insert(make(a, b), at: i)`` are handled without backtracking.
+    src = _rewrite_array_insert_calls(src)
     # ``.count`` is a *property* in Swift (no parens), and Cangjie's
     # collections expose ``.size`` for the same role.  We must NOT rewrite
     # ``.count()`` here — that is almost certainly a user-defined method.
@@ -1226,6 +1221,110 @@ def _outside_strings_regex(src: str, pattern: str, repl) -> str:
     )
 
 
+def _outside_strings_transform(src: str, fn) -> str:
+    """Apply *fn* only to code regions outside string / comment spans."""
+
+    segs: List[Tuple[str, bool]] = []
+    i, n = 0, len(src)
+    buf: List[str] = []
+    while i < n:
+        ch = src[i]
+        if ch == '"':
+            if buf:
+                segs.append(("".join(buf), True))
+                buf = []
+            if src[i:i + 3] == '"""':
+                end = src.find('"""', i + 3)
+                end = n if end == -1 else end + 3
+                segs.append((src[i:end], False))
+                i = end
+                continue
+            j = i + 1
+            while j < n and src[j] != '"':
+                if src[j] == "\\" and j + 1 < n:
+                    j += 2
+                    continue
+                j += 1
+            segs.append((src[i:j + 1], False))
+            i = j + 1
+            continue
+        if ch == "/" and i + 1 < n and src[i + 1] in ("/", "*"):
+            if buf:
+                segs.append(("".join(buf), True))
+                buf = []
+            if src[i + 1] == "/":
+                end = src.find("\n", i)
+                end = n if end == -1 else end
+            else:
+                end = src.find("*/", i)
+                end = n if end == -1 else end + 2
+            segs.append((src[i:end], False))
+            i = end
+            continue
+        buf.append(ch)
+        i += 1
+    if buf:
+        segs.append(("".join(buf), True))
+    return "".join(fn(text) if is_code else text for text, is_code in segs)
+
+
+def _rewrite_array_insert_calls(src: str) -> str:
+    """Rewrite ``.insert(value, at: index)`` calls to ``.add(value, at: index)``.
+
+    The argument scanner tracks nested ``()``/``[]``/``{}`` pairs, so it is not
+    limited to a single parenthesis level.
+    """
+
+    def _transform(text: str) -> str:
+        out: List[str] = []
+        i = 0
+        needle = ".insert("
+        while True:
+            pos = text.find(needle, i)
+            if pos < 0:
+                out.append(text[i:])
+                break
+            arg_start = pos + len(needle)
+            depth_p = depth_s = depth_b = 0
+            split = -1
+            j = arg_start
+            while j < len(text):
+                ch = text[j]
+                if ch == "(":
+                    depth_p += 1
+                elif ch == ")":
+                    if depth_p == 0:
+                        break
+                    depth_p -= 1
+                elif ch == "[":
+                    depth_s += 1
+                elif ch == "]":
+                    depth_s = max(depth_s - 1, 0)
+                elif ch == "{":
+                    depth_b += 1
+                elif ch == "}":
+                    depth_b = max(depth_b - 1, 0)
+                elif (
+                    ch == "," and depth_p == 0 and depth_s == 0 and depth_b == 0
+                    and text[j + 1:].lstrip().startswith("at:")
+                ):
+                    split = j
+                j += 1
+            if j >= len(text) or split < 0:
+                out.append(text[i:pos + len(needle)])
+                i = pos + len(needle)
+                continue
+            out.append(text[i:pos])
+            out.append(".add(")
+            out.append(text[arg_start:split])
+            out.append(text[split:j])
+            out.append(")")
+            i = j + 1
+        return "".join(out)
+
+    return _outside_strings_transform(src, _transform)
+
+
 def _restore_user_count_members(src: str) -> str:
     """If any user-defined class declares a stored member named ``count``,
     revert the global ``.count → .size`` rewrite for accesses targeting
@@ -1532,7 +1631,7 @@ def _wrap_call_site_array_literals(src: str) -> str:
                     prev = out[k]
                 # Already inside an explicit ``ArrayList<T>([...])``
                 # constructor: keep its backing array literal unchanged.
-                if re.search(r"\bArrayList\s*<[^<>]+>\s*\(\s*$", "".join(out[-96:])):
+                if re.search(r"\bArrayList\s*<[^<>]+>\s*\(\s*$", "".join(out)):
                     out.append(ch)
                     i += 1
                     continue
@@ -2925,9 +3024,10 @@ def _emit(pat: Pattern, bindings: dict, ctx: Optional[str] = None) -> str:
     # ``.remove``.  Promote homogeneous integer/float/string literals to the
     # corresponding ``ArrayList<…>`` so the value behaves like a Swift Array.
     if pat.name in ("let_inferred", "var_inferred"):
-        m = re.search(r"=\s*\[(.+)\]\s*$", out, flags=re.DOTALL)
-        if m:
-            inner = m.group(1).strip()
+        eq_pos = out.find("=")
+        rhs = out[eq_pos + 1:].strip() if eq_pos >= 0 else ""
+        if rhs.startswith("[") and rhs.endswith("]") and len(rhs) >= 2:
+            inner = rhs[1:-1].strip()
             # Skip dictionary literals (``k: v``) — let user type them.
             if ":" not in inner or _is_pair_free(inner):
                 inner_rec = _wrap_call_site_array_literals(
@@ -2936,10 +3036,10 @@ def _emit(pat: Pattern, bindings: dict, ctx: Optional[str] = None) -> str:
                 inner_rec = _tighten_generic_spacing(inner_rec)
                 elem_ty = _guess_elem_type_extended(inner_rec)
                 if elem_ty:
+                    prefix = out[:eq_pos]
                     out = (
-                        out[:m.start()]
+                        prefix
                         + f"= ArrayList<{elem_ty}>([{inner_rec}])"
-                        + out[m.end():]
                     )
     return out
 
