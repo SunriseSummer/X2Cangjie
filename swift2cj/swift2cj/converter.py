@@ -315,7 +315,348 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     src = _outside_strings_regex(
         src, r"([A-Za-z_0-9\)\]])\!(?!=)", r"\1",
     )
+    # 6a. Drop Swift declaration modifiers that have no Cangjie analogue.
+    #     ``mutating`` / ``nonmutating`` / ``lazy`` / ``@discardableResult`` / etc.
+    src = _outside_strings_word_replace(
+        src,
+        [
+            ("mutating", ""),
+            ("nonmutating", ""),
+            ("lazy", ""),
+            ("weak", ""),
+            ("unowned", ""),
+            ("required", ""),
+            ("fileprivate", "private"),
+            ("internal", "public"),
+        ],
+    )
+    # 6b. ``@discardableResult``, ``@objc``, ``@inlinable`` etc. — drop the
+    #     whole attribute (line-prefix).
+    src = _outside_strings_regex(src, r"@[A-Za-z_]\w*(?:\s*\([^)]*\))?", "")
+    # 6c. Multi-argument ``print(a, b, c)`` — Swift joins args with a single
+    #     space; rewrite to ``print("${a} ${b} ${c}")`` so the single-arg
+    #     ``println`` we lower to can render the same output.
+    src = _rewrite_multi_arg_print(src)
+    # 7. Closures: ``{ x in body }``  →  ``{ x => body }``.
+    #    Tight pattern: parameter list is identifiers (optionally typed) followed
+    #    by ``in``; this never collides with ``for x in xs { ... }`` because the
+    #    ``in`` there sits *outside* a ``{...}`` body.
+    src = _outside_strings_regex(
+        src,
+        r"\{[ \t]*"
+        r"(\(?[A-Za-z_][\w]*(?:[ \t]*,[ \t]*[A-Za-z_][\w]*)*\)?"
+        r"(?:[ \t]*:[ \t]*[A-Za-z_][\w<>\[\]\?,\. ]*)?)"
+        r"[ \t]+in\b",
+        r"{ \1 =>",
+    )
+    # 8. ``guard cond else { B }`` is one Swift-only form; the rest of the
+    #    function continues after the guard.  We rewrite it to an equivalent
+    #    ``if (!(cond)) { B }`` early so the regular ``if`` pattern handles it.
+    src = _outside_strings_regex(
+        src,
+        r"\bguard[ \t]+(.+?)[ \t]+else[ \t]*\{",
+        r"if (!(\1)) {",
+    )
+    # 9. ``if let NAME = EXPR`` → ``if (let Some(NAME) <- EXPR)``.  The
+    #    standard Cangjie idiom for optional binding.  Done at text level so
+    #    the existing if-chain machinery picks it up verbatim.
+    src = _outside_strings_regex(
+        src,
+        r"\bif[ \t]+let[ \t]+([A-Za-z_]\w*)[ \t]*=[ \t]*",
+        r"if (let Some(\1) <- ",
+    )
+    # The previous rewrite produces a dangling ``(`` that doesn't match the
+    # closing brace; we patch this up below.  Concretely turn
+    #   ``if (let Some(NAME) <- EXPR {``
+    # into
+    #   ``if (let Some(NAME) <- EXPR) {``
+    src = _outside_strings_regex(
+        src,
+        r"(if \(let Some\([A-Za-z_]\w*\) <- [^\n{]+?)[ \t]*\{",
+        r"\1) {",
+    )
+    # 10. Ternary ``cond ? a : b`` → ``(if (cond) { a } else { b })``.
+    #     Very conservative: we only match a ternary that lives on a single
+    #     expression-line, doesn't touch dictionary literals (``[k:v]``), and
+    #     whose ``a`` / ``b`` are simple parenthesisable expressions.
+    src = _rewrite_ternary(src)
     return src, notes
+
+
+def _split_top_level_str_aware(s: str, sep: str) -> List[str]:
+    """Like :func:`_split_top_level` but skips over ``"..."`` string
+    literals, including ones that contain commas or brackets.
+    """
+
+    out: List[str] = []
+    depth = 0
+    buf: List[str] = []
+    i, n = 0, len(s)
+    while i < n:
+        ch = s[i]
+        if ch == '"':
+            if s[i:i + 3] == '"""':
+                end = s.find('"""', i + 3)
+                end = n if end == -1 else end + 3
+                buf.append(s[i:end])
+                i = end
+                continue
+            j = i + 1
+            while j < n and s[j] != '"':
+                if s[j] == "\\" and j + 1 < n:
+                    buf.append(s[i:j + 2])
+                    i = j + 2
+                    j = i
+                    continue
+                j += 1
+            buf.append(s[i:j + 1])
+            i = j + 1
+            continue
+        if ch in "([{<":
+            depth += 1
+        elif ch in ")]}>":
+            depth = max(depth - 1, 0)
+        if ch == sep and depth == 0:
+            out.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+        i += 1
+    if buf:
+        out.append("".join(buf))
+    return out
+
+
+def _rewrite_multi_arg_print(src: str) -> str:
+    """Rewrite ``print(a, b, c)`` → ``print("${a} ${b} ${c}")`` so the
+    standard Cangjie single-argument ``println`` produces the same surface
+    output that Swift's variadic ``print`` does (space-separated).
+    """
+
+    out: List[str] = []
+    i, n = 0, len(src)
+    while i < n:
+        # Find a literal ``print(`` token preceded by a word-boundary char.
+        if (
+            i + 6 <= n and src[i:i + 6] == "print("
+            and (i == 0 or not (src[i - 1].isalnum() or src[i - 1] == "_" or src[i - 1] == "."))
+        ):
+            # Match balanced parens.
+            depth = 1
+            j = i + 6
+            while j < n and depth > 0:
+                c = src[j]
+                if c == '"':
+                    # Skip string literal.
+                    if src[j:j + 3] == '"""':
+                        end = src.find('"""', j + 3)
+                        j = n if end == -1 else end + 3
+                        continue
+                    k = j + 1
+                    while k < n and src[k] != '"':
+                        if src[k] == "\\" and k + 1 < n:
+                            k += 2
+                            continue
+                        k += 1
+                    j = k + 1
+                    continue
+                if c == "(":
+                    depth += 1
+                elif c == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            if depth == 0:
+                inner = src[i + 6:j]
+                # Top-level comma split — string-aware.
+                parts = _split_top_level_str_aware(inner, ",")
+                if len(parts) >= 2:
+                    parts = [p.strip() for p in parts if p.strip()]
+                    body = " ".join("${" + p + "}" for p in parts)
+                    out.append('print("' + body + '")')
+                    i = j + 1
+                    continue
+        out.append(src[i])
+        i += 1
+    return "".join(out)
+
+
+_PROBE_DONE = True
+
+
+def _rewrite_ternary(src: str) -> str:
+    """Translate Swift ternary ``a ? b : c`` into a Cangjie ``if`` expression.
+
+    We avoid known false-positives:
+    * dictionary literal ``[k: v, ...]`` (the ``?`` doesn't appear before ``:``);
+    * type ascription ``name : Type`` (no preceding ``?``);
+    * optional type ``T?`` (no following ``:``).
+    """
+
+    def repl(m: re.Match) -> str:
+        head, a, b = m.group(1), m.group(2).strip(), m.group(3).strip()
+        return f"{head} (if ({head}) {{ {a} }} else {{ {b} }})"  # placeholder
+
+    # The naive ``head`` form above ignores that ``head`` is just the trailing
+    # character of the condition expression — re-implement properly by walking.
+    out: List[str] = []
+    i, n = 0, len(src)
+    while i < n:
+        # Skip strings & comments verbatim.
+        if src[i] == '"':
+            if src[i:i + 3] == '"""':
+                end = src.find('"""', i + 3)
+                end = n if end == -1 else end + 3
+            else:
+                j = i + 1
+                while j < n and src[j] != '"':
+                    if src[j] == "\\" and j + 1 < n:
+                        j += 2
+                        continue
+                    j += 1
+                end = j + 1
+            out.append(src[i:end])
+            i = end
+            continue
+        if src[i] == "/" and i + 1 < n and src[i + 1] in ("/", "*"):
+            if src[i + 1] == "/":
+                end = src.find("\n", i)
+                end = n if end == -1 else end
+            else:
+                end = src.find("*/", i)
+                end = n if end == -1 else end + 2
+            out.append(src[i:end])
+            i = end
+            continue
+        if src[i] == "?":
+            # Try to match a ternary starting near here.  Find a ``:`` later
+            # on the same line at the same paren/bracket level; ``?`` and ``:``
+            # paired only when neither side touches a dict literal.
+            depth_p = depth_s = depth_b = 0
+            j = i + 1
+            colon_pos = -1
+            line_end = src.find("\n", i)
+            if line_end == -1:
+                line_end = n
+            while j < line_end:
+                c = src[j]
+                if c == "(":
+                    depth_p += 1
+                elif c == ")":
+                    if depth_p == 0:
+                        break
+                    depth_p -= 1
+                elif c == "[":
+                    depth_s += 1
+                elif c == "]":
+                    if depth_s == 0:
+                        break
+                    depth_s -= 1
+                elif c == "{":
+                    depth_b += 1
+                elif c == "}":
+                    if depth_b == 0:
+                        break
+                    depth_b -= 1
+                elif c == ":" and depth_p == 0 and depth_s == 0 and depth_b == 0:
+                    colon_pos = j
+                    break
+                elif c == "?" and depth_p == 0 and depth_s == 0 and depth_b == 0:
+                    # Nested ternary — bail out.
+                    break
+                elif c == ";":
+                    break
+                j += 1
+            if colon_pos != -1:
+                # Find start of ``cond`` walking backwards from i-1.
+                k = i - 1
+                while k >= 0 and src[k] in " \t":
+                    k -= 1
+                cond_end = k + 1
+                cond_start = cond_end
+                depth_p = depth_s = 0
+                while cond_start > 0:
+                    c = src[cond_start - 1]
+                    if c == ")":
+                        depth_p += 1
+                    elif c == "(":
+                        if depth_p == 0:
+                            break
+                        depth_p -= 1
+                    elif c == "]":
+                        depth_s += 1
+                    elif c == "[":
+                        if depth_s == 0:
+                            break
+                        depth_s -= 1
+                    elif c in "\n;,{":
+                        break
+                    elif c in "=" and depth_p == 0 and depth_s == 0:
+                        # left-hand side of ``=`` ends the condition.
+                        # But ``==`` / ``!=`` / ``<=`` / ``>=`` are operators.
+                        if cond_start - 2 >= 0 and src[cond_start - 2] in "=!<>":
+                            cond_start -= 1
+                            continue
+                        break
+                    cond_start -= 1
+                # If the cond starts with a Swift statement-keyword
+                # (``return`` / ``throw`` / ``yield``), nudge the start past it
+                # so we don't pull the keyword into the ternary's condition.
+                cond_text = src[cond_start:cond_end].lstrip()
+                for kw in ("return", "throw", "yield"):
+                    if cond_text.startswith(kw + " ") or cond_text.startswith(kw + "\t"):
+                        nudge = src[cond_start:cond_end].find(kw) + len(kw)
+                        cond_start += nudge
+                        break
+                cond_text = src[cond_start:cond_end].strip()
+                then_text = src[i + 1:colon_pos].strip()
+                # The else branch runs from ``colon_pos+1`` to end of line or a
+                # statement terminator at the outer level.
+                end_pos = colon_pos + 1
+                depth_p = depth_s = depth_b = 0
+                while end_pos < n:
+                    c = src[end_pos]
+                    if c == "(":
+                        depth_p += 1
+                    elif c == ")":
+                        if depth_p == 0:
+                            break
+                        depth_p -= 1
+                    elif c == "[":
+                        depth_s += 1
+                    elif c == "]":
+                        if depth_s == 0:
+                            break
+                        depth_s -= 1
+                    elif c == "{":
+                        depth_b += 1
+                    elif c == "}":
+                        if depth_b == 0:
+                            break
+                        depth_b -= 1
+                    elif c in "\n;," and depth_p == 0 and depth_s == 0 and depth_b == 0:
+                        break
+                    end_pos += 1
+                else_text = src[colon_pos + 1:end_pos].strip()
+                # Quick sanity: cond/then/else must all be non-empty and the
+                # condition mustn't end with an "expression-incomplete" op.
+                if cond_text and then_text and else_text and not cond_text.endswith(("=", "+", "-", "*", "/", "%", "<", ">", "!")):
+                    replacement = f"(if ({cond_text}) {{ {then_text} }} else {{ {else_text} }})"
+                    # Splice: replace src[cond_start:end_pos] with replacement.
+                    # ``out`` so far contains src[:i]; we need to rewind ``out``
+                    # by (i - cond_start) characters and then emit replacement.
+                    rewind = i - cond_start
+                    if rewind > 0:
+                        joined = "".join(out)
+                        joined = joined[:len(joined) - rewind]
+                        out = [joined]
+                    out.append(replacement)
+                    i = end_pos
+                    continue
+        out.append(src[i])
+        i += 1
+    return "".join(out)
 
 
 def _outside_strings_regex(src: str, pattern: str, repl: str) -> str:
@@ -688,21 +1029,46 @@ def _render_tokens(tokens: List[Token]) -> str:
     binary_ops = {"+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=",
                   "&&", "||", "??", "&", "|", "^", "<<", ">>", "**",
                   "+=", "-=", "*=", "/=", "%=", "=", "=>", "->"}
+    # Tokens that, when they directly precede a ``-``/``+``/``!``, indicate
+    # that the operator is **unary** (not binary).  In that case we render
+    # without a leading space and without a separating space after.
+    unary_prev_values = {
+        "(", "[", "{", ",", ";", ":", "?",
+        "=", "+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=",
+        "&&", "||", "??", "->", "=>", "+=", "-=", "*=", "/=", "%=",
+        "return", "throw", "if", "while", "else", "case", "in",
+    }
     out: List[str] = []
     for i, t in enumerate(tokens):
         if i > 0:
             prev = tokens[i - 1]
+            # Detect unary ``-`` / ``+`` / ``!`` after a value/operator boundary.
+            is_unary = (
+                t.value in ("-", "+", "!")
+                and (prev.value in unary_prev_values or prev.kind == "KEYWORD")
+            )
+            # Following token can be glued if the previous one was a unary op.
+            prev_is_unary = (
+                prev.value in ("-", "+", "!")
+                and i >= 2
+                and (
+                    tokens[i - 2].value in unary_prev_values
+                    or tokens[i - 2].kind == "KEYWORD"
+                )
+            )
             need_space = False
             if _is_word(prev.value) and _is_word(t.value):
                 need_space = True
             elif prev.value == "," and t.value not in (")", "]", "}"):
                 need_space = True
-            elif t.value in binary_ops:
+            elif t.value in binary_ops and not is_unary:
                 need_space = True
-            elif prev.value in binary_ops:
+            elif prev.value in binary_ops and not prev_is_unary:
                 need_space = True
             elif prev.value == ":":
                 need_space = True
+            if is_unary or prev_is_unary:
+                need_space = False
             if need_space:
                 out.append(" ")
         out.append(t.value)
@@ -1002,6 +1368,52 @@ def _is_body_slot(slot: str) -> bool:
 _TYPE_ALIASES: dict = {}
 _CLASS_METHODS: dict = {}
 _CLASS_PARENT: dict = {}
+_OVERLOADABLE_OPS = {
+    "+", "-", "*", "/", "%", "**",
+    "==", "!=", "<", ">", "<=", ">=",
+    "&", "|", "^", "<<", ">>",
+}
+
+
+def _rewrite_static_operator(text: str) -> str:
+    """Rewrite a ``public static func OP(a: T, b: T): R { ... }`` block
+    emitted by the ``static_method_*`` patterns into an idiomatic Cangjie
+    operator overload ``public operator func OP(b: T): R { ... }`` where the
+    first parameter's identifier is replaced by ``this`` throughout the body.
+    """
+
+    m = re.match(
+        r"^(\s*)public static func "
+        r"(\S+?)\s*\(\s*([A-Za-z_]\w*)\s*:\s*([^,)]+?)\s*,\s*"
+        r"([A-Za-z_]\w*)\s*:\s*([^,)]+?)\s*\)\s*(?::\s*([^\{]+?))?\{\s*\n",
+        text,
+        flags=re.DOTALL,
+    )
+    if not m:
+        return text
+    indent, op, a_name, _a_ty, b_name, b_ty, ret = m.groups()
+    header_end = m.end()
+    # Find matching ``}`` for the body.
+    depth = 1
+    i = header_end
+    while i < len(text) and depth > 0:
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        i += 1
+    if depth != 0:
+        return text
+    body = text[header_end:i]
+    body = re.sub(rf"\b{re.escape(a_name)}\b", "this", body)
+    ret_clause = f": {ret.strip()} " if ret else ""
+    new = (
+        f"{indent}public operator func {op}({b_name}: {b_ty.strip()}){ret_clause}"
+        + "{\n" + body + "}"
+    )
+    return text[:m.start()] + new + text[i + 1:]
 
 
 def _emit(pat: Pattern, bindings: dict, ctx: Optional[str] = None) -> str:
@@ -1012,7 +1424,7 @@ def _emit(pat: Pattern, bindings: dict, ctx: Optional[str] = None) -> str:
         body = _convert_switch_body(bindings.get("BODY", []))
         return out.replace("$EXPR", expr).replace("$SWBODY", body)
 
-    if pat.name == "enum_decl":
+    if pat.name in ("enum_decl", "enum_raw_decl"):
         name = _convert_expr(bindings.get("NAME", [])).strip()
         body = _convert_enum_body(bindings.get("BODY", []))
         return out.replace("$NAME", name).replace("$ENUMBODY", body)
@@ -1107,8 +1519,22 @@ def _emit(pat: Pattern, bindings: dict, ctx: Optional[str] = None) -> str:
     # implicit memberwise init; Cangjie does not.
     if pat.name in ("struct_decl", "struct_impl_decl", "class_decl",
                     "class_decl_inherit", "class_generic_decl",
-                    "class_generic_decl_inherit"):
+                    "class_generic_decl_inherit", "final_class_decl",
+                    "final_class_decl_inherit", "public_class_decl"):
         out = _ensure_memberwise_init(out)
+
+    # Operator overload: Swift writes binary operators as ``static func +``
+    # taking two operands, but Cangjie's operator overloads are *instance*
+    # methods on the left operand.  Rewrite by dropping the first param and
+    # renaming it to ``this`` throughout the body.
+    if pat.name in ("static_method_typed", "static_method_no_ret"):
+        name_toks = bindings.get("NAME", [])
+        if (
+            len(name_toks) == 1
+            and name_toks[0].kind == "PUNCT"
+            and name_toks[0].value in _OVERLOADABLE_OPS
+        ):
+            out = _rewrite_static_operator(out)
 
 
     # Post-substitution: wrap bare collection literals to match a typed
@@ -1125,7 +1551,10 @@ def _emit(pat: Pattern, bindings: dict, ctx: Optional[str] = None) -> str:
             m = re.search(r"=\s*\[(.*)\]\s*$", out, flags=re.DOTALL)
             if m:
                 inner = m.group(1).strip()
-                if ty_text.startswith("HashMap<"):
+                if not inner:
+                    # Empty literal — use the zero-arg constructor directly.
+                    out = out[:m.start()] + f"= {ty_text}()" + out[m.end():]
+                elif ty_text.startswith("HashMap<"):
                     # Swift dict literal ``[k1: v1, k2: v2]`` → list of pairs.
                     pairs = []
                     for kv in _split_top_level(inner, ","):
@@ -1407,6 +1836,11 @@ def _convert_enum_body(tokens: List[Token]) -> str:
                 i += 1
             # Split on top-level commas.
             text = _render_tokens(buf).strip()
+            # Strip raw-value assignment ``= 0`` / ``= "red"`` per variant.
+            text = re.sub(r"\s*=\s*[^,]+", "", text)
+            # Translate primitive type names inside payload tuples
+            # (``rect(Int, Int)`` → ``rect(Int64, Int64)``).
+            text = _apply_primitive_types(text)
             for v in _split_top_level(text, ","):
                 v = v.strip()
                 if v:
@@ -1457,10 +1891,28 @@ def _convert_switch_body(tokens: List[Token]) -> str:
                 lab_tokens.append(toks[i])
                 i += 1
             i += 1  # skip ``:``
-            # Split labels by top-level commas.
+            # Split labels by top-level commas (depth-aware so that
+            # ``case .rect(let w, let h):`` stays a single label).
             buf: List[Token] = []
+            depth_p = depth_s = depth_b = 0
             for tt in lab_tokens:
-                if tt.kind == "PUNCT" and tt.value == ",":
+                v = tt.value
+                if v == "(":
+                    depth_p += 1
+                elif v == ")":
+                    depth_p = max(depth_p - 1, 0)
+                elif v == "[":
+                    depth_s += 1
+                elif v == "]":
+                    depth_s = max(depth_s - 1, 0)
+                elif v == "{":
+                    depth_b += 1
+                elif v == "}":
+                    depth_b = max(depth_b - 1, 0)
+                if (
+                    tt.kind == "PUNCT" and v == ","
+                    and depth_p == 0 and depth_s == 0 and depth_b == 0
+                ):
                     if buf:
                         cur_labels.append(buf)
                     buf = []
@@ -1500,6 +1952,9 @@ def _convert_switch_body(tokens: List[Token]) -> str:
             label_str = "_"
         else:
             label_str = " | ".join(_convert_expr(l) for l in labels if l)
+            # Strip Swift ``let `` binders inside enum-payload destructuring:
+            # ``case rect(let w, let h)`` → ``case rect(w, h)``.
+            label_str = re.sub(r"\blet\s+", "", label_str)
         out_lines.append(f"    case {label_str} =>")
         body_lines = [ln for ln in body_text.split("\n") if ln.strip()]
         if not body_lines:

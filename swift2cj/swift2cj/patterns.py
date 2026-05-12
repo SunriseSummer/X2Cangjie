@@ -250,6 +250,12 @@ CHUNK_PATTERNS: List[Pattern] = [
         "enum $NAME {\n$ENUMBODY\n}",
         ("NAME", "BODY"),
     ),
+    Pattern(
+        "enum_raw_decl",
+        "enum $NAME : $BASE { $BODY }",
+        "enum $NAME {\n$ENUMBODY\n}",
+        ("NAME", "BASE", "BODY"),
+    ),
 
     # ---- struct / class / protocol --------------------------------------- #
     Pattern(
@@ -443,6 +449,26 @@ CHUNK_PATTERNS: List[Pattern] = [
         "func $NAME ( $PARAMS )",
         "func $NAME($PARAMS): Unit",
         ("NAME", "PARAMS"),
+    ),
+
+    # ---- final / open class variants ------------------------------------- #
+    Pattern(
+        "final_class_decl",
+        "final class $NAME { $BODY }",
+        "class $NAME {\n$BODY\n}",
+        ("NAME", "BODY"),
+    ),
+    Pattern(
+        "final_class_decl_inherit",
+        "final class $NAME : $BASE { $BODY }",
+        "class $NAME <: $BASE {\n$BODY\n}",
+        ("NAME", "BASE", "BODY"),
+    ),
+    Pattern(
+        "public_class_decl",
+        "public class $NAME { $BODY }",
+        "public open class $NAME {\n$BODY\n}",
+        ("NAME", "BODY"),
     ),
 
     # ---- expression statement (very generic, low priority) ---------------- #
