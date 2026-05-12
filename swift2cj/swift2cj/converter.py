@@ -1503,6 +1503,12 @@ def _wrap_call_site_array_literals(src: str) -> str:
                     k -= 1
                 if k >= 0:
                     prev = out[k]
+                # Already inside an explicit ``ArrayList<T>([...])``
+                # constructor: keep its backing array literal unchanged.
+                if re.search(r"\bArrayList\s*<[^<>]+>\s*\(\s*$", "".join(out[-96:])):
+                    out.append(ch)
+                    i += 1
+                    continue
                 # Subscript ``foo[x]`` — prev is identifier letter / ``)`` / ``]``.
                 if prev and (prev.isalnum() or prev == "_" or prev in ")]"):
                     out.append(ch)
@@ -1612,10 +1618,39 @@ def _guess_elem_type_extended(inner: str) -> str:
     parts = _split_top_level(inner, ",")
     if not parts:
         return ""
+    # Homogeneous nested array literals, e.g. ``[[1], [2, 3]]`` should infer
+    # ``ArrayList<ArrayList<Int64>>`` after recursive wrapping.
+    nested_elem = ""
+    all_nested_arrays = True
+    for p in parts:
+        p = p.strip()
+        if not (p.startswith("[") and p.endswith("]")):
+            all_nested_arrays = False
+            break
+        nested_inner = p[1:-1].strip()
+        if not nested_inner or not _is_pair_free(nested_inner):
+            all_nested_arrays = False
+            break
+        sub_ty = _guess_elem_type_extended(nested_inner)
+        if not sub_ty:
+            all_nested_arrays = False
+            break
+        if nested_elem and nested_elem != sub_ty:
+            return ""
+        nested_elem = sub_ty
+    if all_nested_arrays and nested_elem:
+        return f"ArrayList<{nested_elem}>"
     ctor_name = ""
     for p in parts:
         p = p.strip()
         if not p:
+            continue
+        m_generic = re.match(r"^(ArrayList<[^<>]+>|HashSet<[^<>]+>|HashMap<[^<>]+>)\s*\(", p)
+        if m_generic:
+            nm = m_generic.group(1)
+            if ctor_name and ctor_name != nm:
+                return ""
+            ctor_name = nm
             continue
         m = re.match(r"^([A-Z][A-Za-z_0-9]*(?:\.[A-Za-z_][A-Za-z_0-9]*)?)\s*\(", p)
         if m:
@@ -2863,16 +2898,17 @@ def _emit(pat: Pattern, bindings: dict, ctx: Optional[str] = None) -> str:
     # ``.remove``.  Promote homogeneous integer/float/string literals to the
     # corresponding ``ArrayList<…>`` so the value behaves like a Swift Array.
     if pat.name in ("let_inferred", "var_inferred"):
-        m = re.search(r"=\s*\[(.+?)\]\s*$", out, flags=re.DOTALL)
+        m = re.search(r"=\s*\[(.+)\]\s*$", out, flags=re.DOTALL)
         if m:
             inner = m.group(1).strip()
             # Skip dictionary literals (``k: v``) — let user type them.
             if ":" not in inner or _is_pair_free(inner):
-                elem_ty = _guess_elem_type_extended(inner)
+                inner_rec = _wrap_call_site_array_literals(
+                    "(" + inner + ")"
+                )[1:-1]
+                inner_rec = _tighten_generic_spacing(inner_rec)
+                elem_ty = _guess_elem_type_extended(inner_rec)
                 if elem_ty:
-                    inner_rec = _wrap_call_site_array_literals(
-                        "(" + inner + ")"
-                    )[1:-1]
                     out = (
                         out[:m.start()]
                         + f"= ArrayList<{elem_ty}>([{inner_rec}])"
