@@ -1,0 +1,5 @@
+after init: [0, 1, 2, 3] size=4 sum=6
+reversed: [3, 2, 1, 0]
+popped 3: [2, 1, 0] size=3
+squares: [1, 4, 9, 16, 25, 36] sum=91
+rev squares: [36, 25, 16, 9, 4, 1]

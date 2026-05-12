@@ -269,6 +269,33 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     notes: List[str] = []
     # 1. String interpolation first — operates inside string literals.
     src = _convert_string_interpolations(src)
+    # 1a.  Scan for Optional-typed bindings/parameters so subsequent
+    #      transforms can promote ``name!`` to ``name.getOrThrow()`` and
+    #      ``name == nil`` / ``!= nil`` to ``isNone()`` / ``isSome()``.
+    optional_names = _scan_optional_names(src)
+    if optional_names:
+        # Rewrite force-unwrap *only* for known-optional names.
+        for nm in optional_names:
+            # ``name!`` (force-unwrap) → ``name.getOrThrow()``.
+            src = _outside_strings_regex(
+                src, rf"\b{re.escape(nm)}\!(?!=)", f"{nm}.getOrThrow()"
+            )
+        # Same inside ``${…}`` interpolations.
+        def _opt_in_interp(inner: str, _names=tuple(optional_names)) -> str:
+            for nm in _names:
+                inner = re.sub(
+                    rf"\b{re.escape(nm)}\!(?!=)", f"{nm}.getOrThrow()", inner
+                )
+            return inner
+        src = _rewrite_inside_interpolations(src, _opt_in_interp)
+        # Equality with nil / None.
+        opt_alt = "|".join(re.escape(n) for n in optional_names)
+        src = _outside_strings_regex(
+            src, rf"\b({opt_alt})\s*==\s*(?:nil|None)\b", r"\1.isNone()"
+        )
+        src = _outside_strings_regex(
+            src, rf"\b({opt_alt})\s*!=\s*(?:nil|None)\b", r"\1.isSome()"
+        )
     # 2. Literal text replacements (member-name calls etc.).  These are
     #    distinctive enough that they cannot collide with Swift keywords.
     src = _outside_strings_replace(
@@ -293,6 +320,15 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     # ``isEmpty()`` as a method.  Add ``()`` only when not already followed
     # by ``(`` (e.g. ``.isEmpty()`` user-method call).
     src = _outside_strings_regex(src, r"\.isEmpty(?!\w|\()", ".isEmpty()")
+    # Same two rewrites, but applied to expressions embedded inside
+    # ``${…}`` interpolation blocks of string literals.
+    def _prop_rewrite(inner: str) -> str:
+        inner = re.sub(r"\.count(?!\w|\()", ".size", inner)
+        inner = re.sub(r"\.isEmpty(?!\w|\()", ".isEmpty()", inner)
+        # Force-unwrap inside interpolations: ``cur!.value`` → ``cur.value``.
+        inner = re.sub(r"([A-Za-z_0-9\)\]])\!(?!=)", r"\1", inner)
+        return inner
+    src = _rewrite_inside_interpolations(src, _prop_rewrite)
     # 3. Word-boundary identifier swaps.
     src = _outside_strings_word_replace(
         src,
@@ -361,6 +397,25 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     #     Whether the param-list parser sees it or not, Cangjie has no
     #     ``inout`` and reference types pass by reference anyway.
     src = _outside_strings_regex(src, r"\binout\b\s*", "")
+    # 6b-iii-b.  Swift dictionary subscript returns ``T?``; in Cangjie the
+    #     HashMap subscript returns ``T`` (and throws on miss).  The
+    #     Optional-aware ``dict[k] ?? default`` idiom must be rewritten to
+    #     ``dict.get(k) ?? default``.
+    src = _outside_strings_regex(
+        src,
+        r"\b([A-Za-z_]\w*)\[([^\[\]]+)\]\s*\?\?",
+        r"\1.get(\2) ??",
+    )
+    # 6b-iv.  Collection reassignment ``xs = []`` → ``xs.clear()``.
+    #     In Swift this re-binds to an empty Array; in Cangjie ArrayList is
+    #     a reference type so the equivalent is to clear it in place.  Only
+    #     fires when *not* preceded by ``let`` / ``var`` (which would make
+    #     it a *declaration* instead — those are typed elsewhere).
+    src = _outside_strings_regex(
+        src,
+        r"(?<!\blet )(?<!\bvar )\b([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*=\s*\[\]",
+        r"\1.clear()",
+    )
     # 6c. Multi-argument ``print(a, b, c)`` — Swift joins args with a single
     #     space; rewrite to ``print("${a} ${b} ${c}")`` so the single-arg
     #     ``println`` we lower to can render the same output.
@@ -966,11 +1021,106 @@ def _outside_strings_regex(src: str, pattern: str, repl) -> str:
     )
 
 
-_LEADING_ENUM_DOT_RE = re.compile(r"(?<![A-Za-z0-9_)\]])\.(?=[A-Za-z_])")
+def _scan_optional_names(src: str) -> set:
+    """Return the set of identifier names declared with an Optional type
+    (``Type?``) anywhere in *src*.  Includes ``let``/``var`` bindings,
+    parameters and class/struct field declarations.
+
+    Best-effort textual scan; the names are global (no scope tracking) but
+    cross-name collisions are rare in practice and the downstream rewrite
+    only kicks in for names actually present in the set.
+    """
+
+    names: set = set()
+    # Variable / field declarations:  ``[let|var] NAME : TYPE?``
+    decl_re = re.compile(
+        r"\b(?:let|var)\s+([A-Za-z_]\w*)\s*:\s*[A-Za-z_][\w<>\[\], ]*\?"
+    )
+    for m in decl_re.finditer(src):
+        names.add(m.group(1))
+    # Function / init parameters:  ``NAME : TYPE?`` (catches both
+    # external-label and positional forms thanks to permissive boundary).
+    param_re = re.compile(
+        r"(?:[(,]\s*(?:_\s+)?)([A-Za-z_]\w*)\s*:\s*[A-Za-z_][\w<>\[\], ]*\?"
+    )
+    for m in param_re.finditer(src):
+        names.add(m.group(1))
+    # Initialiser-with-nil:  ``var NAME = nil`` / ``let NAME = nil``.
+    for m in re.finditer(
+        r"\b(?:let|var)\s+([A-Za-z_]\w*)\s*=\s*nil\b", src
+    ):
+        names.add(m.group(1))
+    # Propagate: ``var/let NAME = <already-optional-NAME>`` carries Optional
+    # through.  Iterate to a fixed point to chain ``a = b; c = a`` etc.
+    rhs_re = re.compile(
+        r"\b(?:let|var)\s+([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*)\b"
+    )
+    changed = True
+    while changed:
+        changed = False
+        for m in rhs_re.finditer(src):
+            if m.group(2) in names and m.group(1) not in names:
+                names.add(m.group(1))
+                changed = True
+    return names
+
+
+def _scan_enum_cases(src: str) -> dict:
+    """Scan *src* for ``enum Name { case a; case b(...); … }`` declarations
+    and return a mapping ``case_name → enum_name`` for every case that
+    appears in **exactly one** enum.  Ambiguous case names (defined by
+    multiple enums) map to ``""`` so the caller can leave them alone.
+    """
+
+    cases: dict = {}
+    ambig: set = set()
+
+    # Find enum bodies via balanced-brace scan from each ``enum NAME {``.
+    enum_re = re.compile(r"\benum\s+([A-Za-z_]\w*)(?:\s*:\s*[^{]+)?\s*\{")
+    case_re = re.compile(r"\bcase\s+([A-Za-z_]\w*)")
+    pos = 0
+    while True:
+        m = enum_re.search(src, pos)
+        if not m:
+            break
+        enum_name = m.group(1)
+        brace_start = m.end() - 1
+        depth = 1
+        j = brace_start + 1
+        n = len(src)
+        while j < n and depth > 0:
+            c = src[j]
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+            j += 1
+        body = src[brace_start + 1:j - 1]
+        for cm in case_re.finditer(body):
+            cn = cm.group(1)
+            if cn in cases and cases[cn] != enum_name:
+                ambig.add(cn)
+            else:
+                cases[cn] = enum_name
+        pos = j
+    for a in ambig:
+        cases[a] = ""
+    return cases
+
+
+_LEADING_ENUM_DOT_RE = re.compile(r"(?<![A-Za-z0-9_)\]!?])\.([A-Za-z_]\w*)")
 
 
 def _strip_leading_enum_dot(src: str) -> str:
-    """Strip Swift leading-dot enum shorthand outside string/comment regions."""
+    """Strip Swift leading-dot enum shorthand outside string/comment regions.
+
+    When a global ``case_name → enum_name`` map is available (built upstream
+    by :func:`_scan_enum_cases`) and the name is *unambiguous*, the leading
+    dot is replaced with ``EnumName.`` so the resulting Cangjie reference is
+    fully qualified (Cangjie has no leading-dot shorthand).
+    """
+
+    case_map = _scan_enum_cases(src)
 
     out: List[str] = []
     i, n = 0, len(src)
@@ -1005,7 +1155,15 @@ def _strip_leading_enum_dot(src: str) -> str:
         out.append(ch)
         i += 1
     text = "".join(out)
-    return _LEADING_ENUM_DOT_RE.sub("", text)
+
+    def _repl(m: "re.Match") -> str:
+        name = m.group(1)
+        enum_n = case_map.get(name, None)
+        if enum_n:
+            return f"{enum_n}.{name}"
+        return name
+
+    return _LEADING_ENUM_DOT_RE.sub(_repl, text)
 
 
 _PRIMITIVE_MAP = {

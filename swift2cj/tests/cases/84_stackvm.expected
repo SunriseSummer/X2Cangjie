@@ -1,0 +1,9 @@
+p1 prints = [14]
+p1 final stack=[14]
+p1 trace size = 7
+p2 prints = [-15]
+p2 final stack=[-15]
+p3 prints = [5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5]
+p3 trace size = 200
+p3 halted = false
+p4 halted = true stack=0
