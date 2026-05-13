@@ -269,6 +269,15 @@ def _rewrite_source(src: str) -> Tuple[str, List[str]]:
     notes: List[str] = []
     # 1. String interpolation first — operates inside string literals.
     src = _convert_string_interpolations(src)
+    # 1a-pre-0.  Normalize higher-level Swift library/control-flow idioms into
+    # forms the existing token/template pipeline can translate semantically.
+    src = _rewrite_named_tuple_accesses(src)
+    src = _rewrite_array_repeating_calls(src)
+    src = _rewrite_reversed_calls(src)
+    src = _rewrite_min_max_calls(src)
+    src = _rewrite_stride_for_loops(src)
+    src = _rewrite_guard_condition_commas(src)
+    src = _rewrite_empty_arrays_in_named_tuple_returns(src)
     # 1a-pre.  Swift iterates ``String`` as Character values.  Cangjie 1.x
     #         string iteration yields bytes for ASCII text, so comparisons like
     #         ``for ch in title { if ch == \"#\" ... }`` need byte literals.
@@ -1526,6 +1535,284 @@ def _scan_dict_names(src: str) -> set:
     return names
 
 
+def _find_matching(src: str, open_idx: int, open_ch: str, close_ch: str) -> int:
+    depth = 1
+    i = open_idx + 1
+    in_str = False
+    esc = False
+    while i < len(src):
+        ch = src[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        else:
+            if ch == '"':
+                in_str = True
+            elif ch == open_ch:
+                depth += 1
+            elif ch == close_ch:
+                depth -= 1
+                if depth == 0:
+                    return i
+        i += 1
+    return -1
+
+
+def _parse_labeled_call_args(arg_text: str) -> dict:
+    out: dict = {}
+    for part in _split_top_level(arg_text, ","):
+        if ":" not in part:
+            continue
+        label, value = part.split(":", 1)
+        out[label.strip()] = value.strip()
+    return out
+
+
+def _parse_array_repeating_call(expr: str) -> Optional[Tuple[str, str]]:
+    expr = expr.strip()
+    if not expr.startswith("Array"):
+        return None
+    m = re.match(r"Array\s*\(", expr)
+    if not m:
+        return None
+    close = _find_matching(expr, m.end() - 1, "(", ")")
+    if close != len(expr) - 1:
+        return None
+    args = _parse_labeled_call_args(expr[m.end():close])
+    if "repeating" not in args or "count" not in args:
+        return None
+    return args["repeating"], args["count"]
+
+
+def _rewrite_array_repeating_calls(src: str) -> str:
+    """Swift ``Array(repeating:count:)`` -> helper-backed ArrayList creation.
+
+    The nested two-dimensional form gets its own helper so each row is a fresh
+    ArrayList rather than repeated references to the same mutable row.
+    """
+
+    out: List[str] = []
+    i = 0
+    while i < len(src):
+        m = re.search(r"\bArray\s*\(", src[i:])
+        if not m:
+            out.append(src[i:])
+            break
+        start = i + m.start()
+        paren = i + m.end() - 1
+        close = _find_matching(src, paren, "(", ")")
+        if close < 0:
+            out.append(src[i:])
+            break
+        call = src[start:close + 1]
+        parsed = _parse_array_repeating_call(call)
+        if not parsed:
+            out.append(src[i:close + 1])
+            i = close + 1
+            continue
+        value, count = parsed
+        nested = _parse_array_repeating_call(value)
+        out.append(src[i:start])
+        if nested:
+            inner_value, inner_count = nested
+            out.append(f"_swiftArray2DRepeating({inner_value}, {count}, {inner_count})")
+        else:
+            out.append(f"_swiftArrayRepeating({value}, {count})")
+        i = close + 1
+    return "".join(out)
+
+
+def _rewrite_reversed_calls(src: str) -> str:
+    return _outside_strings_regex(
+        src,
+        r"\b([A-Za-z_]\w*(?:\[[^\]]+\])?)\.reversed\(\)",
+        r"_swiftArrayReversed(\1)",
+    )
+
+
+def _rewrite_min_max_calls(src: str) -> str:
+    """Rewrite Swift stdlib ``min``/``max`` two-arg calls to Cangjie if-exprs."""
+
+    out: List[str] = []
+    i = 0
+    while i < len(src):
+        m = re.search(r"(?<![\w.])(min|max)\s*\(", src[i:])
+        if not m:
+            out.append(src[i:])
+            break
+        name = m.group(1)
+        start = i + m.start()
+        paren = i + m.end() - 1
+        if re.search(r"\bfunc\s+$", src[max(0, start - 12):start]):
+            out.append(src[i:paren + 1])
+            i = paren + 1
+            continue
+        close = _find_matching(src, paren, "(", ")")
+        if close < 0:
+            out.append(src[i:])
+            break
+        args = _split_top_level(src[paren + 1:close], ",")
+        if len(args) != 2:
+            out.append(src[i:close + 1])
+            i = close + 1
+            continue
+        a = re.sub(r"//.*", "", args[0]).strip()
+        b = re.sub(r"//.*", "", args[1]).strip()
+        if not a or not b:
+            out.append(src[i:close + 1])
+            i = close + 1
+            continue
+        op = "<" if name == "min" else ">"
+        out.append(src[i:start])
+        out.append(f"(if ({a} {op} {b}) {{ {a} }} else {{ {b} }})")
+        i = close + 1
+    return "".join(out)
+
+
+def _rewrite_stride_for_loops(src: str) -> str:
+    """Lower ``for x in stride(from:..., through/to:..., by:...)`` to while."""
+
+    out: List[str] = []
+    i = 0
+    pat = re.compile(r"\bfor\s+([A-Za-z_]\w*)\s+in\s+stride\s*\(")
+    while i < len(src):
+        m = pat.search(src, i)
+        if not m:
+            out.append(src[i:])
+            break
+        var = m.group(1)
+        paren = m.end() - 1
+        close = _find_matching(src, paren, "(", ")")
+        if close < 0:
+            out.append(src[i:])
+            break
+        j = close + 1
+        while j < len(src) and src[j].isspace():
+            j += 1
+        if j >= len(src) or src[j] != "{":
+            out.append(src[i:close + 1])
+            i = close + 1
+            continue
+        body_end = _find_matching(src, j, "{", "}")
+        if body_end < 0:
+            out.append(src[i:])
+            break
+        args = _parse_labeled_call_args(src[paren + 1:close])
+        start_expr = args.get("from")
+        end_expr = args.get("through") or args.get("to")
+        step_expr = args.get("by")
+        if not start_expr or not end_expr or not step_expr:
+            out.append(src[i:body_end + 1])
+            i = body_end + 1
+            continue
+        negative = step_expr.strip().startswith("-")
+        inclusive = "through" in args
+        if negative:
+            cond_op = ">=" if inclusive else ">"
+            step_stmt = f"{var} -= {step_expr.strip()[1:].strip()}"
+        else:
+            cond_op = "<=" if inclusive else "<"
+            step_stmt = f"{var} += {step_expr.strip()}"
+        body = src[j + 1:body_end].rstrip()
+        out.append(src[i:m.start()])
+        out.append(
+            f"var {var} = {start_expr}\n"
+            f"while {var} {cond_op} {end_expr} {{"
+            f"{body}\n    {step_stmt}\n}}"
+        )
+        i = body_end + 1
+    return "".join(out)
+
+
+def _rewrite_guard_condition_commas(src: str) -> str:
+    def repl(m: re.Match) -> str:
+        cond = m.group(1)
+        parts = _split_top_level(cond, ",")
+        if len(parts) <= 1:
+            return m.group(0)
+        return "guard " + " && ".join(p.strip() for p in parts) + " else {"
+
+    return _outside_strings_regex(src, r"\bguard\s+(.+?)\s+else\s*\{", repl)
+
+
+def _scan_named_tuple_returns(src: str) -> dict:
+    out: dict = {}
+    func_re = re.compile(r"\bfunc\s+([A-Za-z_]\w*)\s*\([^{}]*\)\s*->\s*\(([^{}]+)\)\s*\{")
+    for m in func_re.finditer(src):
+        labels: List[Tuple[str, str]] = []
+        for elem in _split_top_level(m.group(2), ","):
+            if ":" not in elem:
+                labels = []
+                break
+            label, ty = elem.split(":", 1)
+            labels.append((label.strip(), ty.strip()))
+        if labels:
+            out[m.group(1)] = labels
+    return out
+
+
+def _rewrite_named_tuple_accesses(src: str) -> str:
+    tuple_returns = _scan_named_tuple_returns(src)
+    for fn, labels in tuple_returns.items():
+        binding_re = re.compile(rf"\b(?:let|var)\s+([A-Za-z_]\w*)\s*=\s*{re.escape(fn)}\s*\(")
+        for bm in list(binding_re.finditer(src)):
+            var = bm.group(1)
+            for idx, (label, _ty) in enumerate(labels):
+                src = _outside_strings_regex(
+                    src,
+                    rf"\b{re.escape(var)}\.{re.escape(label)}\b",
+                    f"{var}[{idx}]",
+                )
+                src = _rewrite_inside_interpolations(
+                    src,
+                    lambda inner, _v=var, _l=label, _i=idx: re.sub(
+                        rf"\b{re.escape(_v)}\.{re.escape(_l)}\b",
+                        f"{_v}[{_i}]",
+                        inner,
+                    ),
+                )
+    return src
+
+
+def _rewrite_empty_arrays_in_named_tuple_returns(src: str) -> str:
+    tuple_returns = _scan_named_tuple_returns(src)
+    if not tuple_returns:
+        return src
+    out: List[str] = []
+    pos = 0
+    func_re = re.compile(r"\bfunc\s+([A-Za-z_]\w*)\s*\([^{}]*\)\s*->\s*\(([^{}]+)\)\s*\{")
+    for m in func_re.finditer(src):
+        fn = m.group(1)
+        labels = tuple_returns.get(fn)
+        if not labels:
+            continue
+        body_end = _find_matching(src, m.end() - 1, "{", "}")
+        if body_end < 0:
+            continue
+        out.append(src[pos:m.start()])
+        body = src[m.start():body_end + 1]
+        converted_types = [_convert_type_text(ty) for _label, ty in labels]
+
+        def ret_repl(rm: re.Match) -> str:
+            elems = [p.strip() for p in _split_top_level(rm.group(1), ",")]
+            if len(elems) != len(converted_types):
+                return rm.group(0)
+            for idx, elem in enumerate(elems):
+                if elem == "[]" and converted_types[idx].startswith("ArrayList<"):
+                    elems[idx] = f"{converted_types[idx]}()"
+            return "return (" + ", ".join(elems) + ")"
+
+        body = re.sub(r"return\s*\(([^()\n]*(?:\[[^\]]*\][^()\n]*)*)\)", ret_repl, body)
+        out.append(body)
+        pos = body_end + 1
+    out.append(src[pos:])
+    return "".join(out)
+
+
 def _rewrite_string_iteration_char_comparisons(src: str) -> str:
     """Rewrite ASCII Character comparisons from Swift string iteration.
 
@@ -2147,7 +2434,7 @@ def _scan_parent_class_names(src: str) -> set:
     return parents
 
 
-_LEADING_ENUM_DOT_RE = re.compile(r"(?<![A-Za-z0-9_)\]!?])\.([A-Za-z_]\w*)")
+_LEADING_ENUM_DOT_RE = re.compile(r"(?<![A-Za-z0-9_)\]!\?.])\.([A-Za-z_]\w*)")
 
 
 def _strip_leading_enum_dot(src: str) -> str:
@@ -3512,7 +3799,13 @@ def _convert_type_text(text: str) -> str:
     # Tuple ``(T, U)`` — Cangjie tuples share the same surface form.
     if text.startswith("(") and text.endswith(")") and "," in text:
         inner = text[1:-1]
-        elems = [_convert_type_text(e.strip()) for e in _split_top_level(inner, ",")]
+        elems = []
+        for elem in _split_top_level(inner, ","):
+            elem = elem.strip()
+            if ":" in elem:
+                _label, elem = elem.split(":", 1)
+                elem = elem.strip()
+            elems.append(_convert_type_text(elem))
         return "(" + ", ".join(elems) + ")"
 
     text = _apply_primitive_types(text)
@@ -3890,6 +4183,51 @@ def convert_source(swift_source: str, wrap_main: bool = True) -> ConversionResul
     body_text = "\n\n".join(p for p in parts if p)
     body_text = _tighten_generic_spacing(body_text)
     body_text = _polish_cj_style(body_text)
+    helper_parts: List[str] = []
+    if "_swiftArrayRepeating(" in body_text:
+        helper_parts.append(
+            "func _swiftArrayRepeating<T>(value: T, count: Int64): ArrayList<T> {\n"
+            "    var out = ArrayList<T>()\n"
+            "    var i = 0\n"
+            "    while (i < count) {\n"
+            "        out.add(value)\n"
+            "        i += 1\n"
+            "    }\n"
+            "    return out\n"
+            "}"
+        )
+    if "_swiftArray2DRepeating(" in body_text:
+        helper_parts.append(
+            "func _swiftArray2DRepeating<T>(value: T, rows: Int64, cols: Int64): ArrayList<ArrayList<T>> {\n"
+            "    var out = ArrayList<ArrayList<T>>()\n"
+            "    var i = 0\n"
+            "    while (i < rows) {\n"
+            "        var row = ArrayList<T>()\n"
+            "        var j = 0\n"
+            "        while (j < cols) {\n"
+            "            row.add(value)\n"
+            "            j += 1\n"
+            "        }\n"
+            "        out.add(row)\n"
+            "        i += 1\n"
+            "    }\n"
+            "    return out\n"
+            "}"
+        )
+    if "_swiftArrayReversed(" in body_text:
+        helper_parts.append(
+            "func _swiftArrayReversed<T>(items: ArrayList<T>): ArrayList<T> {\n"
+            "    var out = ArrayList<T>()\n"
+            "    var i = items.size - 1\n"
+            "    while (i >= 0) {\n"
+            "        out.add(items[i])\n"
+            "        i -= 1\n"
+            "    }\n"
+            "    return out\n"
+            "}"
+        )
+    if helper_parts:
+        body_text = "\n\n".join(helper_parts + [body_text])
 
     headers: List[str] = []
     if _NEEDS_COLLECTION.search(body_text):
