@@ -1806,7 +1806,7 @@ def _rewrite_empty_arrays_in_named_tuple_returns(src: str) -> str:
                     elems[idx] = f"{converted_types[idx]}()"
             return "return (" + ", ".join(elems) + ")"
 
-        body = re.sub(r"return\s*\(([^()\n]*(?:\[[^\]]*\][^()\n]*)*)\)", ret_repl, body)
+        body = re.sub(r"return\s*\(([^()\n]*)\)", ret_repl, body)
         out.append(body)
         pos = body_end + 1
     out.append(src[pos:])
