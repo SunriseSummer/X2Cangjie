@@ -37,7 +37,7 @@
 
 ---
 
-## v0.4 — 训练数据可执行验证 + 更多 program pairs（**进行中**）
+## v0.4 — 训练数据可执行验证 + 更多 program pairs + best-checkpoint 保留
 
 * 用户要求："go 和 cangjie 代码都要编译运行验证，且各自都是最优编码实现"。
 * 新工具：`trainset/verify_programs.py` 调用 `go run` 与 `cjc + 二进制`，要求两侧 stdout 完全一致；CI / 训练前必跑。
@@ -45,19 +45,30 @@
   1. 早期 `programs/*.cj` 用 `main(): Unit { ... return 0 }` 编译失败 → 改为 `main() { ... return 0 }`（仓颉 `main` 返回 Int64）。
   2. `Point(X: 3, Y: 4)` named-arg 构造不被 cjc 接受（参数未声明为 `!`）→ 改为位置参数 `Point(3, 4)`，同步更新 `pairs.jsonl`。
   3. `Float64.toString` 输出 `9.000000` 不同于 Go 的 `9`；在比对场景用 `Int64(f)` 强转后再打印。
-* **新增 program pairs**（每对都 `go run` & `cjc` 双向编译运行通过、stdout 完全一致）：
-  - `06_factorial` 递归阶乘
-  - `07_fib_iter` 迭代 Fibonacci + tuple 交换 → 解构赋值
-  - `08_fizzbuzz` if-else 链
-  - `09_reverse` 切片倒置 + `ArrayList<T>` 构造
-  - `10_counter` 指针接收者方法 → `open class` + Int64 自增
-  - `11_gcd` while 循环 + 多变量交换
-  - `12_primes` 素数枚举
-  - `13_stats` 一次遍历求 max/min/sum
-  - `14_polymorphism` interface + 多实现 + ArrayList<Animal>
-  - `15_matrix` 嵌套 ArrayList
-* **新增 verify 工具**：`tests/verify_go_cases.py` — 对 `tests/cases/*.go` 做 `go run` 并比对 `.expected`，确保测试基线本身是正确的；发现并修复 `26_float_math.expected`（Go 的 `Println(12.56)` 输出 `12.56\n`，原 expected 是错的 `12.560000\n`）。
-* **本阶段训练**：v0.3 checkpoint 之上继续增量训练（每次 1-3 epochs，沙箱单次 ≤ 6 min，避免超时）。
+* 新增 program pairs（每对都 `go run` & `cjc` 双向编译运行通过、stdout 完全一致）：factorial / fib_iter / fizzbuzz / reverse / counter / gcd / primes / stats / polymorphism / matrix。
+* 新增 verify 工具：`tests/verify_go_cases.py` — 对 `tests/cases/*.go` 做 `go run` 并比对 `.expected`；发现并修复 `26_float_math.expected`（Go 的 `Println(12.56)` 输出 `12.56\n`，原 expected 是错的 `12.560000\n`）。
+* **best-checkpoint 协议**：`model.pt` ← 最优，`model_last.pt` ← 最新可续训（gitignored）。每 epoch 末若 `val_seq_acc` 严格更优才覆盖 `model.pt`，否则保留历史最佳。`model_meta.json` 同时记 `epoch`/`best_epoch`/`best_val_*`。
+
+---
+
+## v0.5 — 增量训练继续推进
+
+每次会话续训 2-4 个 epoch，单次沙箱时间 ≤ 30 min，best-checkpoint 保证劣化版本不污染线上。
+
+| Session | epochs | LR | val_tok_acc | val_seq_acc | 备注 |
+|---|---|---|---|---|---|
+| v0.3 baseline | 1–8 | 3e-4 OneCycle | 0.856 | 0.557 | restart, anonymize 启用 |
+| v0.4 round 1 | 9–11 | 2e-4 | 0.852 | 0.587 | +10 program pairs 后续训 |
+| v0.5 round 1 | 12 | 1e-4 | 0.872 | 0.558 | **回退**，model.pt 保持 ep11 |
+| v0.5 round 1 | 13–15 | 1e-4 | 0.904 | 0.647 | PROMOTED, ep15 |
+| v0.5 round 2 | 16 | 8e-5 | 0.897 | 0.637 | **回退**，model.pt 保持 ep15 |
+| v0.5 round 2 | 17 | 8e-5 | 0.910 | 0.676 | PROMOTED |
+| **v0.5 round 2** | **18** | 8e-5 | **0.913** | **0.684** | **当前最佳，已发布** |
+
+**经验**：
+- 每次新会话第一个 epoch 经常回退（OneCycleLR 重新 warm-up 扰乱权重）→ best-checkpoint 协议是必须的。
+- `lr=8e-5 ~ 1e-4` 是 v0.3 数据规模下 ep10+ 的甜区；继续降到 5e-5 以下进步会停滞。
+- 短 anonymized chunk 上 seq_acc 已接近 0.85；长多语句 chunk 仍是主要扣分项 (`curated_factor=80` 增广只能 partial 覆盖)，下一步应在 `programs/` 加更多 5+ chunk 的程序对。
 
 ---
 
