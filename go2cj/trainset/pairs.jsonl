@@ -243,3 +243,44 @@
 {"go": "func (s *Stack) Pop() int { n := len(s.items) - 1; x := s.items[n]; s.items = s.items[:n]; return x }", "cj": "func (s: Stack) Pop(): Int64 { var n = s.items.size - 1; var x = s.items[n]; s.items = s.items[0..n]; return x }"}
 {"go": "func (s Stack) Size() int { return len(s.items) }", "cj": "func (s: Stack) Size(): Int64 { return s.items.size }"}
 {"go": "func (s Stack) IsEmpty() bool { return len(s.items) == 0 }", "cj": "func (s: Stack) IsEmpty(): Bool { return s.items.size == 0 }"}
+{"go": "var ok bool", "cj": "var ok: Bool = false"}
+{"go": "var n int = 0", "cj": "var n: Int64 = 0"}
+{"go": "var f float64 = 0.0", "cj": "var f: Float64 = 0.0"}
+{"go": "var s string = \"\"", "cj": "var s: String = \"\""}
+{"go": "var xs []int", "cj": "var xs = ArrayList<Int64>()"}
+{"go": "var xs = []int{1, 2, 3}", "cj": "var xs = ArrayList<Int64>([1, 2, 3])"}
+{"go": "var ys = []string{\"a\", \"b\"}", "cj": "var ys = ArrayList<String>([\"a\", \"b\"])"}
+{"go": "var m = map[string]int{}", "cj": "var m = HashMap<String, Int64>()"}
+{"go": "var m = map[string]int{\"a\": 1}", "cj": "var m = HashMap<String, Int64>([(\"a\", 1)])"}
+{"go": "x := xs[0]", "cj": "var x = xs[0]"}
+{"go": "xs[i] = v", "cj": "xs[i] = v"}
+{"go": "xs = append(xs, x)", "cj": "xs.add(x)"}
+{"go": "xs = append(xs, a, b, c)", "cj": "xs.add(a); xs.add(b); xs.add(c)"}
+{"go": "n := len(xs)", "cj": "var n = xs.size"}
+{"go": "if len(xs) == 0 { return }", "cj": "if (xs.size == 0) { return }"}
+{"go": "for i := 0; i < n; i++ { fmt.Println(i) }", "cj": "for (i in 0..n) { println(i) }"}
+{"go": "for i := n - 1; i >= 0; i-- { fmt.Println(i) }", "cj": "var i = n - 1; while (i >= 0) { println(i); i-- }"}
+{"go": "for i, v := range xs { fmt.Println(i, v) }", "cj": "for ((i, v) in xs.iterator().enumerate()) { println(\"${i} ${v}\") }"}
+{"go": "for _, v := range xs { sum += v }", "cj": "for (v in xs) { sum += v }"}
+{"go": "for _, x := range xs { if x > maxVal { maxVal = x } }", "cj": "for (x in xs) { if (x > maxVal) { maxVal = x } }"}
+{"go": "func add(a int, b int) int { return a + b }", "cj": "func add(a: Int64, b: Int64): Int64 { return a + b }"}
+{"go": "func square(x int) int { return x * x }", "cj": "func square(x: Int64): Int64 { return x * x }"}
+{"go": "func greet(name string) string { return \"hello \" + name }", "cj": "func greet(name: String): String { return \"hello \" + name }"}
+{"go": "func isEven(n int) bool { return n%2 == 0 }", "cj": "func isEven(n: Int64): Bool { return n % 2 == 0 }"}
+{"go": "func clamp(x int, lo int, hi int) int { if x < lo { return lo }; if x > hi { return hi }; return x }", "cj": "func clamp(x: Int64, lo: Int64, hi: Int64): Int64 { if (x < lo) { return lo }; if (x > hi) { return hi }; return x }"}
+{"go": "func swap(a int, b int) (int, int) { return b, a }", "cj": "func swap(a: Int64, b: Int64): (Int64, Int64) { return (b, a) }"}
+{"go": "a, b := swap(1, 2)", "cj": "var (a, b) = swap(1, 2)"}
+{"go": "if x > 0 { fmt.Println(\"pos\") } else if x < 0 { fmt.Println(\"neg\") } else { fmt.Println(\"zero\") }", "cj": "if (x > 0) { println(\"pos\") } else if (x < 0) { println(\"neg\") } else { println(\"zero\") }"}
+{"go": "switch n { case 1: fmt.Println(\"one\"); case 2: fmt.Println(\"two\"); default: fmt.Println(\"other\") }", "cj": "match (n) { case 1 => println(\"one\"); case 2 => println(\"two\"); case _ => println(\"other\") }"}
+{"go": "switch { case x < 0: fmt.Println(\"neg\"); case x == 0: fmt.Println(\"zero\"); default: fmt.Println(\"pos\") }", "cj": "if (x < 0) { println(\"neg\") } else if (x == 0) { println(\"zero\") } else { println(\"pos\") }"}
+{"go": "fmt.Println(\"x =\", x)", "cj": "println(\"x = ${x}\")"}
+{"go": "fmt.Printf(\"%d + %d = %d\\n\", a, b, a+b)", "cj": "println(\"${a} + ${b} = ${a + b}\")"}
+{"go": "type Pair struct { A int; B int }", "cj": "open class Pair { public var A: Int64; public var B: Int64; public init(A: Int64, B: Int64) { this.A = A; this.B = B } }"}
+{"go": "type Named interface { Name() string }", "cj": "interface Named { func Name(): String }"}
+{"go": "p := Pair{A: 1, B: 2}", "cj": "var p = Pair(1, 2)"}
+{"go": "p := Pair{1, 2}", "cj": "var p = Pair(1, 2)"}
+{"go": "fmt.Println(p.A + p.B)", "cj": "println(p.A + p.B)"}
+{"go": "return a + b", "cj": "return a + b"}
+{"go": "return", "cj": "return"}
+{"go": "break", "cj": "break"}
+{"go": "continue", "cj": "continue"}

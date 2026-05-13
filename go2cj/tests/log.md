@@ -4,12 +4,12 @@
 
 ## 汇总
 
-- 用例总数：**40**
-- 模式覆盖率（confident / chunks）：**100.00%** (72 / 72)
-- Go 源编译（`go vet`）：**40 / 40** (100.00%)
-- Cangjie 编译通过：**5 / 40** (12.50%)
-- 运行输出匹配：**0 / 40** (0.00%)
-- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**45.00%**
+- 用例总数：**45**
+- 模式覆盖率（confident / chunks）：**100.00%** (81 / 81)
+- Go 源编译（`go vet`）：**45 / 45** (100.00%)
+- Cangjie 编译通过：**3 / 45** (6.67%)
+- 运行输出匹配：**1 / 45** (2.22%)
+- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**43.11%**
 
 ## 评分公式
 
@@ -23,7 +23,7 @@
 
 | 用例 | chunks | confident | fallback | 覆盖率 | Go vet | CJ 编译 | 运行 | 评分 |
 |---|---:|---:|---:|---:|:---:|:---:|:---:|---:|
-| `01_hello` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `01_hello` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `02_arithmetic` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `03_vars` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `04_if_else` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
@@ -49,13 +49,13 @@
 | `24_printf_format` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `25_const_block` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `26_float_math` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `27_typed_func` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `28_count_chars` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `29_nested_func_calls` | 3 | 3 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `27_typed_func` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `28_count_chars` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `29_nested_func_calls` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `30_mixed_program` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `31_map_basic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `31_map_basic` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `32_string_basics` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `33_max_min` | 3 | 3 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `33_max_min` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `34_polymorphism` | 6 | 6 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `35_max_in_slice` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `36_gcd` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
@@ -63,32 +63,33 @@
 | `38_reverse_slice` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `39_counter` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `40_matrix_sum` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `41_range_index` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `42_swap_tuple` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `43_clamp` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `44_pair_struct` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `45_even_odd` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 
 ## 失败 / 待改进用例诊断
 
-### `01_hello`
-
-- cjc 诊断：`error: undeclared identifier 'NUM1'`
-
 ### `02_arithmetic`
-
-- cjc 诊断：`error: undeclared identifier 'a'`
-
-### `03_vars`
 
 - cjc 诊断：`error: unclosed delimiter: '('`
 
+### `03_vars`
+
+- cjc 诊断：`error: undeclared identifier 'y'`
+
 ### `04_if_else`
 
-- cjc 诊断：`error: expected declaration, found 'println'`
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'else'`
 
 ### `05_for_classic`
 
-- cjc 诊断：`error: expected '{', found '}'`
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'return'`
 
 ### `06_while_for`
 
-- cjc 诊断：`error: expected '{', found '}'`
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'return'`
 
 ### `07_functions`
 
@@ -97,16 +98,16 @@
   want:
   '5\n'
    got:
-  '2\n'
+  '2\n3\n'
   ```
 
 ### `08_recursion`
 
-- cjc 诊断：`error: unmatched delimiter: ')'`
+- cjc 诊断：`error: unclosed delimiter: '('`
 
 ### `09_fibonacci`
 
-- cjc 诊断：`error: unmatched delimiter: ')'`
+- cjc 诊断：`error: unclosed delimiter: '('`
 
 ### `10_multi_return`
 
@@ -114,19 +115,19 @@
 
 ### `11_slice`
 
-- cjc 诊断：`error: undeclared identifier 'xs'`
+- cjc 诊断：`error: unclosed delimiter: '{'`
 
 ### `12_slice_append`
 
-- cjc 诊断：`error: undeclared identifier 'v'`
+- cjc 诊断：`error: the type Int64 of expression in for-in expression does not implement Iterator`
 
 ### `13_nested_for`
 
-- cjc 诊断：`error: unclosed delimiter: '('`
+- cjc 诊断：`error: variable declaration 'i' needs either type or initializer`
 
 ### `14_if_elif`
 
-- cjc 诊断：`error: expected declaration, found keyword 'return'`
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'else'`
 
 ### `15_string_concat`
 
@@ -134,7 +135,7 @@
 
 ### `16_boolean_logic`
 
-- cjc 诊断：`error: expected expression after '!', found ')'`
+- cjc 诊断：`error: undeclared identifier 'NUM15'`
 
 ### `17_fizzbuzz`
 
@@ -142,27 +143,27 @@
 
 ### `18_sum_array`
 
-- cjc 诊断：`error: undeclared identifier 'v'`
+- cjc 诊断：`error: unexpected _ wildcard`
 
 ### `19_switch`
 
-- cjc 诊断：`error: expected expression or declaration, found keyword 'case'`
+- cjc 诊断：`error: expected declaration, found keyword 'match'`
 
 ### `20_struct_basic`
 
-- cjc 诊断：`error: assignment operators cannot be chained`
+- cjc 诊断：`error: undeclared identifier 'p'`
 
 ### `21_struct_methods`
 
-- cjc 诊断：`error: expected a func name after keyword 'func', found '('`
+- cjc 诊断：`error: unclosed delimiter: '('`
 
 ### `22_interface`
 
-- cjc 诊断：`error: unclosed delimiter: '('`
+- cjc 诊断：`error: function 'Greet' has overload conflicts`
 
 ### `23_break_continue`
 
-- cjc 诊断：`error: expected '{', found '}'`
+- cjc 诊断：`error: mismatched types`
 
 ### `24_printf_format`
 
@@ -174,63 +175,45 @@
 
 ### `26_float_math`
 
-- cjc 诊断：`error: cannot have assignment expression in initializer`
+- cjc 诊断：`error: redefinition of declaration 'area'`
 
 ### `27_typed_func`
 
-- 运行差异：
-  ```
-  want:
-  '7\n10\n'
-   got:
-  '10\n10\n10\n'
-  ```
+- cjc 诊断：`error: extra argument given for parameter list '(UInt64)' in call`
 
 ### `28_count_chars`
-
-- cjc 诊断：`error: undeclared identifier 'NUM1'`
-
-### `29_nested_func_calls`
 
 - 运行差异：
   ```
   want:
   '12\n'
    got:
-  '5\n'
+  'hello, world\n'
   ```
+
+### `29_nested_func_calls`
+
+- cjc 诊断：`error: unclosed delimiter: '('`
 
 ### `30_mixed_program`
 
-- cjc 诊断：`error: assignment operators cannot be chained`
+- cjc 诊断：`error: expected a member name after '.' in qualified name, found keyword 'this'`
 
 ### `31_map_basic`
 
-- 运行差异：
-  ```
-  want:
-  '1\n2\n3\n'
-   got:
-  'b\n'
-  ```
+- cjc 诊断：`error: cannot convert an integer literal to type 'Struct-String'`
 
 ### `32_string_basics`
 
-- cjc 诊断：`error: unmatched delimiter: ')'`
+- cjc 诊断：`error: undeclared identifier 's'`
 
 ### `33_max_min`
 
-- 运行差异：
-  ```
-  want:
-  '7\n3\n'
-   got:
-  '3\n7\n'
-  ```
+- cjc 诊断：`error: extra argument given for parameter list '(UInt64)' in call`
 
 ### `34_polymorphism`
 
-- cjc 诊断：`error: assignment operators cannot be chained`
+- cjc 诊断：`error: redefinition of declaration 'name'`
 
 ### `35_max_in_slice`
 
@@ -238,15 +221,15 @@
 
 ### `36_gcd`
 
-- cjc 诊断：`error: expected declaration, found keyword 'return'`
+- cjc 诊断：`error: unclosed delimiter: '('`
 
 ### `37_primes`
 
-- cjc 诊断：`error: unclosed delimiter: '('`
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'var'`
 
 ### `38_reverse_slice`
 
-- cjc 诊断：`error: unclosed delimiter: '('`
+- cjc 诊断：`error: unmatched delimiter: ']'`
 
 ### `39_counter`
 
@@ -254,7 +237,27 @@
 
 ### `40_matrix_sum`
 
-- cjc 诊断：`error: expected 'in' in for-in expression, found '}'`
+- cjc 诊断：`error: expected 'in' in for-in expression, found ')'`
+
+### `41_range_index`
+
+- cjc 诊断：`error: undeclared identifier 'i'`
+
+### `42_swap_tuple`
+
+- cjc 诊断：`error: unclosed delimiter: '('`
+
+### `43_clamp`
+
+- cjc 诊断：`error: redefinition of declaration 'lo'`
+
+### `44_pair_struct`
+
+- cjc 诊断：`error: undeclared identifier 'p'`
+
+### `45_even_odd`
+
+- cjc 诊断：`error: unclosed delimiter: '('`
 
 
 ## 质量分析

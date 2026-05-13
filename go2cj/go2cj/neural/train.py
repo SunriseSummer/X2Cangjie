@@ -57,7 +57,8 @@ from .vocab import Vocab, tokenize_text
 
 
 PKG_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_MODEL_PATH = PKG_DIR / "model.pt"
+DEFAULT_MODEL_PATH = PKG_DIR / "model.pt"           # best-so-far (used by translator)
+DEFAULT_LAST_PATH = PKG_DIR / "model_last.pt"        # latest (used to resume training)
 DEFAULT_VOCAB_PATH = PKG_DIR / "vocab.json"
 DEFAULT_META_PATH = PKG_DIR / "model_meta.json"
 
@@ -187,7 +188,11 @@ def train(
     torch.set_num_threads(max(1, os.cpu_count() or 1))
 
     # Has a previous checkpoint? Determine resume mode.
-    have_ckpt = model_path.exists() and vocab_path.exists()
+    # Prefer model_last.pt for resume (latest optimizer state); fall back
+    # to model.pt if model_last.pt is missing (older checkpoints).
+    last_path = DEFAULT_LAST_PATH
+    resume_from = last_path if last_path.exists() else model_path
+    have_ckpt = resume_from.exists() and vocab_path.exists()
     resume = have_ckpt and not restart
 
     print(
@@ -241,7 +246,7 @@ def train(
 
     # Model — reuse config from checkpoint when resuming, otherwise build fresh.
     if resume:
-        state = torch.load(model_path, map_location="cpu", weights_only=False)
+        state = torch.load(resume_from, map_location="cpu", weights_only=False)
         cfg = state["config"]
         # Sanity: same vocab size?  If a contributor added new tokens to
         # the trainset, the new tokens map to <unk> for this checkpoint,
@@ -251,7 +256,7 @@ def train(
         start_epoch = int(state.get("epoch", 0))
         prev_meta = state.get("meta", {})
         print(
-            f"[train] resumed model.pt from epoch {start_epoch} "
+            f"[train] resumed {resume_from.name} from epoch {start_epoch} "
             f"(prev val_tok_acc={prev_meta.get('val_tok_acc', 'n/a')})",
             flush=True,
         )
@@ -290,6 +295,22 @@ def train(
             print(f"[train] warning: could not restore optimizer state ({e})",
                   flush=True)
 
+    # Read existing "best" metrics from meta_path so a partial training
+    # session can never demote a good checkpoint.
+    best_tok_acc = -1.0
+    best_seq_acc = -1.0
+    best_epoch = 0
+    if meta_path.exists():
+        try:
+            prev = json.loads(meta_path.read_text())
+            best_tok_acc = float(prev.get("best_val_tok_acc",
+                                          prev.get("val_tok_acc", -1.0)))
+            best_seq_acc = float(prev.get("best_val_seq_acc",
+                                          prev.get("val_seq_acc", -1.0)))
+            best_epoch = int(prev.get("best_epoch", prev.get("epoch", 0)))
+        except Exception:
+            pass
+
     v_acc = 0.0
     for local_ep in range(1, epochs + 1):
         global_ep = start_epoch + local_ep
@@ -316,15 +337,34 @@ def train(
                     flush=True,
                 )
         v_acc = _evaluate(model, val_loader, pad_idx)
+        # Also compute seq accuracy each epoch (slower but lets us
+        # promote/discard checkpoints accurately every epoch).
+        seq_correct, seq_total = _evaluate_seq(
+            model, val_loader, vocab, bos_idx, eos_idx, max_len,
+        )
+        seq_acc = seq_correct / max(1, seq_total)
         elapsed = time.time() - t0
         print(
             f"[train] ep{global_ep} done loss={epoch_loss/max(1,n_batches):.4f} "
-            f"val_tok_acc={v_acc:.4f} time={elapsed:.1f}s",
+            f"val_tok_acc={v_acc:.4f} val_seq_acc={seq_acc:.4f} "
+            f"time={elapsed:.1f}s",
             flush=True,
         )
 
+        # Promote to best if strictly better on the primary metric
+        # (seq_acc), with tok_acc as the tie-breaker.  This is the
+        # "always keep the best version, discard worse" guarantee.
+        improved = (seq_acc > best_seq_acc) or (
+            seq_acc == best_seq_acc and v_acc > best_tok_acc
+        )
+        if improved:
+            best_tok_acc = v_acc
+            best_seq_acc = seq_acc
+            best_epoch = global_ep
+
         meta = {
             "epoch": global_ep,
+            "best_epoch": best_epoch,
             "n_samples": n_samples,
             "curated_pairs_raw": n_curated_raw,
             "curated_pairs_augmented": n_curated_aug,
@@ -335,6 +375,9 @@ def train(
             "vocab_size": len(vocab),
             "params": int(n_params),
             "val_tok_acc": v_acc,
+            "val_seq_acc": seq_acc,
+            "best_val_tok_acc": best_tok_acc,
+            "best_val_seq_acc": best_seq_acc,
             "anonymize": anonymize,
             "seed": seed,
         }
@@ -346,22 +389,30 @@ def train(
             "anonymize": anonymize,
             "meta": meta,
         }
-        _atomic_save(ckpt, model_path)
+        # ALWAYS save "last" — resume continues optimizer state seamlessly.
+        _atomic_save(ckpt, DEFAULT_LAST_PATH)
+        # ONLY overwrite "best" model.pt when this epoch improved.  The
+        # translator loads model.pt, so inference always uses the best.
+        if improved or not model_path.exists():
+            _atomic_save(ckpt, model_path)
+            promoted = "PROMOTED"
+        else:
+            promoted = (
+                f"kept best (ep{best_epoch} "
+                f"seq_acc={best_seq_acc:.4f}, tok_acc={best_tok_acc:.4f})"
+            )
         _atomic_write_text(json.dumps(meta, indent=2), meta_path)
-        print(f"[train] checkpoint saved (ep{global_ep}, "
-              f"{model_path.stat().st_size/1e6:.2f}MB)", flush=True)
+        print(
+            f"[train] checkpoint saved (ep{global_ep}, "
+            f"{DEFAULT_LAST_PATH.stat().st_size/1e6:.2f}MB) — {promoted}",
+            flush=True,
+        )
 
-    seq_correct, seq_total = _evaluate_seq(
-        model, val_loader, vocab, bos_idx, eos_idx, max_len,
+    print(
+        f"[train] best checkpoint = ep{best_epoch} "
+        f"(val_seq_acc={best_seq_acc:.4f}, val_tok_acc={best_tok_acc:.4f})",
+        flush=True,
     )
-    seq_acc = seq_correct / max(1, seq_total)
-    print(f"[train] greedy seq-level val acc = {seq_acc:.4f} "
-          f"({seq_correct}/{seq_total})", flush=True)
-
-    # Final metadata with seq-level metric.
-    meta = json.loads(meta_path.read_text())
-    meta["val_seq_acc"] = seq_acc
-    _atomic_write_text(json.dumps(meta, indent=2), meta_path)
 
 
 def main(argv=None):
