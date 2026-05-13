@@ -521,8 +521,15 @@ def _rewrite_var_const_decls(src: str) -> str:
     """Pre-rewrite ``var name TYPE = expr`` and ``var name TYPE`` to
     a colon-typed form ``var name : TYPE = expr`` so chunk patterns can
     match cleanly (two adjacent slots are otherwise unbindable).
+
+    Also flattens ``const ( … )`` and ``var ( … )`` group declarations
+    into a sequence of single-line declarations, because Go uses
+    newlines (not ``;``) as separators inside those parens and our
+    lexer would otherwise treat the whole group as one chunk.
     """
 
+    src = _flatten_decl_groups(src, "const")
+    src = _flatten_decl_groups(src, "var")
     type_re = r"(?:\*?\[?\d*\]?\s*\*?(?:map\[[^\]]+\]\s*)?[\w.<>\[\]]+)"
     pats = [
         (re.compile(rf"\b(var|const)\s+([A-Za-z_]\w*)\s+({type_re})\s*=\s*"),
@@ -533,6 +540,25 @@ def _rewrite_var_const_decls(src: str) -> str:
     for regex, repl in pats:
         src = _re_outside_strings(src, regex, lambda m, _r=repl: m.expand(_r))
     return src
+
+
+def _flatten_decl_groups(src: str, kw: str) -> str:
+    """Rewrite ``<kw> ( a = 1\\n b = 2 )`` → ``<kw> a = 1; <kw> b = 2;``.
+
+    Only matches at top-level (outside strings/comments).  Group bodies
+    may span multiple lines.
+    """
+
+    pat = re.compile(rf"\b{kw}\s*\(\s*([^)]*?)\s*\)", re.DOTALL)
+
+    def repl(m: re.Match) -> str:
+        body = m.group(1)
+        lines = [ln.strip() for ln in body.split("\n") if ln.strip()]
+        if not lines:
+            return ""
+        return "; ".join(f"{kw} {ln.rstrip(';')}" for ln in lines)
+
+    return _re_outside_strings(src, pat, repl)
 
 
 def _re_outside_strings(src: str, regex: re.Pattern, repl) -> str:
@@ -1617,18 +1643,30 @@ def _rewrite_struct_literal(text: str) -> str:
                 break
             inner = text[j + 1:k]
             if saw_kv:
-                # Named-field literal: ``Point{X: 1, Y: 2}`` → keyword args.
-                pairs = []
+                # Named-field literal: ``Point{X: 1, Y: 2}``.  Cangjie's
+                # constructor uses positional args, so map labels back
+                # to the struct's declared field order.
+                kv_pairs = []
                 for part in _split_top_level_text(inner, ","):
                     p = part.strip()
                     if not p:
                         continue
                     kv = _split_top_level_text(p, ":")
                     if len(kv) == 2:
-                        pairs.append(f"{kv[0].strip()}: {kv[1].strip()}")
+                        kv_pairs.append((kv[0].strip(), kv[1].strip()))
                     else:
-                        pairs.append(p)
-                args = ", ".join(pairs)
+                        kv_pairs.append((None, p))
+                fields = _STRUCT_FIELDS.get(name)
+                if fields and all(k is not None for k, _ in kv_pairs):
+                    by_name = dict(kv_pairs)
+                    args = ", ".join(
+                        by_name.get(fn, _default_value_for(ft))
+                        for fn, ft in fields
+                    )
+                else:
+                    args = ", ".join(
+                        v if k is None else f"{k}: {v}" for k, v in kv_pairs
+                    )
             else:
                 args = inner.strip()
             out.append(f"{name}({args})")
@@ -1664,17 +1702,17 @@ def _convert_params_text(text: str) -> str:
         p = p.strip()
         if not p:
             continue
-        # Try ``name type``.
-        m = re.match(r"^([A-Za-z_]\w*)\s+(.+)$", p)
+        # Try ``name type`` — type may begin with ``[``, ``*``, ``map``,
+        # or an identifier (no space required after the name).
+        m = re.match(r"^([A-Za-z_]\w*)(\s+|(?=[\[*]))(.+)$", p)
         if m:
-            name, ty = m.group(1), m.group(2).strip()
+            name, ty = m.group(1), m.group(3).strip()
             ty_cj = _convert_type_text(ty)
             for nm in pending_names:
                 out.append((nm, ty_cj))
             out.append((name, ty_cj))
             pending_names = []
         else:
-            # Bare name — defer type assignment.
             pending_names.append(p)
     # Any pending names with no type at all default to Any.
     for nm in pending_names:
@@ -1858,6 +1896,7 @@ def convert_source(go_source: str, wrap_main: bool = True) -> ConversionResult:
 
     # Promote struct + methods into class bodies.
     top_level_decls = _promote_methods_into_classes(top_level_decls)
+    top_level_decls = _attach_interface_implementations(top_level_decls)
 
     parts: List[str] = []
     if top_level_decls:
@@ -1946,6 +1985,83 @@ def _promote_methods_into_classes(decls: List[str]) -> List[str]:
             continue
         out.append(d)
     return out
+
+
+def _attach_interface_implementations(decls: List[str]) -> List[str]:
+    """Add ``<: Interface`` to classes that implement every method of
+    a previously declared interface.
+
+    Go uses *structural* (implicit) interface satisfaction; Cangjie
+    requires explicit ``<:`` clauses.  We bridge the two by inspecting
+    each class body's method signatures, and for every interface whose
+    full method set is a subset, we append the interface name to the
+    class's super-type list.  Methods inside a class look like
+    ``public func Name(...): RetType``; interface methods look like
+    ``func Name(...): RetType``.
+    """
+
+    iface_re = re.compile(r"^interface (\w+)\s*\{([\s\S]*?)\}", re.MULTILINE)
+    class_re = re.compile(
+        r"^open class (\w+)((?:\s+<:[^{]*)?)\s*\{([\s\S]*?)\n\}", re.MULTILINE
+    )
+
+    def _sigs(body: str, prefix: str) -> List[str]:
+        out = []
+        for m in re.finditer(
+            rf"{prefix}func\s+(\w+)\s*\(([^)]*)\)\s*:\s*([^{{\n]+)", body,
+        ):
+            name, params, ret = m.group(1), m.group(2), m.group(3).strip()
+            # Normalise whitespace.
+            params = re.sub(r"\s+", " ", params).strip()
+            out.append(f"{name}|{params}|{ret}")
+        return out
+
+    interfaces: List[Tuple[str, List[str]]] = []
+    full = "\n\n".join(decls)
+    for m in iface_re.finditer(full):
+        interfaces.append((m.group(1), _sigs(m.group(2), "")))
+
+    if not interfaces:
+        return decls
+
+    new_decls = []
+    for d in decls:
+        cm = class_re.match(d.strip())
+        if not cm:
+            new_decls.append(d)
+            continue
+        cname, existing_sup, body = cm.group(1), cm.group(2), cm.group(3)
+        class_sigs = set(_sigs(body, "public "))
+        implemented = []
+        for iname, isigs in interfaces:
+            if isigs and all(s in class_sigs for s in isigs):
+                implemented.append(iname)
+        if not implemented:
+            new_decls.append(d)
+            continue
+        sup = existing_sup.strip()
+        if sup:
+            sup = sup + ", " + ", ".join(implemented)
+        else:
+            sup = "<: " + " & ".join(implemented)
+        new_decl = d.replace(
+            f"open class {cname}{existing_sup} {{",
+            f"open class {cname} {sup} {{",
+            1,
+        )
+        # Mark interface-method overrides with ``public override``.
+        for iname, isigs in interfaces:
+            if iname not in implemented:
+                continue
+            for sig in isigs:
+                mname = sig.split("|", 1)[0]
+                new_decl = re.sub(
+                    rf"(\n\s*)public func {re.escape(mname)}\b",
+                    rf"\1public override func {mname}",
+                    new_decl,
+                )
+        new_decls.append(new_decl)
+    return new_decls
 
 
 _GENERIC_NAMES = (

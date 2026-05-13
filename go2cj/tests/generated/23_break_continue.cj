@@ -1,0 +1,12 @@
+main() {
+    for (i in 0..10) {
+        if (i == 5) {
+            break
+        }
+        if (i % 2 == 0) {
+            continue
+        }
+        println(i)
+    }
+    return 0
+}

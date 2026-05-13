@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+tests/generated/*.bin
+tests/generated/*.cjo
