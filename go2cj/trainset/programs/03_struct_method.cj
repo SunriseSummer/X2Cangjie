@@ -10,8 +10,8 @@ open class Point {
     }
 }
 
-main(): Unit {
-    var p = Point(X: 3, Y: 4)
+main() {
+    var p = Point(3, 4)
     println(p.Sum())
     return 0
 }

@@ -4,12 +4,12 @@
 
 ## 汇总
 
-- 用例总数：**30**
-- 模式覆盖率（confident / chunks）：**100.00%** (51 / 51)
-- Go 源编译（`go vet`）：**30 / 30** (100.00%)
-- Cangjie 编译通过：**30 / 30** (100.00%)
-- 运行输出匹配：**30 / 30** (100.00%)
-- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**100.00%**
+- 用例总数：**40**
+- 模式覆盖率（confident / chunks）：**100.00%** (72 / 72)
+- Go 源编译（`go vet`）：**40 / 40** (100.00%)
+- Cangjie 编译通过：**5 / 40** (12.50%)
+- 运行输出匹配：**0 / 40** (0.00%)
+- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**45.00%**
 
 ## 评分公式
 
@@ -23,36 +23,239 @@
 
 | 用例 | chunks | confident | fallback | 覆盖率 | Go vet | CJ 编译 | 运行 | 评分 |
 |---|---:|---:|---:|---:|:---:|:---:|:---:|---:|
-| `01_hello` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `02_arithmetic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `03_vars` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `04_if_else` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `05_for_classic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `06_while_for` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `07_functions` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `08_recursion` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `09_fibonacci` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `10_multi_return` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `11_slice` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `12_slice_append` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `13_nested_for` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `14_if_elif` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `15_string_concat` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `16_boolean_logic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `17_fizzbuzz` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `18_sum_array` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `19_switch` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `20_struct_basic` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `21_struct_methods` | 3 | 3 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `22_interface` | 4 | 4 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `23_break_continue` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `24_printf_format` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `25_const_block` | 4 | 4 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `26_float_math` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `27_typed_func` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `28_count_chars` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `29_nested_func_calls` | 3 | 3 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `30_mixed_program` | 3 | 3 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `01_hello` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `02_arithmetic` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `03_vars` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `04_if_else` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `05_for_classic` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `06_while_for` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `07_functions` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `08_recursion` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `09_fibonacci` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `10_multi_return` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `11_slice` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `12_slice_append` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `13_nested_for` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `14_if_elif` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `15_string_concat` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `16_boolean_logic` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `17_fizzbuzz` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `18_sum_array` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `19_switch` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `20_struct_basic` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `21_struct_methods` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `22_interface` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `23_break_continue` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `24_printf_format` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `25_const_block` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `26_float_math` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `27_typed_func` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `28_count_chars` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `29_nested_func_calls` | 3 | 3 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `30_mixed_program` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `31_map_basic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `32_string_basics` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `33_max_min` | 3 | 3 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `34_polymorphism` | 6 | 6 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `35_max_in_slice` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `36_gcd` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `37_primes` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `38_reverse_slice` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `39_counter` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `40_matrix_sum` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+
+## 失败 / 待改进用例诊断
+
+### `01_hello`
+
+- cjc 诊断：`error: undeclared identifier 'NUM1'`
+
+### `02_arithmetic`
+
+- cjc 诊断：`error: undeclared identifier 'a'`
+
+### `03_vars`
+
+- cjc 诊断：`error: unclosed delimiter: '('`
+
+### `04_if_else`
+
+- cjc 诊断：`error: expected declaration, found 'println'`
+
+### `05_for_classic`
+
+- cjc 诊断：`error: expected '{', found '}'`
+
+### `06_while_for`
+
+- cjc 诊断：`error: expected '{', found '}'`
+
+### `07_functions`
+
+- 运行差异：
+  ```
+  want:
+  '5\n'
+   got:
+  '2\n'
+  ```
+
+### `08_recursion`
+
+- cjc 诊断：`error: unmatched delimiter: ')'`
+
+### `09_fibonacci`
+
+- cjc 诊断：`error: unmatched delimiter: ')'`
+
+### `10_multi_return`
+
+- cjc 诊断：`error: unclosed delimiter: '('`
+
+### `11_slice`
+
+- cjc 诊断：`error: undeclared identifier 'xs'`
+
+### `12_slice_append`
+
+- cjc 诊断：`error: undeclared identifier 'v'`
+
+### `13_nested_for`
+
+- cjc 诊断：`error: unclosed delimiter: '('`
+
+### `14_if_elif`
+
+- cjc 诊断：`error: expected declaration, found keyword 'return'`
+
+### `15_string_concat`
+
+- cjc 诊断：`error: cannot have assignment expression in initializer`
+
+### `16_boolean_logic`
+
+- cjc 诊断：`error: expected expression after '!', found ')'`
+
+### `17_fizzbuzz`
+
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'else'`
+
+### `18_sum_array`
+
+- cjc 诊断：`error: undeclared identifier 'v'`
+
+### `19_switch`
+
+- cjc 诊断：`error: expected expression or declaration, found keyword 'case'`
+
+### `20_struct_basic`
+
+- cjc 诊断：`error: assignment operators cannot be chained`
+
+### `21_struct_methods`
+
+- cjc 诊断：`error: expected a func name after keyword 'func', found '('`
+
+### `22_interface`
+
+- cjc 诊断：`error: unclosed delimiter: '('`
+
+### `23_break_continue`
+
+- cjc 诊断：`error: expected '{', found '}'`
+
+### `24_printf_format`
+
+- cjc 诊断：`error: cannot have assignment expression in initializer`
+
+### `25_const_block`
+
+- cjc 诊断：`error: undeclared identifier 'B'`
+
+### `26_float_math`
+
+- cjc 诊断：`error: cannot have assignment expression in initializer`
+
+### `27_typed_func`
+
+- 运行差异：
+  ```
+  want:
+  '7\n10\n'
+   got:
+  '10\n10\n10\n'
+  ```
+
+### `28_count_chars`
+
+- cjc 诊断：`error: undeclared identifier 'NUM1'`
+
+### `29_nested_func_calls`
+
+- 运行差异：
+  ```
+  want:
+  '12\n'
+   got:
+  '5\n'
+  ```
+
+### `30_mixed_program`
+
+- cjc 诊断：`error: assignment operators cannot be chained`
+
+### `31_map_basic`
+
+- 运行差异：
+  ```
+  want:
+  '1\n2\n3\n'
+   got:
+  'b\n'
+  ```
+
+### `32_string_basics`
+
+- cjc 诊断：`error: unmatched delimiter: ')'`
+
+### `33_max_min`
+
+- 运行差异：
+  ```
+  want:
+  '7\n3\n'
+   got:
+  '3\n7\n'
+  ```
+
+### `34_polymorphism`
+
+- cjc 诊断：`error: assignment operators cannot be chained`
+
+### `35_max_in_slice`
+
+- cjc 诊断：`error: unclosed delimiter: '('`
+
+### `36_gcd`
+
+- cjc 诊断：`error: expected declaration, found keyword 'return'`
+
+### `37_primes`
+
+- cjc 诊断：`error: unclosed delimiter: '('`
+
+### `38_reverse_slice`
+
+- cjc 诊断：`error: unclosed delimiter: '('`
+
+### `39_counter`
+
+- cjc 诊断：`error: expected a func name after keyword 'func', found '('`
+
+### `40_matrix_sum`
+
+- cjc 诊断：`error: expected 'in' in for-in expression, found '}'`
+
 
 ## 质量分析
 

@@ -6,7 +6,7 @@ func sumTo(n: Int64): Int64 {
     return total
 }
 
-main(): Unit {
+main() {
     println(sumTo(10))
     return 0
 }

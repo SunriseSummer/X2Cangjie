@@ -12,8 +12,8 @@ open class Square <: Shape {
     }
 }
 
-main(): Unit {
-    var sh: Shape = Square(Side: 3.0)
-    println(sh.Area())
+main() {
+    var sh: Shape = Square(3.0)
+    println(Int64(sh.Area()))
     return 0
 }

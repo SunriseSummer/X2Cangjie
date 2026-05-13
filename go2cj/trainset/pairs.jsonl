@@ -120,10 +120,10 @@
 {"go": "type Point struct { X int; Y int }", "cj": "open class Point { public var X: Int64; public var Y: Int64; public init(X: Int64, Y: Int64) { this.X = X; this.Y = Y } }"}
 {"go": "type Point struct { x float64; y float64 }", "cj": "open class Point { public var x: Float64; public var y: Float64; public init(x: Float64, y: Float64) { this.x = x; this.y = y } }"}
 {"go": "type User struct { Name string; Age int }", "cj": "open class User { public var Name: String; public var Age: Int64; public init(Name: String, Age: Int64) { this.Name = Name; this.Age = Age } }"}
-{"go": "p := Point{X: 3, Y: 4}", "cj": "var p = Point(X: 3, Y: 4)"}
-{"go": "p := Point{3, 4}", "cj": "var p = Point(X: 3, Y: 4)"}
-{"go": "p := &Point{X: 1, Y: 2}", "cj": "var p = Point(X: 1, Y: 2)"}
-{"go": "u := User{Name: \"alice\", Age: 30}", "cj": "var u = User(Name: \"alice\", Age: 30)"}
+{"go": "p := Point{X: 3, Y: 4}", "cj": "var p = Point(3, 4)"}
+{"go": "p := Point{3, 4}", "cj": "var p = Point(3, 4)"}
+{"go": "p := &Point{X: 1, Y: 2}", "cj": "var p = Point(1, 2)"}
+{"go": "u := User{Name: \"alice\", Age: 30}", "cj": "var u = User(\"alice\", 30)"}
 {"go": "func (p Point) Sum() int { return p.X + p.Y }", "cj": "func (p: Point) Sum(): Int64 { return p.X + p.Y }"}
 {"go": "func (p *Point) Move(dx int, dy int) { p.X += dx; p.Y += dy }", "cj": "func (p: Point) Move(dx: Int64, dy: Int64): Unit { p.X += dx; p.Y += dy }"}
 {"go": "func (u User) Greet() string { return \"hi, \" + u.Name }", "cj": "func (u: User) Greet(): String { return \"hi, \" + u.Name }"}

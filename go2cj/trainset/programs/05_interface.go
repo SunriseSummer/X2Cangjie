@@ -16,5 +16,5 @@ func (s Square) Area() float64 {
 
 func main() {
 	var sh Shape = Square{Side: 3.0}
-	fmt.Println(sh.Area())
+	fmt.Println(int(sh.Area()))
 }
