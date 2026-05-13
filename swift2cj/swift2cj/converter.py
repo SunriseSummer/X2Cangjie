@@ -2541,9 +2541,11 @@ def _scan_parent_class_names(src: str) -> set:
     return parents
 
 
-# Leading-dot enum shorthand (``.case``) should not fire after identifier
-# characters, closing delimiters, postfix optional/force markers, or another
-# dot.  The final ``.`` guard preserves Swift closed ranges such as ``1...n``.
+# Leading-dot enum shorthand (``.case``) should not fire after:
+# - identifier characters (ordinary member access / numeric literals),
+# - closing delimiters ``)`` / ``]`` (member access on grouped/indexed values),
+# - postfix ``!`` / ``?`` markers (forced/safe optional access),
+# - another dot (closed ranges such as ``1...n``).
 _LEADING_ENUM_DOT_RE = re.compile(r"(?<![A-Za-z0-9_)\]!\?.])\.([A-Za-z_]\w*)")
 
 

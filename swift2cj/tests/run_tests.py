@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -100,7 +101,6 @@ def _has(cmd: str) -> bool:
 
 
 def _case_sort_key(path: Path):
-    import re
     m = re.match(r"^(\d+)_(.*)$", path.stem)
     if m:
         return (int(m.group(1)), m.group(2))
