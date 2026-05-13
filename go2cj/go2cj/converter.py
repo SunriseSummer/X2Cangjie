@@ -32,6 +32,54 @@ from dataclasses import dataclass, field
 from typing import List
 
 from .lexer import Token, tokenize
+
+
+_NO_SEMI_AFTER = {
+    "(", "[", "{", ",", ".", ";", ":", "?", "@",
+    "+", "-", "*", "/", "%", "&", "|", "^", "!", "<", ">", "=",
+    "==", "!=", "<=", ">=", "&&", "||", ":=", "<<", ">>", "+=", "-=",
+    "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=", "&^", "&^=",
+    "...",
+    "if", "else", "for", "switch", "case", "default", "func", "var",
+    "const", "type", "struct", "interface", "map", "chan", "go", "defer",
+    "return", "range", "import", "package", "select",
+}
+
+
+def _inject_semis(tokens: List[Token]) -> List[Token]:
+    """Insert Go's auto-inserted ``;`` tokens at line ends.
+
+    Walks the token stream including ``NEWLINE`` markers; emits a
+    ``;`` whenever Go's spec would auto-insert one (i.e. the previous
+    meaningful token is not in :data:`_NO_SEMI_AFTER` and we are not
+    inside parens / brackets).  This is a *lexical* preprocessing step
+    — not a translation rule.
+    """
+    out: List[Token] = []
+    prev = None
+    dp = ds = 0
+    for t in tokens:
+        if t.kind == "NEWLINE":
+            if (prev is not None and prev.value not in _NO_SEMI_AFTER
+                    and dp == 0 and ds == 0):
+                out.append(Token("PUNCT", ";", t.line, t.col))
+                prev = out[-1]
+            continue
+        if t.kind in ("COMMENT_BLOCK", "COMMENT_LINE"):
+            continue
+        if t.value == "(":
+            dp += 1
+        elif t.value == ")":
+            dp = max(dp - 1, 0)
+        elif t.value == "[":
+            ds += 1
+        elif t.value == "]":
+            ds = max(ds - 1, 0)
+        out.append(t)
+        prev = t
+    return out
+
+
 from .lifting import (
     attach_interface_impls,
     promote_methods,
@@ -228,6 +276,7 @@ def convert_source(go_source: str, wrap_main: bool = True) -> ConversionResult:
     # 1. Lexical pre-processing.
     src = _convert_raw_strings(go_source)
     tokens = tokenize(src)
+    tokens = _inject_semis(tokens)
     chunks = _segment_chunks(tokens)
 
     # 2. Skim ``package`` / ``import`` and identify ``func main``.

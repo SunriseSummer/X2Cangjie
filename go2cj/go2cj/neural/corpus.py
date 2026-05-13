@@ -592,7 +592,14 @@ GENERATORS = [
 
 def generate_corpus(n_samples: int = 20000, seed: int = 0xC0FFEE
                     ) -> List[Tuple[str, str]]:
-    """Generate ``n_samples`` Go ↔ Cangjie chunk pairs."""
+    """Generate ``n_samples`` Go ↔ Cangjie chunk pairs.
+
+    NOTE: see :mod:`.anonymize` for an optional identifier-anonymization
+    helper (a future training-pipeline improvement that lets the model
+    perfectly preserve user identifiers).  It is not enabled by default
+    because the shipped ``model.pt`` was trained on raw, non-anonymized
+    pairs.
+    """
     rng = random.Random(seed)
     s = Sampler(rng)
     weights = [w for _, w in GENERATORS]
