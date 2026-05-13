@@ -1,11 +1,16 @@
 {
-  "n_samples": 12000,
-  "epochs": 10,
+  "epoch": 8,
+  "n_samples": 4000,
+  "curated_pairs_raw": 249,
+  "curated_pairs_augmented": 19920,
+  "synth_pairs": 4000,
+  "total_pairs": 23920,
   "batch_size": 96,
-  "lr": 0.0006,
-  "vocab_size": 1402,
-  "params": 1749370,
-  "val_tok_acc": 0.675575101488498,
-  "val_seq_acc": 0.2638888888888889,
-  "seed": 12648430
+  "lr": 0.0003,
+  "vocab_size": 455,
+  "params": 610439,
+  "val_tok_acc": 0.8561158915150855,
+  "anonymize": true,
+  "seed": 12648430,
+  "val_seq_acc": 0.5571030640668524
 }

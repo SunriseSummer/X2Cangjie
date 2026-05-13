@@ -1,0 +1,6 @@
+main(): Unit {
+    var x = 10
+    var y = 20
+    println(x + y)
+    return 0
+}

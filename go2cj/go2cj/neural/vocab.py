@@ -108,8 +108,30 @@ def tokenize_text(text: str) -> List[str]:
             out.append(c)
             i += 1
         else:
-            out.append(text[i:j])
-            i = j
+            # Float / decimal literal: if the run is purely digits and
+            # is followed by ``.<digit>``, glue the fractional part on
+            # so floats like ``3.14`` are a single token (the model
+            # learns much better with atomic numeric literals).
+            token = text[i:j]
+            if token.isdigit() and j + 1 < n and text[j] == "." \
+                    and text[j + 1].isdigit():
+                k = j + 1
+                while k < n and text[k].isdigit():
+                    k += 1
+                # Optional scientific exponent: e[+-]?digits
+                if k < n and text[k] in ("e", "E"):
+                    k2 = k + 1
+                    if k2 < n and text[k2] in ("+", "-"):
+                        k2 += 1
+                    while k2 < n and text[k2].isdigit():
+                        k2 += 1
+                    if k2 > k + 1 and text[k2 - 1].isdigit():
+                        k = k2
+                out.append(text[i:k])
+                i = k
+            else:
+                out.append(token)
+                i = j
     return out
 
 

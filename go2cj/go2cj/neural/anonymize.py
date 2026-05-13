@@ -65,17 +65,44 @@ CJ_KEEPS = {
     "size",
 }
 
-# Built-in Go functions / packages kept verbatim.
+# Built-in Go functions / packages kept verbatim.  These are the
+# tokens that have well-defined semantics in *both* languages — names
+# that the model must translate, not just copy.
 GO_BUILTINS = {
+    # fmt package
     "fmt", "Println", "Print", "Printf", "Sprintf", "Sprintln",
     "Errorf", "Scanln", "Scan",
+    # universe builtins
     "len", "cap", "append", "make", "new", "delete", "copy", "close",
+    "panic", "recover",
+    # Cangjie equivalents the decoder emits
     "print", "println",
-    "os", "strings", "math", "strconv", "Args", "Exit",
-    "Sqrt", "Pow", "Abs", "Floor", "Ceil",
+    # std packages used in tests
+    "os", "strings", "math", "strconv", "errors", "sort", "time", "rand",
+    # functions referenced in trainset
+    "Args", "Exit", "Getenv",
+    "Sqrt", "Pow", "Abs", "Floor", "Ceil", "Max", "Min",
+    "MaxInt64", "MinInt64", "Pi",
     "Itoa", "Atoi", "FormatInt", "ParseInt",
+    "Contains", "HasPrefix", "HasSuffix", "ToUpper", "ToLower",
+    "Split", "Join", "Replace", "Index",
+    "Ints", "Strings",
+    "New", "Now", "Sleep", "Second", "Intn",
+    # Cangjie API surface
     "iterator", "enumerate", "keys", "values", "add", "remove",
-    "Println", "Printf",
+    "size", "contains", "startsWith", "endsWith",
+    "toAsciiUpper", "toAsciiLower", "split", "join", "replace",
+    "indexOf", "toString", "parse", "fromUtf8", "toArray",
+    "toRuneArray", "compare", "sortBy", "abs", "floor", "ceil", "sqrt",
+    "max", "min", "isNone", "isSome",
+    "Some", "Channel", "send", "receive", "spawn", "throw", "try",
+    "catch", "finally",
+    "Process", "current", "arguments", "exit",
+    "EnvironmentVariables", "getOrDefault",
+    "DateTime", "Duration", "second", "now",
+    "Random", "nextInt64",
+    "String", "fromUtf8", "delimiter",
+    "Max", "Min",
 }
 
 KEEP_TOKENS = GO_KEYWORDS | GO_TYPES | CJ_KEEPS | GO_BUILTINS
