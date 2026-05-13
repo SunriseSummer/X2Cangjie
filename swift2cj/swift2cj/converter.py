@@ -2546,6 +2546,9 @@ def _scan_parent_class_names(src: str) -> set:
 # - closing delimiters ``)`` / ``]`` (member access on grouped/indexed values),
 # - postfix ``!`` / ``?`` markers (forced/safe optional access),
 # - another dot (closed ranges such as ``1...n``).
+# The trailing dot in the negative lookbehind is intentionally subtle: without
+# it, the third dot in ``...`` looks like enum shorthand and ``1...n`` becomes
+# the invalid half-open-looking ``1..n`` before range patterns see it.
 _LEADING_ENUM_DOT_RE = re.compile(r"(?<![A-Za-z0-9_)\]!\?.])\.([A-Za-z_]\w*)")
 
 

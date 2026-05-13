@@ -34,6 +34,7 @@ ROOT = HERE.parent
 CASES_DIR = HERE / "cases"
 GEN_DIR = HERE / "generated"
 LOG_PATH = HERE / "log.md"
+NON_NUMERIC_SORT_KEY = 10**9
 
 
 @dataclasses.dataclass
@@ -104,7 +105,7 @@ def _case_sort_key(path: Path):
     m = re.match(r"^(\d+)_(.*)$", path.stem)
     if m:
         return (int(m.group(1)), m.group(2))
-    return (10**9, path.stem)
+    return (NON_NUMERIC_SORT_KEY, path.stem)
 
 
 def _typecheck_swift(sw_path: Path) -> bool:
