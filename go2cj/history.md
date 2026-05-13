@@ -63,12 +63,32 @@
 | v0.5 round 1 | 13–15 | 1e-4 | 0.904 | 0.647 | PROMOTED, ep15 |
 | v0.5 round 2 | 16 | 8e-5 | 0.897 | 0.637 | **回退**，model.pt 保持 ep15 |
 | v0.5 round 2 | 17 | 8e-5 | 0.910 | 0.676 | PROMOTED |
-| **v0.5 round 2** | **18** | 8e-5 | **0.913** | **0.684** | **当前最佳，已发布** |
+| v0.5 round 2 | 18 | 8e-5 | 0.913 | 0.684 | PROMOTED |
+| v0.5 round 3 | 19 | 6e-5 | 0.907 | 0.674 | **回退**，model.pt 保持 ep18 |
+| v0.5 round 3 | 20 | 6e-5 | 0.916 | 0.704 | PROMOTED |
+| v0.5 round 3 | 21 | 6e-5 | 0.922 | 0.722 | PROMOTED |
+| v0.5 round 4 | 22 | 5e-5 | 0.914 | 0.693 | **回退**，model.pt 保持 ep21 |
+| v0.5 round 4 | 23 | 5e-5 | 0.924 | 0.723 | PROMOTED |
+| **v0.5 round 4** | **24** | 5e-5 | **0.931** | **0.738** | **当前最佳，已发布** |
 
-**经验**：
+**端到端测试集 (`tests/cases/*.go`，cjc 编译 + 运行) 实测**（每次会话末跑 `tests/run_tests.py`，需 cjc）：
+| 阶段 | cjc 编译通过 | 运行匹配 | 备注 |
+|---|---:|---:|---|
+| ep15 (v0.5 round 1 末) | 3 / 45 | 1 / 45 | 历史 `tests/log.md` 提交点 |
+| ep18 (v0.5 round 2 末) | 2 / 45 | 1 / 45 | 本会话开头实测 |
+| ep21 (v0.5 round 3 末) | 3 / 45 | 1 / 45 | val 上升但 e2e 同步未明显改善 |
+| **ep24 (v0.5 round 4 末)** | **2 / 45** | **1 / 45** | val_seq_acc=0.738 但 e2e 卡 ~2-3/45 |
+
+**关键经验** ⚠️：
 - 每次新会话第一个 epoch 经常回退（OneCycleLR 重新 warm-up 扰乱权重）→ best-checkpoint 协议是必须的。
-- `lr=8e-5 ~ 1e-4` 是 v0.3 数据规模下 ep10+ 的甜区；继续降到 5e-5 以下进步会停滞。
-- 短 anonymized chunk 上 seq_acc 已接近 0.85；长多语句 chunk 仍是主要扣分项 (`curated_factor=80` 增广只能 partial 覆盖)，下一步应在 `programs/` 加更多 5+ chunk 的程序对。
+- `lr=5e-5 ~ 8e-5` 是 v0.3 数据规模下 ep15+ 的甜区。
+- **val_seq_acc 与端到端 cjc 编译率严重脱钩**：val_seq_acc 从 0.557 一路涨到 0.738 (+18 pp)，但测试集 cjc 编译通过率始终在 **2–3 / 45** 区间震荡。原因诊断：
+  - 训练集（curated + synth）按 chunk 级匿名化，单 chunk 通常只有 1–3 条语句；val_seq_acc 测的是这类**短模板**上的精确召回率。
+  - `tests/cases/*.go` 的 `func main()` 经 `_segment_chunks` 后整体作为**一个长 chunk**（6–15 条语句）送入模型，分布外严重。模型在 chunk 内会"漏写、重复写、把字面量混进语义位置"，导致整段不可编译。
+  - 单纯继续训练已无法突破此瓶颈。**下一阶段必须做的真正改进**：
+    1. 在 `_segment_chunks` 中把 `func` 体进一步按语句切分，让神经模型只翻译"行级"片段（与训练分布一致）；
+    2. 或在 `programs/` 增补 5+ 语句的 program pairs，并让 `curated_factor` 增广不丢长上下文；
+    3. 或对长 chunk 退回到模板槽位绑定回路（保留 v0.1 的 patterns.py 作为长 chunk 兜底）。
 
 ---
 

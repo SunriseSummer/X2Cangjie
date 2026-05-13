@@ -7,9 +7,9 @@
 - 用例总数：**45**
 - 模式覆盖率（confident / chunks）：**100.00%** (81 / 81)
 - Go 源编译（`go vet`）：**45 / 45** (100.00%)
-- Cangjie 编译通过：**3 / 45** (6.67%)
+- Cangjie 编译通过：**2 / 45** (4.44%)
 - 运行输出匹配：**1 / 45** (2.22%)
-- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**43.11%**
+- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**42.22%**
 
 ## 评分公式
 
@@ -50,7 +50,7 @@
 | `25_const_block` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `26_float_math` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `27_typed_func` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `28_count_chars` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `28_count_chars` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `29_nested_func_calls` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `30_mixed_program` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `31_map_basic` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
@@ -73,7 +73,7 @@
 
 ### `02_arithmetic`
 
-- cjc 诊断：`error: unclosed delimiter: '('`
+- cjc 诊断：`error: unmatched delimiter: ')'`
 
 ### `03_vars`
 
@@ -81,7 +81,7 @@
 
 ### `04_if_else`
 
-- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'else'`
+- cjc 诊断：`error: invalid binary operator '>' on type 'Struct-String' and 'Int64'`
 
 ### `05_for_classic`
 
@@ -115,7 +115,7 @@
 
 ### `11_slice`
 
-- cjc 诊断：`error: unclosed delimiter: '{'`
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'for'`
 
 ### `12_slice_append`
 
@@ -123,7 +123,7 @@
 
 ### `13_nested_for`
 
-- cjc 诊断：`error: variable declaration 'i' needs either type or initializer`
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'return'`
 
 ### `14_if_elif`
 
@@ -131,11 +131,11 @@
 
 ### `15_string_concat`
 
-- cjc 诊断：`error: cannot have assignment expression in initializer`
+- cjc 诊断：`error: redefinition of declaration 'a'`
 
 ### `16_boolean_logic`
 
-- cjc 诊断：`error: undeclared identifier 'NUM15'`
+- cjc 诊断：`error: undeclared identifier 'b'`
 
 ### `17_fizzbuzz`
 
@@ -143,15 +143,15 @@
 
 ### `18_sum_array`
 
-- cjc 诊断：`error: unexpected _ wildcard`
+- cjc 诊断：`error: undeclared identifier 'v'`
 
 ### `19_switch`
 
-- cjc 诊断：`error: expected declaration, found keyword 'match'`
+- cjc 诊断：`error: expected expression or declaration, found keyword 'case'`
 
 ### `20_struct_basic`
 
-- cjc 诊断：`error: undeclared identifier 'p'`
+- cjc 诊断：`error: unclosed delimiter: '('`
 
 ### `21_struct_methods`
 
@@ -159,7 +159,7 @@
 
 ### `22_interface`
 
-- cjc 诊断：`error: function 'Greet' has overload conflicts`
+- cjc 诊断：`error: unclosed delimiter: '('`
 
 ### `23_break_continue`
 
@@ -167,7 +167,7 @@
 
 ### `24_printf_format`
 
-- cjc 诊断：`error: cannot have assignment expression in initializer`
+- cjc 诊断：`error: unclosed delimiter: '('`
 
 ### `25_const_block`
 
@@ -175,7 +175,7 @@
 
 ### `26_float_math`
 
-- cjc 诊断：`error: redefinition of declaration 'area'`
+- cjc 诊断：`error: cannot have assignment expression in initializer`
 
 ### `27_typed_func`
 
@@ -183,13 +183,7 @@
 
 ### `28_count_chars`
 
-- 运行差异：
-  ```
-  want:
-  '12\n'
-   got:
-  'hello, world\n'
-  ```
+- cjc 诊断：`error: undeclared identifier 's'`
 
 ### `29_nested_func_calls`
 
@@ -197,11 +191,11 @@
 
 ### `30_mixed_program`
 
-- cjc 诊断：`error: expected a member name after '.' in qualified name, found keyword 'this'`
+- cjc 诊断：`error: the type Class-Rectangle of expression in for-in expression does not implement Iterator`
 
 ### `31_map_basic`
 
-- cjc 诊断：`error: cannot convert an integer literal to type 'Struct-String'`
+- cjc 诊断：`error: expected ';' or '<NL>', found ','`
 
 ### `32_string_basics`
 
@@ -217,11 +211,11 @@
 
 ### `35_max_in_slice`
 
-- cjc 诊断：`error: unclosed delimiter: '('`
+- cjc 诊断：`error: unexpected _ wildcard`
 
 ### `36_gcd`
 
-- cjc 诊断：`error: unclosed delimiter: '('`
+- cjc 诊断：`error: extra argument given for parameter list '(UInt64)' in call`
 
 ### `37_primes`
 
@@ -229,7 +223,7 @@
 
 ### `38_reverse_slice`
 
-- cjc 诊断：`error: unmatched delimiter: ']'`
+- cjc 诊断：`error: undeclared identifier 'i'`
 
 ### `39_counter`
 
@@ -237,11 +231,11 @@
 
 ### `40_matrix_sum`
 
-- cjc 诊断：`error: expected 'in' in for-in expression, found ')'`
+- cjc 诊断：`error: invalid binary operator '>' on type 'Class-ArrayList<Int64>' and 'Struct-Array<Interface-ToString>'`
 
 ### `41_range_index`
 
-- cjc 诊断：`error: undeclared identifier 'i'`
+- cjc 诊断：`error: undeclared identifier 'v'`
 
 ### `42_swap_tuple`
 
@@ -257,7 +251,7 @@
 
 ### `45_even_odd`
 
-- cjc 诊断：`error: unclosed delimiter: '('`
+- cjc 诊断：`error: unclosed delimiter: '{'`
 
 
 ## 质量分析
