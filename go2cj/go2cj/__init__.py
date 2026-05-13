@@ -1,25 +1,22 @@
-"""go2cj — Neural / self-organizing Go → Cangjie source converter.
+"""go2cj — Neural-network Go → Cangjie source converter.
 
 A single-file source-to-source transpiler from Go to the Cangjie
-programming language.  The pipeline uses the same non-linear /
-neuro-symbolic architecture as ``ts2cj``:
-
-* a regex-driven Go tokenizer (the only purely classical step);
-* deterministic hashing-trick token embeddings (no training data);
-* a Kohonen self-organizing map (SOM) trained on a built-in pattern
-  corpus of Go ↔ Cangjie chunk templates;
-* a Hopfield-style associative memory for symbol / method translation
-  (e.g. ``fmt.Println`` → ``println``, ``len`` → ``.size``);
-* non-linear template slot binding with composite scoring.
+programming language driven by a **trained Transformer encoder-decoder**
+(PyTorch, CPU-only).  See :mod:`.neural` for the model, the synthetic
+training-corpus generator, and the training script.
 
 Public API:
 
-* :func:`convert_source` — convert a Go source string to Cangjie.
-* :class:`ConversionResult` — dataclass with the output text plus
-  chunk-coverage statistics used to gate quality downstream.
+* :func:`convert_source` — convert a Go source string to Cangjie source.
+* :class:`ConversionResult` — output text plus per-chunk statistics.
 """
 
+# Re-exported lazily so that ``import go2cj`` does not import torch on
+# users that only want to inspect package metadata.  The translator is
+# loaded the first time :func:`convert_source` is called.
 from .converter import convert_source, ConversionResult  # noqa: F401
 
 __all__ = ["convert_source", "ConversionResult"]
-__version__ = "0.1.0"
+__version__ = "0.2.0"
+"""0.2.0 — switched per-chunk translation from rule-based slot binding
+to a trained Transformer seq2seq."""

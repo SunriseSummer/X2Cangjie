@@ -1,0 +1,11 @@
+{
+  "n_samples": 8000,
+  "epochs": 6,
+  "batch_size": 96,
+  "lr": 0.0007,
+  "vocab_size": 1133,
+  "params": 741293,
+  "val_tok_acc": 0.5028453181583031,
+  "val_seq_acc": 0.1125,
+  "seed": 12648430
+}
