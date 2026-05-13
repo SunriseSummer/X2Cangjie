@@ -215,12 +215,122 @@ def _render_chunk(chunk: List[Token]) -> str:
 _NEEDS_COLLECTION = re.compile(r"\b(?:ArrayList|HashMap|HashSet)\b")
 
 
+def _split_statements(text: str) -> str:
+    """Break a possibly single-line Cangjie source into multi-line form.
+
+    The fine-tuned model — trained on chunks rendered as flat,
+    space-separated source text — tends to emit its translations on
+    one line.  Cangjie's parser is line-sensitive in many places
+    (``} return ...``, ``} var ...``, etc. all need either ``;`` or a
+    newline between the closing brace and the next statement).  This
+    helper inserts newlines at the canonical statement boundaries.
+
+    We walk the text and track string + brace context so we never split
+    inside a string literal or function-call parenthesis list.
+    """
+    out: List[str] = []
+    i = 0
+    n = len(text)
+    paren = bracket = 0
+    in_str = False
+    str_ch = ""
+    while i < n:
+        c = text[i]
+        if in_str:
+            out.append(c)
+            if c == "\\" and i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if c == str_ch:
+                in_str = False
+            i += 1
+            continue
+        if c in ('"', "'"):
+            in_str = True
+            str_ch = c
+            out.append(c)
+            i += 1
+            continue
+        if c == "(":
+            paren += 1
+        elif c == ")":
+            paren = max(paren - 1, 0)
+        elif c == "[":
+            bracket += 1
+        elif c == "]":
+            bracket = max(bracket - 1, 0)
+        out.append(c)
+        # Break after ';' or '}' at top level (outside () and []).
+        if paren == 0 and bracket == 0:
+            if c == ";":
+                # Skip following whitespace, then insert newline if not already.
+                j = i + 1
+                while j < n and text[j] in (" ", "\t"):
+                    j += 1
+                if j < n and text[j] != "\n":
+                    out.append("\n")
+                i = j
+                # Drop trailing semicolon's trailing spaces consumed above.
+                continue
+            if c == "}":
+                # Look ahead: if next non-space token starts a new statement
+                # (NOT one of else/catch/finally/while/,/;/)/]/}/./?), insert NL.
+                j = i + 1
+                while j < n and text[j] in (" ", "\t"):
+                    j += 1
+                if j < n and text[j] != "\n":
+                    nxt = text[j]
+                    if nxt in (",", ";", ")", "]", "}", ".", "?"):
+                        pass  # legitimate continuation, no break
+                    else:
+                        # Peek the next word token.
+                        m = re.match(r"[A-Za-z_]\w*", text[j:])
+                        word = m.group(0) if m else ""
+                        if word not in ("else", "catch", "finally", "while"):
+                            out.append("\n")
+                            i = j
+                            continue
+        i += 1
+    return "".join(out)
+
+
+def _indent_block(text: str, indent: str = "    ") -> str:
+    """Indent a brace-delimited body for readability.
+
+    Walks each line, decrements indent on lines starting with ``}`` and
+    increments after lines ending with ``{``.  Mainly cosmetic — Cangjie
+    doesn't care about indentation, but it makes the generated code and
+    cjc diagnostics readable.
+    """
+    out: List[str] = []
+    depth = 0
+    for raw in text.split("\n"):
+        line = raw.strip()
+        if not line:
+            out.append("")
+            continue
+        d = depth
+        if line.startswith("}") or line.startswith(")"):
+            d = max(depth - 1, 0)
+        out.append(indent * d + line)
+        # Update depth from net braces on this line.
+        for ch in line:
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth = max(depth - 1, 0)
+    return "\n".join(out)
+
+
 def _cosmetic(text: str) -> str:
     text = re.sub(r"\b(ArrayList|HashMap|HashSet|Option|Array)\s+<\s*",
                   r"\1<", text)
     text = re.sub(r"\s+>\s*\(", ">(", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"\s+,", ",", text)
+    text = _split_statements(text)
+    text = _indent_block(text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"[ \t]+\n", "\n", text)
     return text
 
