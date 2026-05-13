@@ -101,7 +101,7 @@ def _has(cmd: str) -> bool:
 
 def _case_sort_key(path: Path):
     import re
-    m = re.match(r"^(\d+)(.*)$", path.stem)
+    m = re.match(r"^(\d+)_(.*)$", path.stem)
     if m:
         return (int(m.group(1)), m.group(2))
     return (10**9, path.stem)
