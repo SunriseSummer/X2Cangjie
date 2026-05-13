@@ -1536,6 +1536,20 @@ def _scan_dict_names(src: str) -> set:
 
 
 def _find_matching(src: str, open_idx: int, open_ch: str, close_ch: str) -> int:
+    """Find the matching closing delimiter for ``src[open_idx]``.
+
+    Args:
+        src: Source text to scan.
+        open_idx: Index of the already-seen opening delimiter.
+        open_ch: Opening delimiter character.
+        close_ch: Closing delimiter character.
+
+    Returns:
+        The index of the matching closing delimiter, or ``-1`` if no balanced
+        close is found.  Nested delimiter pairs and string literals are
+        accounted for.
+    """
+
     depth = 1
     i = open_idx + 1
     in_str = False
@@ -1563,6 +1577,15 @@ def _find_matching(src: str, open_idx: int, open_ch: str, close_ch: str) -> int:
 
 
 def _parse_labeled_call_args(arg_text: str) -> dict:
+    """Parse Swift-style labeled call arguments into ``label -> value``.
+
+    Args:
+        arg_text: Text inside a call's parentheses, e.g. ``"from: a, by: -1"``.
+
+    Returns:
+        A dictionary mapping each top-level argument label to its value text.
+    """
+
     out: dict = {}
     for part in _split_top_level(arg_text, ","):
         if ":" not in part:
@@ -1573,6 +1596,16 @@ def _parse_labeled_call_args(arg_text: str) -> dict:
 
 
 def _parse_array_repeating_call(expr: str) -> Optional[Tuple[str, str]]:
+    """Parse ``Array(repeating: value, count: n)`` call text.
+
+    Args:
+        expr: Candidate expression text.
+
+    Returns:
+        ``(repeating_value, count)`` when the expression matches the Swift
+        initializer form; otherwise ``None``.
+    """
+
     expr = expr.strip()
     if not expr.startswith("Array"):
         return None
@@ -1590,6 +1623,12 @@ def _parse_array_repeating_call(expr: str) -> Optional[Tuple[str, str]]:
 
 def _rewrite_array_repeating_calls(src: str) -> str:
     """Swift ``Array(repeating:count:)`` -> helper-backed ArrayList creation.
+
+    Args:
+        src: Swift source text after interpolation normalization.
+
+    Returns:
+        Source text with repeating-array initializers rewritten to helper calls.
 
     The nested two-dimensional form gets its own helper so each row is a fresh
     ArrayList rather than repeated references to the same mutable row.
@@ -1627,6 +1666,16 @@ def _rewrite_array_repeating_calls(src: str) -> str:
 
 
 def _rewrite_reversed_calls(src: str) -> str:
+    """Rewrite Swift ``xs.reversed()`` calls to a Cangjie helper call.
+
+    Args:
+        src: Swift source text.
+
+    Returns:
+        Source text where simple ``.reversed()`` calls use
+        ``_swiftArrayReversed(xs)``.
+    """
+
     return _outside_strings_regex(
         src,
         r"\b([A-Za-z_]\w*(?:\[[^\]]+\])?)\.reversed\(\)",
@@ -1635,7 +1684,16 @@ def _rewrite_reversed_calls(src: str) -> str:
 
 
 def _rewrite_min_max_calls(src: str) -> str:
-    """Rewrite Swift stdlib ``min``/``max`` two-arg calls to Cangjie if-exprs."""
+    """Rewrite Swift stdlib ``min``/``max`` two-arg calls to Cangjie if-exprs.
+
+    Args:
+        src: Swift source text.
+
+    Returns:
+        Source text with free ``min(a, b)`` / ``max(a, b)`` calls rewritten to
+        Cangjie ``if`` expressions.  Member calls and function declarations are
+        left unchanged.
+    """
 
     out: List[str] = []
     i = 0
@@ -1674,7 +1732,15 @@ def _rewrite_min_max_calls(src: str) -> str:
 
 
 def _rewrite_stride_for_loops(src: str) -> str:
-    """Lower ``for x in stride(from:..., through/to:..., by:...)`` to while."""
+    """Lower ``for x in stride(from:..., through/to:..., by:...)`` to while.
+
+    Args:
+        src: Swift source text.
+
+    Returns:
+        Source text with stride-based ``for`` loops rewritten to equivalent
+        ``var`` + ``while`` loops.
+    """
 
     out: List[str] = []
     i = 0
@@ -1729,6 +1795,16 @@ def _rewrite_stride_for_loops(src: str) -> str:
 
 
 def _rewrite_guard_condition_commas(src: str) -> str:
+    """Convert comma-separated Swift ``guard`` conditions to ``&&``.
+
+    Args:
+        src: Swift source text.
+
+    Returns:
+        Source text where top-level commas in guard conditions are logical AND
+        operators that the Cangjie condition emitter can handle.
+    """
+
     def repl(m: re.Match) -> str:
         cond = m.group(1)
         parts = _split_top_level(cond, ",")
@@ -1740,6 +1816,16 @@ def _rewrite_guard_condition_commas(src: str) -> str:
 
 
 def _scan_named_tuple_returns(src: str) -> dict:
+    """Scan function declarations with named tuple return types.
+
+    Args:
+        src: Swift source text.
+
+    Returns:
+        A mapping of function name to ``[(label, swift_type), ...]`` entries
+        for each named tuple element.
+    """
+
     out: dict = {}
     func_re = re.compile(r"\bfunc\s+([A-Za-z_]\w*)\s*\([^{}]*\)\s*->\s*\(([^{}]+)\)\s*\{")
     for m in func_re.finditer(src):
@@ -1756,6 +1842,16 @@ def _scan_named_tuple_returns(src: str) -> dict:
 
 
 def _rewrite_named_tuple_accesses(src: str) -> str:
+    """Rewrite named tuple field accesses to Cangjie tuple indices.
+
+    Args:
+        src: Swift source text.
+
+    Returns:
+        Source text where bindings of functions returning named tuples can be
+        accessed as ``result[0]`` instead of Swift's ``result.maxValue`` form.
+    """
+
     tuple_returns = _scan_named_tuple_returns(src)
     for fn, labels in tuple_returns.items():
         binding_re = re.compile(rf"\b(?:let|var)\s+([A-Za-z_]\w*)\s*=\s*{re.escape(fn)}\s*\(")
@@ -1779,6 +1875,17 @@ def _rewrite_named_tuple_accesses(src: str) -> str:
 
 
 def _rewrite_empty_arrays_in_named_tuple_returns(src: str) -> str:
+    """Type empty array literals in named tuple return statements.
+
+    Args:
+        src: Swift source text.
+
+    Returns:
+        Source text where tuple returns such as ``return (0, [])`` use explicit
+        ``ArrayList<T>()`` constructors when the named tuple return annotation
+        provides the array element type.
+    """
+
     tuple_returns = _scan_named_tuple_returns(src)
     if not tuple_returns:
         return src

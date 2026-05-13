@@ -99,6 +99,14 @@ def _has(cmd: str) -> bool:
     return shutil.which(cmd) is not None
 
 
+def _case_sort_key(path: Path):
+    import re
+    m = re.match(r"^(\d+)(.*)$", path.stem)
+    if m:
+        return (int(m.group(1)), m.group(2))
+    return (10**9, path.stem)
+
+
 def _typecheck_swift(sw_path: Path) -> bool:
     if not _has("swiftc"):
         return True
@@ -122,7 +130,7 @@ def _run_binary(bin_path: Path, stdin_path):
 def run_all():
     GEN_DIR.mkdir(parents=True, exist_ok=True)
     results = []
-    cases = sorted(CASES_DIR.glob("*.swift"))
+    cases = sorted(CASES_DIR.glob("*.swift"), key=_case_sort_key)
     for sw in cases:
         name = sw.stem
         cj = GEN_DIR / f"{name}.cj"
