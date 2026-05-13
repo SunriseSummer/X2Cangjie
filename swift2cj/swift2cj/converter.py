@@ -4082,6 +4082,8 @@ def _polish_cj_style(text: str) -> str:
     masked = _outside_strings_regex(masked, r"(?<=[\w\]\)])\s*(==|!=|<=|>=|&&|\|\|)\s*(?=[!\w\(\[])", r" \1 ")
     masked = _outside_strings_regex(masked, r"(?<=[\w\]\)])\s*([<>])\s*(?=[\w\(\[])", r" \1 ")
     masked = _outside_strings_regex(masked, r"&&\s*!", r"&& !")
+    masked = _outside_strings_regex(masked, r"\)\s*\{", r") {")
+    masked = _outside_strings_regex(masked, r"\}\s*else\b", r"} else")
     masked = _outside_strings_regex(masked, r"\boperator func (==|!=|<=|>=|<|>)\s+\(", r"operator func \1(")
     masked = _outside_strings_regex(masked, r"([=(,\[:])\s*-\s+(?=\d)", r"\1-")
     masked = _outside_strings_regex(masked, r"=\s*-(?=\d)", r"= -")

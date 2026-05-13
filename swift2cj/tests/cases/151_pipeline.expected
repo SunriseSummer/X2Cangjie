@@ -1,0 +1,3 @@
+cost=10
+ready0=build
+ready1=build,test
