@@ -414,7 +414,7 @@ def _rewrite_printf_calls(src: str) -> str:
             continue
         args, end_idx = parse_args(src, m.end())
         # Replace format verbs with interpolation.
-        verb_re = re.compile(r"%(?:\+|-|#|0|\d)*\.?\d*[vdsftqxXbeEgGcUop%]")
+        verb_re = re.compile(r"%[+\-#0-9]*\.?[0-9]*[vdsftqxXbeEgGcUop%]")
         new_str: List[str] = []
         pos = 0
         ai = 0

@@ -1,13 +1,13 @@
 """Kohonen Self-Organizing Map (SOM).
 
 A small SOM is trained on the embedded patterns from
-:mod:`ts2cj.patterns`.  After training, each neuron in the 2-D grid
+:mod:`go2cj.patterns`.  After training, each neuron in the 2-D grid
 becomes a *prototype* for a translation pattern.  At conversion time we
 look up the best-matching unit (BMU) for an input chunk and use the
 patterns associated with that neuron as candidates.
 
 This gives us the "non-linear" pattern retrieval the user asked for:
-similar TS snippets get routed to the same SOM region and thus to the
+similar Go snippets get routed to the same SOM region and thus to the
 same Cangjie template family, even when their surface tokens differ
 significantly from any single stored pattern.
 

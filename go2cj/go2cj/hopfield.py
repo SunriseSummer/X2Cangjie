@@ -1,7 +1,7 @@
 """Hopfield-style associative memory for symbol mapping.
 
 We use this to translate identifier-level token streams (e.g. property
-names, method calls, type names) from TypeScript to Cangjie.  Each
+names, method calls, type names) from Go to Cangjie.  Each
 stored "memory" is a (key_vector, value_string) pair.  Recall is a
 non-linear competition: the input vector is compared against every
 stored key with a softmax, and we either return the winning value or
