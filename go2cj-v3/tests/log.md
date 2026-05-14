@@ -5,11 +5,11 @@
 ## 汇总
 
 - 用例总数：**60**
-- 模式覆盖率（confident / chunks）：**0.00%** (0 / 0)
+- 模式覆盖率（confident / chunks）：**100.00%** (109 / 109)
 - Go 源编译（`go vet`）：**60 / 60** (100.00%)
-- Cangjie 编译通过：**0 / 60** (0.00%)
-- 运行输出匹配：**0 / 60** (0.00%)
-- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**0.00%**
+- Cangjie 编译通过：**35 / 60** (58.33%)
+- 运行输出匹配：**29 / 60** (48.33%)
+- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**73.00%**
 
 ## 评分公式
 
@@ -23,308 +23,228 @@
 
 | 用例 | chunks | confident | fallback | 覆盖率 | Go vet | CJ 编译 | 运行 | 评分 |
 |---|---:|---:|---:|---:|:---:|:---:|:---:|---:|
-| `01_hello` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `02_arithmetic` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `03_vars` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `04_if_else` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `05_for_classic` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `06_while_for` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `07_functions` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `08_recursion` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `09_fibonacci` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `10_multi_return` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `11_slice` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `12_slice_append` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `13_nested_for` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `14_if_elif` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `15_string_concat` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `16_boolean_logic` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `17_fizzbuzz` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `18_sum_array` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `19_switch` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `20_struct_basic` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `21_struct_methods` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `22_interface` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `23_break_continue` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `24_printf_format` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `25_const_block` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `26_float_math` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `27_typed_func` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `28_count_chars` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `29_nested_func_calls` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `30_mixed_program` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `31_map_basic` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `32_string_basics` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `33_max_min` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `34_polymorphism` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `35_max_in_slice` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `36_gcd` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `37_primes` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `38_reverse_slice` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `39_counter` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `40_matrix_sum` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `41_range_index` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `42_swap_tuple` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `43_clamp` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `44_pair_struct` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `45_even_odd` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `46_bubble_sort` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `47_sum_digits` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `48_power` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `49_lcm` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `50_sum_range` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `51_squares` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `52_point_method` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `53_count_multiples` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `54_counter_pointer` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `55_average` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `56_factorial_table` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `57_max_and` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `58_abs` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `59_map_square` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
-| `60_rect_area` | 0 | 0 | 0 | n/a | ✅ | ❌ | ❌ | 0.00% |
+| `01_hello` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `02_arithmetic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `03_vars` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `04_if_else` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `05_for_classic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `06_while_for` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `07_functions` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `08_recursion` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `09_fibonacci` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `10_multi_return` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `11_slice` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `12_slice_append` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `13_nested_for` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `14_if_elif` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `15_string_concat` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `16_boolean_logic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `17_fizzbuzz` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `18_sum_array` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `19_switch` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `20_struct_basic` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `21_struct_methods` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `22_interface` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `23_break_continue` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `24_printf_format` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `25_const_block` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `26_float_math` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `27_typed_func` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `28_count_chars` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `29_nested_func_calls` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `30_mixed_program` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `31_map_basic` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `32_string_basics` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `33_max_min` | 3 | 3 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `34_polymorphism` | 6 | 6 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `35_max_in_slice` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `36_gcd` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `37_primes` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `38_reverse_slice` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `39_counter` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `40_matrix_sum` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `41_range_index` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `42_swap_tuple` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `43_clamp` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `44_pair_struct` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `45_even_odd` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `46_bubble_sort` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `47_sum_digits` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `48_power` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `49_lcm` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `50_sum_range` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `51_squares` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `52_point_method` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `53_count_multiples` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `54_counter_pointer` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `55_average` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `56_factorial_table` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `57_max_and` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `58_abs` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `59_map_square` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `60_rect_area` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 
 ## 失败 / 待改进用例诊断
 
-### `01_hello`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/01_hello.cj' doesn't exist`
-
-### `02_arithmetic`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/02_arithmetic.cj' doesn't exist`
-
-### `03_vars`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/03_vars.cj' doesn't exist`
-
-### `04_if_else`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/04_if_else.cj' doesn't exist`
-
-### `05_for_classic`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/05_for_classic.cj' doesn't exist`
-
-### `06_while_for`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/06_while_for.cj' doesn't exist`
-
-### `07_functions`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/07_functions.cj' doesn't exist`
-
-### `08_recursion`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/08_recursion.cj' doesn't exist`
-
-### `09_fibonacci`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/09_fibonacci.cj' doesn't exist`
-
 ### `10_multi_return`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/10_multi_return.cj' doesn't exist`
-
-### `11_slice`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/11_slice.cj' doesn't exist`
+- 运行差异：
+  ```
+  want:
+  '2\n1\n'
+   got:
+  '2 1\n'
+  ```
 
 ### `12_slice_append`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/12_slice_append.cj' doesn't exist`
+- cjc 诊断：`error: cannot have assignment expression in initializer`
 
 ### `13_nested_for`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/13_nested_for.cj' doesn't exist`
+- cjc 诊断：`error: cannot assign to immutable value`
 
 ### `14_if_elif`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/14_if_elif.cj' doesn't exist`
+- cjc 诊断：`error: trailing closure can only be used on function calls with function or variable names`
 
 ### `15_string_concat`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/15_string_concat.cj' doesn't exist`
-
-### `16_boolean_logic`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/16_boolean_logic.cj' doesn't exist`
+- 运行差异：
+  ```
+  want:
+  'Hello, World!\n'
+   got:
+  ''
+  ```
 
 ### `17_fizzbuzz`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/17_fizzbuzz.cj' doesn't exist`
+- cjc 诊断：`error: trailing closure can only be used on function calls with function or variable names`
 
 ### `18_sum_array`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/18_sum_array.cj' doesn't exist`
+- cjc 诊断：`error: mismatched types`
 
 ### `19_switch`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/19_switch.cj' doesn't exist`
-
-### `20_struct_basic`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/20_struct_basic.cj' doesn't exist`
+- cjc 诊断：`error: expected expression or declaration, found keyword 'case'`
 
 ### `21_struct_methods`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/21_struct_methods.cj' doesn't exist`
+- cjc 诊断：`error: expected type name after ':', found literal '42'`
 
 ### `22_interface`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/22_interface.cj' doesn't exist`
-
-### `23_break_continue`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/23_break_continue.cj' doesn't exist`
-
-### `24_printf_format`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/24_printf_format.cj' doesn't exist`
-
-### `25_const_block`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/25_const_block.cj' doesn't exist`
+- cjc 诊断：`error: undeclared type name 'Struct'`
 
 ### `26_float_math`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/26_float_math.cj' doesn't exist`
-
-### `27_typed_func`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/27_typed_func.cj' doesn't exist`
-
-### `28_count_chars`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/28_count_chars.cj' doesn't exist`
+- 运行差异：
+  ```
+  want:
+  '12.56\n'
+   got:
+  '12.560000\n'
+  ```
 
 ### `29_nested_func_calls`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/29_nested_func_calls.cj' doesn't exist`
+- cjc 诊断：`error: undeclared identifier 'Double'`
 
 ### `30_mixed_program`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/30_mixed_program.cj' doesn't exist`
+- cjc 诊断：`error: extra argument given for parameter list '(Int64, Int64)' in call`
 
 ### `31_map_basic`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/31_map_basic.cj' doesn't exist`
-
-### `32_string_basics`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/32_string_basics.cj' doesn't exist`
-
-### `33_max_min`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/33_max_min.cj' doesn't exist`
+- cjc 诊断：`error: mismatched types`
 
 ### `34_polymorphism`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/34_polymorphism.cj' doesn't exist`
-
-### `35_max_in_slice`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/35_max_in_slice.cj' doesn't exist`
-
-### `36_gcd`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/36_gcd.cj' doesn't exist`
+- cjc 诊断：`error: expected type name after ':', found ''`
 
 ### `37_primes`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/37_primes.cj' doesn't exist`
+- cjc 诊断：`error: cannot assign to immutable value`
 
 ### `38_reverse_slice`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/38_reverse_slice.cj' doesn't exist`
+- cjc 诊断：`error: cannot assign to immutable value`
 
 ### `39_counter`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/39_counter.cj' doesn't exist`
+- cjc 诊断：`error: expected expression after keyword 'return', found keyword 'Unit'`
 
 ### `40_matrix_sum`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/40_matrix_sum.cj' doesn't exist`
+- cjc 诊断：`error: unclosed delimiter: '['`
 
 ### `41_range_index`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/41_range_index.cj' doesn't exist`
+- cjc 诊断：`error: mismatched types`
 
 ### `42_swap_tuple`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/42_swap_tuple.cj' doesn't exist`
-
-### `43_clamp`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/43_clamp.cj' doesn't exist`
+- 运行差异：
+  ```
+  want:
+  '2\n1\n'
+   got:
+  '2 1\n'
+  ```
 
 ### `44_pair_struct`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/44_pair_struct.cj' doesn't exist`
+- cjc 诊断：`error: extra argument given for parameter list '(Int64, Int64)' in call`
 
 ### `45_even_odd`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/45_even_odd.cj' doesn't exist`
+- 运行差异：
+  ```
+  want:
+  '1 odd\n2 even\n3 odd\n4 even\n5 odd\n6 even\n'
+   got:
+  'odd\neven\nodd\neven\nodd\neven\n'
+  ```
 
 ### `46_bubble_sort`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/46_bubble_sort.cj' doesn't exist`
+- 运行差异：
+  ```
+  want:
+  '1\n2\n3\n4\n5\n'
+   got:
+  ''
+  ```
 
 ### `47_sum_digits`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/47_sum_digits.cj' doesn't exist`
-
-### `48_power`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/48_power.cj' doesn't exist`
+- cjc 诊断：`error: cannot assign to immutable value`
 
 ### `49_lcm`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/49_lcm.cj' doesn't exist`
+- cjc 诊断：`error: expected ';' or '<NL>', found ','`
 
 ### `50_sum_range`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/50_sum_range.cj' doesn't exist`
+- cjc 诊断：`error: expected a argument name after '(' in parameter list, found literal '1'`
 
 ### `51_squares`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/51_squares.cj' doesn't exist`
+- cjc 诊断：`error: cannot assign to immutable value`
 
 ### `52_point_method`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/52_point_method.cj' doesn't exist`
-
-### `53_count_multiples`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/53_count_multiples.cj' doesn't exist`
+- cjc 诊断：`error: extra argument given for parameter list '(Int64, Int64)' in call`
 
 ### `54_counter_pointer`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/54_counter_pointer.cj' doesn't exist`
-
-### `55_average`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/55_average.cj' doesn't exist`
-
-### `56_factorial_table`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/56_factorial_table.cj' doesn't exist`
-
-### `57_max_and`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/57_max_and.cj' doesn't exist`
-
-### `58_abs`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/58_abs.cj' doesn't exist`
-
-### `59_map_square`
-
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/59_map_square.cj' doesn't exist`
+- cjc 诊断：`error: expected expression after keyword 'return', found keyword 'Unit'`
 
 ### `60_rect_area`
 
-- cjc 诊断：`error: source file '/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/60_rect_area.cj' doesn't exist`
+- cjc 诊断：`error: extra argument given for parameter list '(Int64, Int64)' in call`
 
 
 ## 质量分析
