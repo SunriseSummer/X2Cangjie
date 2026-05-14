@@ -261,8 +261,18 @@ def _split_statements(text: str) -> str:
         elif c == "]":
             bracket = max(bracket - 1, 0)
         out.append(c)
-        # Break after ';' or '}' at top level (outside () and []).
+        # Break after '{', ';' or '}' at top level (outside () and []).
         if paren == 0 and bracket == 0:
+            if c == "{":
+                # Models often emit ``main() { var ...`` on one line; Cangjie
+                # requires a separator before the first body statement.
+                j = i + 1
+                while j < n and text[j] in (" ", "\t"):
+                    j += 1
+                if j < n and text[j] != "\n":
+                    out.append("\n")
+                    i = j
+                    continue
             if c == ";":
                 # Skip following whitespace, then insert newline if not already.
                 j = i + 1
