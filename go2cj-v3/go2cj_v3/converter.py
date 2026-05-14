@@ -357,24 +357,94 @@ def _indent_block(text: str, indent: str = "    ") -> str:
     return "\n".join(out)
 
 
+def _close_blocks_before_main(text: str) -> str:
+    """Keep generated ``main`` at top level when the model forgets a close brace."""
+
+    out: List[str] = []
+    depth = 0
+    for raw in text.split("\n"):
+        line = raw.strip()
+        if depth > 0 and re.match(r"main\s*\(\s*\)\s*\{", line):
+            for _ in range(depth):
+                out.append("}")
+            depth = 0
+        out.append(raw)
+        for ch in line:
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+    return "\n".join(out)
+
+
+def _drop_main_return_zero(text: str) -> str:
+    """Remove model-added ``return 0`` lines from generated top-level main."""
+
+    out: List[str] = []
+    main_depth = -1
+    depth = 0
+    for raw in text.split("\n"):
+        line = raw.strip()
+        in_main = main_depth >= 0 and depth >= main_depth
+        if in_main and line == "return 0":
+            continue
+        if main_depth < 0 and re.match(r"main\s*\(\s*\)\s*(?::\s*Unit\s*)?\{", line):
+            main_depth = depth + 1
+        out.append(raw)
+        for ch in line:
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+        if main_depth >= 0 and depth < main_depth:
+            main_depth = -1
+    return "\n".join(out)
+
+
+def _drop_unmatched_closing_braces(text: str) -> str:
+    out: List[str] = []
+    depth = 0
+    for raw in text.split("\n"):
+        line = raw.strip()
+        if line == "}" and depth <= 0:
+            continue
+        out.append(raw)
+        for ch in line:
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+    return "\n".join(out)
+
+
 def _cosmetic(text: str) -> str:
+    text = re.sub(r"\bpublic\s+public\s+", "public ", text)
     text = re.sub(r"\b(ArrayList|HashMap|HashSet|Option|Array)\s+<\s*",
                   r"\1<", text)
     text = re.sub(r"\s+>\s*\(", ">(", text)
     text = re.sub(r"\s+,", ",", text)
     text = re.sub(r"\b(true|false)\s+(?=(?:var|let|println|print|return)\b)",
                   r"\1\n", text)
+    text = re.sub(
+        r"(?<=[\w\]\)])\s+(?=(?:var|let|if|for|while|println|print|return)\b)",
+        "\n",
+        text,
+    )
+    text = re.sub(r"(?<=[0-9\]\)])\s+(?=\w+\s*(?:[+\-*/%]?=))", "\n", text)
     text = _split_statements(text)
     text = _indent_block(text)
-    # Only repair missing trailing right braces; extra right braces remain in
-    # the generated source so cjc can report the malformed output.
+    text = _close_blocks_before_main(text)
+    text = _indent_block(text)
+    text = _drop_main_return_zero(text)
+    text = _drop_unmatched_closing_braces(text)
+    # Repair missing trailing right braces after the safe line-level cleanup.
     balance = 0
     for ch in text:
         if ch == "{":
             balance += 1
         elif ch == "}":
             balance -= 1
-    if balance:
+    if balance > 0:
         text += "\n" + "\n".join("}" for _ in range(balance))
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"[ \t]+\n", "\n", text)

@@ -7,9 +7,9 @@
 - 用例总数：**60**
 - 模式覆盖率（confident / chunks）：**100.00%** (109 / 109)
 - Go 源编译（`go vet`）：**60 / 60** (100.00%)
-- Cangjie 编译通过：**35 / 60** (58.33%)
-- 运行输出匹配：**29 / 60** (48.33%)
-- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**73.00%**
+- Cangjie 编译通过：**33 / 60** (55.00%)
+- 运行输出匹配：**25 / 60** (41.67%)
+- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**70.33%**
 
 ## 评分公式
 
@@ -34,10 +34,10 @@
 | `09_fibonacci` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `10_multi_return` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `11_slice` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `12_slice_append` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `12_slice_append` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `13_nested_for` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `14_if_elif` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `15_string_concat` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `14_if_elif` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `15_string_concat` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `16_boolean_logic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `17_fizzbuzz` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `18_sum_array` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
@@ -48,14 +48,14 @@
 | `23_break_continue` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `24_printf_format` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `25_const_block` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `26_float_math` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `27_typed_func` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `28_count_chars` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `29_nested_func_calls` | 3 | 3 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `26_float_math` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `27_typed_func` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `28_count_chars` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `29_nested_func_calls` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `30_mixed_program` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `31_map_basic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `32_string_basics` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `33_max_min` | 3 | 3 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `31_map_basic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `32_string_basics` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `33_max_min` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `34_polymorphism` | 6 | 6 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `35_max_in_slice` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `36_gcd` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
@@ -66,25 +66,35 @@
 | `41_range_index` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `42_swap_tuple` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `43_clamp` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `44_pair_struct` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `45_even_odd` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `44_pair_struct` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `45_even_odd` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `46_bubble_sort` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `47_sum_digits` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `48_power` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `49_lcm` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `50_sum_range` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `50_sum_range` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `51_squares` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `52_point_method` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `53_count_multiples` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `53_count_multiples` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `54_counter_pointer` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `55_average` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `55_average` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `56_factorial_table` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `57_max_and` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `58_abs` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `59_map_square` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `58_abs` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `59_map_square` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `60_rect_area` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 
 ## 失败 / 待改进用例诊断
+
+### `12_slice_append`
+
+- 运行差异：
+  ```
+  want:
+  '1\n2\n3\n4\n5\n'
+   got:
+  ''
+  ```
 
 ### `13_nested_for`
 
@@ -92,12 +102,16 @@
 
 ### `14_if_elif`
 
+- cjc 诊断：`error: unexpected main function in function body`
+
+### `15_string_concat`
+
 - 运行差异：
   ```
   want:
-  'A\nB\nC\nF\n'
+  'Hello, World!\n'
    got:
-  'F\nF\nF\nA\n'
+  ''
   ```
 
 ### `17_fizzbuzz`
@@ -107,7 +121,7 @@
   want:
   '1\n2\nFizz\n4\nBuzz\nFizz\n7\n8\nFizz\nBuzz\n11\nFizz\n13\n14\nFizzBuzz\n'
    got:
-  'Fizz\nFizz\nFizzBuzz\nFizz\nFizzBuzz\nFizzBuzz\nFizz\nFizz\nFizzBuzz\nFizzBuzz\nFizz\nFizzBuzz\nFizz\nFizz\nFizzBuzz\n'
+  '1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n0\n'
   ```
 
 ### `19_switch`
@@ -116,15 +130,15 @@
 
 ### `20_struct_basic`
 
-- cjc 诊断：`error: unexpected main function in class body`
+- cjc 诊断：`error: duplicated modifier: 'public'`
 
 ### `21_struct_methods`
 
-- cjc 诊断：`error: unexpected main function in class body`
+- cjc 诊断：`error: 'this' cannot be used outside class or struct or interface`
 
 ### `22_interface`
 
-- cjc 诊断：`error: unexpected main function in class body`
+- cjc 诊断：`error: missing arguments for parameter list '(Struct-String, Struct-String)' in call`
 
 ### `23_break_continue`
 
@@ -136,23 +150,43 @@
 
 ### `26_float_math`
 
-- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'var'`
+- 运行差异：
+  ```
+  want:
+  '12.56\n'
+   got:
+  '12.560000\n'
+  ```
 
-### `28_count_chars`
+### `27_typed_func`
 
-- cjc 诊断：`error: undeclared identifier 'len'`
+- cjc 诊断：`error: mismatched types`
+
+### `29_nested_func_calls`
+
+- cjc 诊断：`error: unclosed delimiter: '('`
 
 ### `30_mixed_program`
 
-- cjc 诊断：`error: unexpected main function in class body`
+- cjc 诊断：`error: duplicated modifier: 'public'`
 
-### `32_string_basics`
+### `31_map_basic`
 
-- cjc 诊断：`error: undeclared identifier 'len'`
+- 运行差异：
+  ```
+  want:
+  '1\n2\n3\n'
+   got:
+  ''
+  ```
+
+### `33_max_min`
+
+- cjc 诊断：`error: mismatched types`
 
 ### `34_polymorphism`
 
-- cjc 诊断：`error: unexpected class declaration in class body`
+- cjc 诊断：`error: function 'Sound' has overload conflicts`
 
 ### `37_primes`
 
@@ -171,16 +205,16 @@
   want:
   '5\n4\n3\n2\n1\n'
    got:
-  ''
+  '5\n3\n2\n2\n3\n'
   ```
 
 ### `39_counter`
 
-- cjc 诊断：`error: unexpected main function in class body`
+- cjc 诊断：`error: expected declaration, found 'Counter'`
 
 ### `40_matrix_sum`
 
-- cjc 诊断：`error: mismatched types`
+- cjc 诊断：`error: unclosed delimiter: '['`
 
 ### `41_range_index`
 
@@ -188,63 +222,57 @@
 
 ### `43_clamp`
 
-- cjc 诊断：`error: unexpected main function in function body`
-
-### `44_pair_struct`
-
-- cjc 诊断：`error: unexpected main function in class body`
+- cjc 诊断：`error: expected '.', '(', '[', '{' or '?' after '?'`
 
 ### `45_even_odd`
 
-- 运行差异：
-  ```
-  want:
-  '1 odd\n2 even\n3 odd\n4 even\n5 odd\n6 even\n'
-   got:
-  '1\n2 even\n3\n4 even\n5\n6 even\n'
-  ```
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'else'`
 
 ### `46_bubble_sort`
 
-- cjc 诊断：`error: undeclared identifier 'len'`
+- cjc 诊断：`error: the return type of this function cannot be calculated from the function body and all the return expressions`
 
 ### `47_sum_digits`
 
-- cjc 诊断：`error: cannot assign to immutable value`
+- cjc 诊断：`error: expected ';' or '<NL>', found 'n'`
 
 ### `49_lcm`
 
-- cjc 诊断：`error: expected ';' or '<NL>', found 'x'`
-
-### `50_sum_range`
-
-- 运行差异：
-  ```
-  want:
-  '55\n5050\n'
-   got:
-  '55\n5049\n'
-  ```
+- cjc 诊断：`error: assignment operators cannot be chained`
 
 ### `52_point_method`
 
-- cjc 诊断：`error: unexpected main function in class body`
+- cjc 诊断：`error: duplicated modifier: 'public'`
+
+### `53_count_multiples`
+
+- cjc 诊断：`error: the return type of this function cannot be calculated from the function body and all the return expressions`
 
 ### `54_counter_pointer`
 
-- cjc 诊断：`error: unexpected main function in class body`
-
-### `55_average`
-
-- cjc 诊断：`error: undeclared identifier 'len'`
+- cjc 诊断：`error: expected declaration, found 'Counter'`
 
 ### `57_max_and`
 
 - cjc 诊断：`error: expected ';' or '<NL>', found keyword 'var'`
 
+### `58_abs`
+
+- 运行差异：
+  ```
+  want:
+  '7\n0\n42\n'
+   got:
+  '7\n0\n-42\n'
+  ```
+
+### `59_map_square`
+
+- cjc 诊断：`error: invalid binary operator '>' on type 'Class-ArrayList<Int64>' and 'Unit'`
+
 ### `60_rect_area`
 
-- cjc 诊断：`error: unexpected main function in class body`
+- cjc 诊断：`error: duplicated modifier: 'public'`
 
 
 ## 质量分析
