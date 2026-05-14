@@ -1,0 +1,8 @@
+shape count = 4
+total area  = 143
+Rect(3x4) area = 12
+Circle(r=5) area = 75
+Square(6) area = 36
+Rect(2x10) area = 20
+final = 3 1
+manhattan = 4

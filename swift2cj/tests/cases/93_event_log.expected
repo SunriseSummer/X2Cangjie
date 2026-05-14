@@ -1,0 +1,17 @@
+total entries = 5
+DBG count = 2
+WRN count = 1
+ERR count = 1
+-- dump above WARN --
+[3] WRN #3 low memory
+[5] ERR #5 disk full
+-- filter at INFO --
+now total = 7
+-- dump all --
+[1] DBG #1 tick 1
+[2] INF #2 system started
+[3] WRN #3 low memory
+[4] DBG #4 tick 2
+[5] ERR #5 disk full
+[6] INF #6 still here
+[7] ERR #7 boom

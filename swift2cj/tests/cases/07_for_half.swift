@@ -1,0 +1,5 @@
+var total: Int = 0
+for i in 0..<5 {
+    total = total + i
+}
+print(total)

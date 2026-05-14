@@ -1,0 +1,16 @@
+start = RED
+tick 1: GREEN
+tick 2: YELLOW
+tick 3: RED
+tick 4: GREEN
+tick 5: YELLOW
+tick 6: RED
+tick 7: GREEN
+history size = 7
+after reset = RED ticks=0 history=0
+L0 = RED
+L1 = GREEN
+L2 = YELLOW
+L0 after 3 ticks = RED (total 3)
+L1 after 3 ticks = GREEN (total 4)
+L2 after 3 ticks = YELLOW (total 5)

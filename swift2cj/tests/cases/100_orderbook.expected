@@ -1,0 +1,19 @@
+== trades ==
+BUY#5 <-> SELL#4 qty=6 @103
+trade count = 1
+== depth after ==
+BIDS:
+  #5 1 @ 104
+  #2 3 @ 102
+  #1 5 @ 100
+ASKS:
+  #3 4 @ 105
+== after sweep buy ==
+BUY#5 <-> SELL#4 qty=6 @103
+BUY#6 <-> SELL#3 qty=4 @105
+BIDS:
+  #6 16 @ 110
+  #5 1 @ 104
+  #2 3 @ 102
+  #1 5 @ 100
+ASKS:

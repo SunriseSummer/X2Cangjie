@@ -1,0 +1,11 @@
+n = 9
+degree(0) = 2
+degree(4) = 3
+degree(8) = 0
+bfs dist = [0, 1, 2, 1, 2, 3, -1, -1, -1]
+bfs sum = 6
+dfs order = [0, 1, 2, 4, 3, 5]
+components = 3
+bfs from 4 = [2, 2, 1, 1, 0, 1, -1, -1, -1]
+bfs from 6 = [-1, -1, -1, -1, -1, -1, 0, 1, -1]
+bfs from 8 = [-1, -1, -1, -1, -1, -1, -1, -1, 0]

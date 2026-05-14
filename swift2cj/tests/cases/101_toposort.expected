@@ -1,0 +1,13 @@
+g1: src->[compile] compile->[link, test] link->[package] package->[deploy] test->[package] deploy->[] 
+g1 order: [src, compile, link, test, package, deploy]
+g1 cycle: false
+g2: a->[c] c->[d] b->[c] d->[] e->[d] 
+g2 order: [a, b, e, c, d]
+g2 cycle: false
+g3: x->[y] y->[z] z->[x] 
+g3 order: []
+g3 cycle: true
+g4: p->[q] q->[] r->[s] s->[] lonely->[] 
+g4 order: [p, r, lonely, q, s]
+g4 cycle: false
+g4 node count: 5

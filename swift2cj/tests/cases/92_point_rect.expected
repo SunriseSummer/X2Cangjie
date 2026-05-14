@@ -1,0 +1,8 @@
+area = 50
+contains (3, 3) = true
+contains (11, 3) = false
+p moved to (6, 4)
+dist^2 to (10, 10) = 52
+r2 area = 16
+r2 contains (0, 0) = true
+r2 contains (3, 3) = false

@@ -1,0 +1,6 @@
+3 4 + = 7 err='' ops=1
+10 5 - 2 * = 10
+100 7 / 3 % = 2
+1+2+3+4 = 10
+10 0 / err='div by zero' top=0
+5 + err='stack underflow on +'

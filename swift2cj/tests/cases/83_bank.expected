@@ -1,0 +1,15 @@
+after deposits: total=1700
+transfer 1→2 300 = true
+transfer 2→3 1000 = false
+withdraw a1 200 = true
+withdraw a3 999 = false
+final total = 1500
+[1:Alice] balance=500 tx_count=3
+  DEP id=1000 amount=1000 other=-1
+  TX-OUT id=1003 amount=300 other=2
+  WD id=1005 amount=200 other=-1
+[2:Bob] balance=800 tx_count=2
+  DEP id=1001 amount=500 other=-1
+  TX-IN id=1003 amount=300 other=1
+[3:Carol] balance=200 tx_count=1
+  DEP id=1002 amount=200 other=-1
