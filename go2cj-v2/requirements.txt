@@ -1,0 +1,5 @@
+# Pinned versions only matter for installation; sandboxed agents may use newer.
+torch>=2.0
+transformers>=4.30,<5
+sentencepiece
+numpy
