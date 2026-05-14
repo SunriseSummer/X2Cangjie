@@ -296,7 +296,8 @@ def _split_statements(text: str) -> str:
                     i = j
                     continue
             if c == ";":
-                out.pop()
+                if out and out[-1] == ";":
+                    out.pop()
                 # Skip following whitespace, then insert newline if not already.
                 j = i + 1
                 while j < n and text[j] in (" ", "\t"):
@@ -365,12 +366,14 @@ def _cosmetic(text: str) -> str:
                   r"\1\n", text)
     text = _split_statements(text)
     text = _indent_block(text)
+    # Only repair missing trailing right braces; extra right braces remain in
+    # the generated source so cjc can report the malformed output.
     balance = 0
     for ch in text:
         if ch == "{":
             balance += 1
         elif ch == "}":
-            balance = max(balance - 1, 0)
+            balance -= 1
     if balance:
         text += "\n" + "\n".join("}" for _ in range(balance))
     text = re.sub(r"\n{3,}", "\n\n", text)
