@@ -260,9 +260,31 @@ def _split_statements(text: str) -> str:
             bracket += 1
         elif c == "]":
             bracket = max(bracket - 1, 0)
+        if c == "}" and paren == 0 and bracket == 0:
+            k = len(out) - 1
+            while k >= 0 and out[k] in (" ", "\t"):
+                k -= 1
+            if k >= 0 and out[k] not in ("\n", "{"):
+                out.append("\n")
         out.append(c)
         # Break after '{', ';' or '}' at top level (outside () and []).
         if paren == 0 and bracket == 0:
+            if c in (")", "]"):
+                j = i + 1
+                while j < n and text[j] in (" ", "\t"):
+                    j += 1
+                if j < n and text[j] != "\n":
+                    nxt = text[j]
+                    if nxt not in (",", ";", ")", "]", "}", ".", "?", "{",
+                                   "+", "-", "*", "/", "%", "<", ">", "=",
+                                   "&", "|", "^", ":"):
+                        m = re.match(r"[A-Za-z_]\w*", text[j:])
+                        word = m.group(0) if m else ""
+                        if word and word not in ("as", "is", "else", "catch",
+                                                 "finally", "while"):
+                            out.append("\n")
+                            i = j
+                            continue
             if c == "{":
                 # Models often emit ``main() { var ...`` on one line; Cangjie
                 # requires a separator before the first body statement.
@@ -274,6 +296,7 @@ def _split_statements(text: str) -> str:
                     i = j
                     continue
             if c == ";":
+                out.pop()
                 # Skip following whitespace, then insert newline if not already.
                 j = i + 1
                 while j < n and text[j] in (" ", "\t"):
@@ -338,8 +361,18 @@ def _cosmetic(text: str) -> str:
                   r"\1<", text)
     text = re.sub(r"\s+>\s*\(", ">(", text)
     text = re.sub(r"\s+,", ",", text)
+    text = re.sub(r"\b(true|false)\s+(?=(?:var|let|println|print|return)\b)",
+                  r"\1\n", text)
     text = _split_statements(text)
     text = _indent_block(text)
+    balance = 0
+    for ch in text:
+        if ch == "{":
+            balance += 1
+        elif ch == "}":
+            balance = max(balance - 1, 0)
+    if balance:
+        text += "\n" + "\n".join("}" for _ in range(balance))
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"[ \t]+\n", "\n", text)
     return text

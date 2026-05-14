@@ -7,9 +7,9 @@
 - 用例总数：**60**
 - 模式覆盖率（confident / chunks）：**100.00%** (109 / 109)
 - Go 源编译（`go vet`）：**60 / 60** (100.00%)
-- Cangjie 编译通过：**29 / 60** (48.33%)
-- 运行输出匹配：**24 / 60** (40.00%)
-- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**67.33%**
+- Cangjie 编译通过：**35 / 60** (58.33%)
+- 运行输出匹配：**29 / 60** (48.33%)
+- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**73.00%**
 
 ## 评分公式
 
@@ -33,14 +33,14 @@
 | `08_recursion` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `09_fibonacci` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `10_multi_return` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `11_slice` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `11_slice` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `12_slice_append` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `13_nested_for` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `14_if_elif` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `15_string_concat` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `16_boolean_logic` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `16_boolean_logic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `17_fizzbuzz` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `18_sum_array` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `18_sum_array` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `19_switch` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `20_struct_basic` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `21_struct_methods` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
@@ -57,10 +57,10 @@
 | `32_string_basics` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `33_max_min` | 3 | 3 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `34_polymorphism` | 6 | 6 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `35_max_in_slice` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `35_max_in_slice` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `36_gcd` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `37_primes` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `38_reverse_slice` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `38_reverse_slice` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `39_counter` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `40_matrix_sum` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `41_range_index` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
@@ -81,18 +81,14 @@
 | `56_factorial_table` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `57_max_and` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `58_abs` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `59_map_square` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `59_map_square` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `60_rect_area` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 
 ## 失败 / 待改进用例诊断
 
-### `11_slice`
-
-- cjc 诊断：`error: expected ';' or '<NL>', found 'println'`
-
 ### `13_nested_for`
 
-- cjc 诊断：`error: unclosed delimiter: '{'`
+- cjc 诊断：`error: the return type of this function cannot be calculated from the function body and all the return expressions`
 
 ### `14_if_elif`
 
@@ -104,10 +100,6 @@
   'F\nF\nF\nA\n'
   ```
 
-### `16_boolean_logic`
-
-- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'var'`
-
 ### `17_fizzbuzz`
 
 - 运行差异：
@@ -117,10 +109,6 @@
    got:
   'Fizz\nFizz\nFizzBuzz\nFizz\nFizzBuzz\nFizzBuzz\nFizz\nFizz\nFizzBuzz\nFizzBuzz\nFizz\nFizzBuzz\nFizz\nFizz\nFizzBuzz\n'
   ```
-
-### `18_sum_array`
-
-- cjc 诊断：`error: expected ';' or '<NL>', found 'println'`
 
 ### `19_switch`
 
@@ -140,7 +128,7 @@
 
 ### `23_break_continue`
 
-- cjc 诊断：`error: unclosed delimiter: '{'`
+- cjc 诊断：`error: the return type of this function cannot be calculated from the function body and all the return expressions`
 
 ### `25_const_block`
 
@@ -166,10 +154,6 @@
 
 - cjc 诊断：`error: unexpected class declaration in class body`
 
-### `35_max_in_slice`
-
-- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'var'`
-
 ### `37_primes`
 
 - 运行差异：
@@ -182,7 +166,13 @@
 
 ### `38_reverse_slice`
 
-- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'var'`
+- 运行差异：
+  ```
+  want:
+  '5\n4\n3\n2\n1\n'
+   got:
+  ''
+  ```
 
 ### `39_counter`
 
@@ -190,11 +180,11 @@
 
 ### `40_matrix_sum`
 
-- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'for'`
+- cjc 诊断：`error: mismatched types`
 
 ### `41_range_index`
 
-- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'for'`
+- cjc 诊断：`error: undeclared identifier 'v'`
 
 ### `43_clamp`
 
@@ -216,7 +206,7 @@
 
 ### `46_bubble_sort`
 
-- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'for'`
+- cjc 诊断：`error: undeclared identifier 'len'`
 
 ### `47_sum_digits`
 
@@ -246,13 +236,9 @@
 
 ### `55_average`
 
-- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'var'`
+- cjc 诊断：`error: undeclared identifier 'len'`
 
 ### `57_max_and`
-
-- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'var'`
-
-### `59_map_square`
 
 - cjc 诊断：`error: expected ';' or '<NL>', found keyword 'var'`
 

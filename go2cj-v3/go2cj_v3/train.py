@@ -330,8 +330,10 @@ def main(argv=None):
         # Save "last" snapshot.
         _atomic_save_model(model, tokenizer, FINETUNED_LAST_DIR)
 
-        # Save "best" if strictly better on val_seq.
-        if val_seq > meta.best_val_seq_acc + 1e-9:
+        # Save "best" if strictly better on val_seq, or if metadata exists but
+        # the ignored local checkpoint directory has not been reproduced yet.
+        if (val_seq > meta.best_val_seq_acc + 1e-9
+                or not (FINETUNED_DIR / "config.json").is_file()):
             meta.best_val_seq_acc = val_seq
             meta.best_val_tok_acc = val_tok
             meta.best_val_loss = avg_loss
