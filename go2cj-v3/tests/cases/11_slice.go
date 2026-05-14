@@ -1,0 +1,10 @@
+package main
+
+import "fmt"
+
+func main() {
+xs := []int{1, 2, 3}
+fmt.Println(xs[0])
+fmt.Println(xs[1])
+fmt.Println(xs[2])
+}
