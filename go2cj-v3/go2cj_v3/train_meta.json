@@ -1,5 +1,5 @@
 {
-  "epoch": 1,
+  "epoch": 2,
   "best_epoch": 1,
   "best_val_seq_acc": 0.7368421052631579,
   "best_val_tok_acc": 0.7601626016260162,
