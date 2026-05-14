@@ -7,9 +7,9 @@
 - 用例总数：**60**
 - 模式覆盖率（confident / chunks）：**100.00%** (109 / 109)
 - Go 源编译（`go vet`）：**60 / 60** (100.00%)
-- Cangjie 编译通过：**33 / 60** (55.00%)
-- 运行输出匹配：**25 / 60** (41.67%)
-- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**70.33%**
+- Cangjie 编译通过：**43 / 60** (71.67%)
+- 运行输出匹配：**33 / 60** (55.00%)
+- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**79.67%**
 
 ## 评分公式
 
@@ -24,7 +24,7 @@
 | 用例 | chunks | confident | fallback | 覆盖率 | Go vet | CJ 编译 | 运行 | 评分 |
 |---|---:|---:|---:|---:|:---:|:---:|:---:|---:|
 | `01_hello` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `02_arithmetic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `02_arithmetic` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `03_vars` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `04_if_else` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `05_for_classic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
@@ -34,59 +34,147 @@
 | `09_fibonacci` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `10_multi_return` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `11_slice` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `12_slice_append` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `12_slice_append` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `13_nested_for` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `14_if_elif` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `15_string_concat` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `14_if_elif` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `15_string_concat` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `16_boolean_logic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `17_fizzbuzz` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `17_fizzbuzz` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `18_sum_array` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `19_switch` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `20_struct_basic` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `20_struct_basic` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `21_struct_methods` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `22_interface` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `23_break_continue` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `24_printf_format` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `25_const_block` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `23_break_continue` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `24_printf_format` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `25_const_block` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `26_float_math` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `27_typed_func` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `27_typed_func` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `28_count_chars` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `29_nested_func_calls` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `29_nested_func_calls` | 3 | 3 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `30_mixed_program` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `31_map_basic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `31_map_basic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `32_string_basics` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `33_max_min` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `33_max_min` | 3 | 3 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `34_polymorphism` | 6 | 6 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `35_max_in_slice` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `36_gcd` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `37_primes` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `38_reverse_slice` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `37_primes` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `38_reverse_slice` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `39_counter` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `40_matrix_sum` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `41_range_index` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `42_swap_tuple` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `43_clamp` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `43_clamp` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `44_pair_struct` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `45_even_odd` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `46_bubble_sort` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `45_even_odd` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `46_bubble_sort` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `47_sum_digits` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `48_power` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `49_lcm` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `50_sum_range` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `48_power` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `49_lcm` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `50_sum_range` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `51_squares` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `52_point_method` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `53_count_multiples` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `53_count_multiples` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `54_counter_pointer` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `55_average` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `55_average` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `56_factorial_table` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `57_max_and` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `58_abs` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `59_map_square` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `57_max_and` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `58_abs` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `59_map_square` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `60_rect_area` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 
 ## 失败 / 待改进用例诊断
 
-### `12_slice_append`
+### `02_arithmetic`
+
+- cjc 诊断：`error: unclosed delimiter: '('`
+
+### `13_nested_for`
+
+- cjc 诊断：`error: the type Int64 of expression in for-in expression does not implement Iterator`
+
+### `17_fizzbuzz`
+
+- cjc 诊断：`error: expected ';' or '<NL>', found ''`
+
+### `19_switch`
+
+- cjc 诊断：`error: expected expression or declaration, found keyword 'case'`
+
+### `21_struct_methods`
+
+- cjc 诊断：`error: expected type name after ':', found literal '42'`
+
+### `22_interface`
+
+- cjc 诊断：`error: mismatched types`
+
+### `23_break_continue`
+
+- 运行差异：
+  ```
+  want:
+  '1\n3\n'
+   got:
+  ''
+  ```
+
+### `24_printf_format`
+
+- 运行差异：
+  ```
+  want:
+  'name=Cangjie year=2024\n'
+   got:
+  'name=Cangie year=2024\n'
+  ```
+
+### `26_float_math`
+
+- 运行差异：
+  ```
+  want:
+  '12.56\n'
+   got:
+  ''
+  ```
+
+### `30_mixed_program`
+
+- cjc 诊断：`error: expected type name after ':', found literal '4'`
+
+### `34_polymorphism`
+
+- cjc 诊断：`error: expected type name after ':', found ''`
+
+### `37_primes`
+
+- cjc 诊断：`error: expected declaration, found keyword 'return'`
+
+### `39_counter`
+
+- cjc 诊断：`error: expected type name after ':', found literal '0'`
+
+### `40_matrix_sum`
+
+- cjc 诊断：`error: unclosed delimiter: '('`
+
+### `41_range_index`
+
+- cjc 诊断：`error: undeclared identifier 'v'`
+
+### `45_even_odd`
+
+- 运行差异：
+  ```
+  want:
+  '1 odd\n2 even\n3 odd\n4 even\n5 odd\n6 even\n'
+   got:
+  '1\n2 even\n3\n4 even\n5\n6 even\n'
+  ```
+
+### `46_bubble_sort`
 
 - 运行差异：
   ```
@@ -96,183 +184,75 @@
   ''
   ```
 
-### `13_nested_for`
-
-- cjc 诊断：`error: the return type of this function cannot be calculated from the function body and all the return expressions`
-
-### `14_if_elif`
-
-- cjc 诊断：`error: unexpected main function in function body`
-
-### `15_string_concat`
-
-- 运行差异：
-  ```
-  want:
-  'Hello, World!\n'
-   got:
-  ''
-  ```
-
-### `17_fizzbuzz`
-
-- 运行差异：
-  ```
-  want:
-  '1\n2\nFizz\n4\nBuzz\nFizz\n7\n8\nFizz\nBuzz\n11\nFizz\n13\n14\nFizzBuzz\n'
-   got:
-  '1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n0\n'
-  ```
-
-### `19_switch`
-
-- cjc 诊断：`error: expected expression or declaration, found keyword 'case'`
-
-### `20_struct_basic`
-
-- cjc 诊断：`error: duplicated modifier: 'public'`
-
-### `21_struct_methods`
-
-- cjc 诊断：`error: 'this' cannot be used outside class or struct or interface`
-
-### `22_interface`
-
-- cjc 诊断：`error: missing arguments for parameter list '(Struct-String, Struct-String)' in call`
-
-### `23_break_continue`
-
-- cjc 诊断：`error: the return type of this function cannot be calculated from the function body and all the return expressions`
-
-### `25_const_block`
-
-- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'let'`
-
-### `26_float_math`
-
-- 运行差异：
-  ```
-  want:
-  '12.56\n'
-   got:
-  '12.560000\n'
-  ```
-
-### `27_typed_func`
-
-- cjc 诊断：`error: mismatched types`
-
-### `29_nested_func_calls`
-
-- cjc 诊断：`error: unclosed delimiter: '('`
-
-### `30_mixed_program`
-
-- cjc 诊断：`error: duplicated modifier: 'public'`
-
-### `31_map_basic`
-
-- 运行差异：
-  ```
-  want:
-  '1\n2\n3\n'
-   got:
-  ''
-  ```
-
-### `33_max_min`
-
-- cjc 诊断：`error: mismatched types`
-
-### `34_polymorphism`
-
-- cjc 诊断：`error: function 'Sound' has overload conflicts`
-
-### `37_primes`
-
-- 运行差异：
-  ```
-  want:
-  '2\n3\n5\n7\n11\n13\n17\n19\n'
-   got:
-  ''
-  ```
-
-### `38_reverse_slice`
-
-- 运行差异：
-  ```
-  want:
-  '5\n4\n3\n2\n1\n'
-   got:
-  '5\n3\n2\n2\n3\n'
-  ```
-
-### `39_counter`
-
-- cjc 诊断：`error: expected declaration, found 'Counter'`
-
-### `40_matrix_sum`
-
-- cjc 诊断：`error: unclosed delimiter: '['`
-
-### `41_range_index`
-
-- cjc 诊断：`error: undeclared identifier 'v'`
-
-### `43_clamp`
-
-- cjc 诊断：`error: expected '.', '(', '[', '{' or '?' after '?'`
-
-### `45_even_odd`
-
-- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'else'`
-
-### `46_bubble_sort`
-
-- cjc 诊断：`error: the return type of this function cannot be calculated from the function body and all the return expressions`
-
 ### `47_sum_digits`
 
-- cjc 诊断：`error: expected ';' or '<NL>', found 'n'`
+- cjc 诊断：`error: cannot assign to immutable value`
+
+### `48_power`
+
+- cjc 诊断：`error: expected declaration, found keyword 'return'`
 
 ### `49_lcm`
 
-- cjc 诊断：`error: assignment operators cannot be chained`
+- 运行差异：
+  ```
+  want:
+  '12\n35\n'
+   got:
+  "Command '['/home/runner/work/X2Cangjie/X2Cangjie/go2cj-v3/tests/generated/49_lcm.bin']' timed out after 10 seconds"
+  ```
 
-### `52_point_method`
-
-- cjc 诊断：`error: duplicated modifier: 'public'`
-
-### `53_count_multiples`
-
-- cjc 诊断：`error: the return type of this function cannot be calculated from the function body and all the return expressions`
-
-### `54_counter_pointer`
-
-- cjc 诊断：`error: expected declaration, found 'Counter'`
-
-### `57_max_and`
-
-- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'var'`
-
-### `58_abs`
+### `50_sum_range`
 
 - 运行差异：
   ```
   want:
-  '7\n0\n42\n'
+  '55\n5050\n'
    got:
-  '7\n0\n-42\n'
+  '55\n5049\n'
+  ```
+
+### `52_point_method`
+
+- cjc 诊断：`error: 'this' cannot be used outside class or struct or interface`
+
+### `53_count_multiples`
+
+- 运行差异：
+  ```
+  want:
+  '6\n'
+   got:
+  ''
+  ```
+
+### `54_counter_pointer`
+
+- cjc 诊断：`error: 'this' cannot be used outside class or struct or interface`
+
+### `55_average`
+
+- 运行差异：
+  ```
+  want:
+  '150\n30\n'
+   got:
+  '150\n'
   ```
 
 ### `59_map_square`
 
-- cjc 诊断：`error: invalid binary operator '>' on type 'Class-ArrayList<Int64>' and 'Unit'`
+- 运行差异：
+  ```
+  want:
+  '1\n4\n9\n16\n25\n'
+   got:
+  ''
+  ```
 
 ### `60_rect_area`
 
-- cjc 诊断：`error: duplicated modifier: 'public'`
+- cjc 诊断：`error: 'this' cannot be used outside class or struct or interface`
 
 
 ## 质量分析
