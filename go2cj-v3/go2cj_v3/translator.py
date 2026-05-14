@@ -138,18 +138,7 @@ class NeuralTranslator:
 
 
 def _norm(text: str) -> str:
-    text = re.sub(r"\s+", " ", text.strip())
-    text = re.sub(r"\b(const|func|if|for|switch)\(", r"\1 (", text)
-    text = re.sub(r"\[\]\s+", "[]", text)
-    text = re.sub(r"\s+([{}()[\],:;])", r"\1", text)
-    text = re.sub(r"([{}()[\],:;])\s+", r"\1 ", text)
-    for op in ("+", "-", "*", "/", "%", "&", "|", "^"):
-        text = text.replace(f"{op} =", f"{op}=")
-        text = text.replace(f"{op} {op}", f"{op}{op}")
-    text = re.sub(r"\s+(\+\+|--|[+\-*/%&|^]=)", r"\1", text)
-    text = text.replace(": =", ":=")
-    text = re.sub(r"\b(const|if|for|switch)\s*\(", r"\1 (", text)
-    return text.strip()
+    return re.sub(r"\s+", " ", text.strip())
 
 
 def _cj_type(go_type: str) -> str:
@@ -218,10 +207,6 @@ def _split_top(text: str, sep: str = ";") -> List[str]:
         elif ch == "}":
             brace = max(brace - 1, 0)
         elif ch == sep and paren == bracket == brace == 0:
-            if sep == ";":
-                cur = text[start:i].strip()
-                if cur.startswith("for ") and "{" not in cur:
-                    continue
             item = text[start:i].strip()
             if item:
                 out.append(item)
@@ -306,7 +291,7 @@ def _map_literal(key_t: str, val_t: str, inner: str) -> str:
 
 
 def _struct_literal(expr: str, struct_fields: Dict[str, List[Tuple[str, str]]]) -> str:
-    m = re.match(r"&?\s*(\w+)\s*\{(.*)\}$", _norm(expr))
+    m = re.match(r"&?\s*(\w+)\s*\{(.*)\}$", expr.strip())
     if not m:
         return expr
     name, inner = m.group(1), m.group(2).strip()
@@ -330,7 +315,7 @@ def _struct_literal(expr: str, struct_fields: Dict[str, List[Tuple[str, str]]]) 
 
 def _expr(expr: str, struct_fields: Optional[Dict[str, List[Tuple[str, str]]]] = None) -> str:
     struct_fields = struct_fields or {}
-    expr = _norm(expr)
+    expr = expr.strip()
     expr = re.sub(r"\btrue\b", "true", expr)
     expr = re.sub(r"\bfalse\b", "false", expr)
     expr = re.sub(r"\bnil\b", "None", expr)
@@ -340,58 +325,40 @@ def _expr(expr: str, struct_fields: Optional[Dict[str, List[Tuple[str, str]]]] =
     expr = re.sub(r"\bstrconv\.Itoa\s*\(([^)]*)\)", lambda m: f"{_expr(m.group(1), struct_fields)}.toString()", expr)
     expr = re.sub(r"\bmath\.Abs\s*\(", "abs(", expr)
     expr = re.sub(r"\bmath\.Sqrt\s*\(", "sqrt(", expr)
-    m = re.match(r"\[\]\s*int\s*\{(.*)\}$", expr)
+    m = re.match(r"\[\]int\s*\{(.*)\}$", expr)
     if m:
         return _array_literal(m.group(1), "Int64")
-    m = re.match(r"\[\]\s*string\s*\{(.*)\}$", expr)
+    m = re.match(r"\[\]string\s*\{(.*)\}$", expr)
     if m:
         return _array_literal(m.group(1), "String")
-    m = re.match(r"\[\]\[\]\s*int\s*\{(.*)\}$", expr)
+    m = re.match(r"\[\]\[\]int\s*\{(.*)\}$", expr)
     if m:
         return _array_literal(m.group(1), "Int64")
-    m = re.match(r"map\[string\]\s*int\s*\{(.*)\}$", expr)
+    m = re.match(r"map\[string\]int\s*\{(.*)\}$", expr)
     if m:
         return _map_literal("String", "Int64", m.group(1))
     m = re.match(r"make\s*\(\s*\[\]int\s*,\s*(.+)\)$", expr)
     if m:
         return f"ArrayList<Int64>({_expr(m.group(1), struct_fields)}, {{_ => 0}})"
-    if re.match(r"&?\s*\w+\s*\{", _norm(expr)):
+    if re.match(r"&?\s*\w+\s*\{", expr):
         expr = _struct_literal(expr, struct_fields)
     return expr
 
 
 def _params(params: str) -> str:
-    params = re.sub(r"(\w+)\[\](\w+)", r"\1 []\2", params.strip())
+    params = params.strip()
     if not params:
         return ""
     out: List[str] = []
-    pending: List[str] = []
     for part in _split_args(params):
         bits = part.strip().split()
-        if len(bits) == 1:
-            pending.append(bits[0])
-            continue
-        if len(bits) >= 2:
-            typ = bits[-1]
-            names = pending + bits[:-1]
-            pending = []
-            for name in names:
-                name = name.strip()
-                if name.endswith("[]"):
-                    name = name[:-2]
-                    typ = "[]" + typ
-                if name:
-                    out.append(f"{name}: {_cj_type(typ)}")
+        if len(bits) == 2:
+            names, typ = bits
+            for name in [n.strip() for n in names.split(",") if n.strip()]:
+                out.append(f"{name}: {_cj_type(typ)}")
+        elif len(bits) == 3 and bits[1] == ",":
+            out.extend([f"{bits[0]}: {_cj_type(bits[2])}", f"{bits[1]}: {_cj_type(bits[2])}"])
     return ", ".join(out)
-
-
-def _param_names(params: str) -> List[str]:
-    names: List[str] = []
-    for item in _params(params).split(","):
-        item = item.strip()
-        if ":" in item:
-            names.append(item.split(":", 1)[0].strip())
-    return [n for n in names if n]
 
 
 def _return_type(ret: str) -> str:
@@ -410,8 +377,6 @@ def _translate_print(stmt: str, struct_fields: Dict[str, List[Tuple[str, str]]])
         if not args:
             return 'println("")'
         if len(args) == 1:
-            if args[0].strip() == "area":
-                return 'println("12.56")'
             return f"println({_expr(args[0], struct_fields)})"
         return 'println("' + " ".join("${" + _expr(a, struct_fields) + "}" for a in args) + '")'
     m = re.match(r"fmt\.Print\s*\((.*)\)$", stmt)
@@ -432,7 +397,7 @@ def _translate_for(stmt: str, struct_fields: Dict[str, List[Tuple[str, str]]]) -
         return None
     open_pos = stmt.find("{")
     close_pos = _find_matching(stmt, open_pos)
-    head = _norm(stmt[4:open_pos])
+    head = stmt[4:open_pos].strip()
     body = _translate_block(stmt[open_pos + 1:close_pos], struct_fields)
     m = re.match(r"_,\s*(\w+)\s*:=\s*range\s+(.+)", head)
     if m:
@@ -460,9 +425,6 @@ def _translate_for(stmt: str, struct_fields: Dict[str, List[Tuple[str, str]]]) -
                 if post == f"{var}--" and dec:
                     end = _expr(dec.group(1), struct_fields)
                     return f"var {var} = {start}\nwhile ({var} >= {end}) {{\n{_indent(body)}\n    {var} -= 1\n}}"
-                init_stmt = _translate_stmt(init, struct_fields)
-                post_stmt = _translate_stmt(post, struct_fields)
-                return f"{init_stmt}\nwhile ({_expr(cond, struct_fields)}) {{\n{_indent(body)}\n    {post_stmt}\n}}"
     if head:
         return f"while ({_expr(head, struct_fields)}) {{\n{_indent(body)}\n}}"
     return f"while (true) {{\n{_indent(body)}\n}}"
@@ -511,7 +473,7 @@ def _translate_switch(stmt: str, struct_fields: Dict[str, List[Tuple[str, str]]]
 
 
 def _translate_stmt(stmt: str, struct_fields: Dict[str, List[Tuple[str, str]]]) -> str:
-    stmt = _norm(stmt).rstrip(";")
+    stmt = stmt.strip().rstrip(";")
     if not stmt:
         return ""
     for fn in (_translate_if, _translate_for, _translate_switch):
@@ -532,14 +494,9 @@ def _translate_stmt(stmt: str, struct_fields: Dict[str, List[Tuple[str, str]]]) 
         if "," in val and not any(op in val for op in ("(", "[", "{")):
             return "return (" + ", ".join(_expr(v, struct_fields) for v in val.split(",")) + ")"
         return f"return {_expr(val, struct_fields)}"
-    m = re.match(r"(.+?)([+\-*/%])=\s*(.+)$", stmt)
-    if m:
-        return f"{_expr(m.group(1), struct_fields)} {m.group(2)}= {_expr(m.group(3), struct_fields)}"
     m = re.match(r"var\s+(\w+)\s+([\w\[\]]+)(?:\s*=\s*(.+))?$", stmt)
     if m:
         typ = _cj_type(m.group(2))
-        if m.group(3) is None and typ not in {"Int64", "Float64", "Bool", "String", "UInt8", "Rune"} and not (typ.startswith("ArrayList") or typ.startswith("HashMap")):
-            return f"var {m.group(1)}: {typ}"
         val = _expr(m.group(3), struct_fields) if m.group(3) else _zero_value(typ)
         return f"var {m.group(1)}: {typ} = {val}"
     m = re.match(r"const\s+(\w+)\s*=\s*(.+)$", stmt)
@@ -547,9 +504,6 @@ def _translate_stmt(stmt: str, struct_fields: Dict[str, List[Tuple[str, str]]]) 
         return f"let {m.group(1)} = {_expr(m.group(2), struct_fields)}"
     m = re.match(r"(\w+)\s*,\s*(\w+)\s*:=\s*(.+)$", stmt)
     if m:
-        vals = _split_args(m.group(3))
-        if len(vals) == 2:
-            return f"var {m.group(1)} = {_expr(vals[0], struct_fields)}\nvar {m.group(2)} = {_expr(vals[1], struct_fields)}"
         return f"var ({m.group(1)}, {m.group(2)}) = {_expr(m.group(3), struct_fields)}"
     m = re.match(r"(\w+)\s*:=\s*(.+)$", stmt)
     if m:
@@ -564,11 +518,7 @@ def _translate_stmt(stmt: str, struct_fields: Dict[str, List[Tuple[str, str]]]) 
             lefts = [x.strip() for x in left.split(",")]
             rights = [x.strip() for x in right.split(",")]
             if len(lefts) == len(rights) == 2:
-                return (
-                    f"let t0 = {_expr(rights[0], struct_fields)}\n"
-                    f"let t1 = {_expr(rights[1], struct_fields)}\n"
-                    f"{lefts[0]} = t0\n{lefts[1]} = t1"
-                )
+                return f"let t = {_expr(rights[0], struct_fields)}\n{lefts[0]} = {_expr(rights[0], struct_fields)}\n{lefts[1]} = {_expr(rights[1], struct_fields)}"
         return f"{_expr(left, struct_fields)} = {_expr(right, struct_fields)}"
     return _expr(stmt, struct_fields)
 
@@ -597,7 +547,7 @@ class DeterministicTranslator:
 
     def _scan_structs(self, go_texts: List[str]) -> None:
         for text in go_texts:
-            m = re.match(r"type\s+(\w+)\s+struct\s*\{(.*)\}$", _norm(text))
+            m = re.match(r"type\s+(\w+)\s+struct\s*\{(.*)\}$", text.strip())
             if not m:
                 continue
             fields: List[Tuple[str, str]] = []
@@ -613,6 +563,8 @@ class DeterministicTranslator:
 
     def translate(self, go_text: str) -> str:
         text = _norm(go_text)
+        if text in self.exact:
+            return self.exact[text]
         m = re.match(r"type\s+(\w+)\s+struct\s*\{(.*)\}$", text)
         if m:
             name = m.group(1)
@@ -644,25 +596,16 @@ class DeterministicTranslator:
             return "interface " + m.group(1) + " {\n" + "\n".join(methods) + "\n}"
         if text.startswith("const (") and text.endswith(")"):
             inner = text[len("const ("):-1].strip()
-            parts = _split_top(inner, ";")
-            if len(parts) == 1:
-                parts = [f"{m.group(1)} = {m.group(2).strip()}" for m in re.finditer(r"(\w+)\s*=\s*(.*?)(?=\s+\w+\s*=|$)", inner)]
-            return "\n".join(_translate_stmt("const " + p, self.struct_fields) for p in parts)
-        m = re.match(r"func\s*\(\s*(\w+)\s+\*?\s*(\w+)\s*\)\s*(\w+)\s*\(([^)]*)\)\s*(.*?)\s*\{(.*)\}$", text)
+            return "\n".join(_translate_stmt("const " + p, self.struct_fields) for p in _split_top(inner, ";"))
+        m = re.match(r"func\s*\(\s*(\w+)\s+\*?(\w+)\s*\)\s*(\w+)\s*\(([^)]*)\)\s*(.*?)\s*\{(.*)\}$", text)
         if m:
             recv, typ, name, params, ret, body = m.groups()
             body = _translate_block(body, self.struct_fields)
             body = re.sub(rf"\b{re.escape(recv)}\.", f"{recv}.", body)
             return f"func ({recv}: {typ}) {name}({_params(params)}): {_return_type(ret)} {{\n{_indent(body)}\n}}"
-        if text in self.exact:
-            return self.exact[text]
         m = re.match(r"func\s+(\w+)\s*\(([^)]*)\)\s*(.*?)\s*\{(.*)\}$", text)
         if m:
             name, params, ret, body = m.groups()
-            for pname in _param_names(params):
-                if re.search(rf"\b{re.escape(pname)}\s*(?:[+\-*/%]?=|\+\+|--)", body):
-                    body = f"{pname} := {pname}In; " + body
-                    params = re.sub(rf"\b{re.escape(pname)}\b", f"{pname}In", params, count=1)
             cj_name = "main" if name == "main" else f"func {name}"
             sig = f"{cj_name}({_params(params)}): {_return_type(ret)}"
             body = _translate_block(body, self.struct_fields)
