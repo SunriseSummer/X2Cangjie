@@ -4,12 +4,12 @@
 
 ## 汇总
 
-- 用例总数：**45**
-- 模式覆盖率（confident / chunks）：**100.00%** (81 / 81)
-- Go 源编译（`go vet`）：**45 / 45** (100.00%)
-- Cangjie 编译通过：**16 / 45** (35.56%)
-- 运行输出匹配：**14 / 45** (31.11%)
-- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**60.44%**
+- 用例总数：**60**
+- 模式覆盖率（confident / chunks）：**100.00%** (109 / 109)
+- Go 源编译（`go vet`）：**60 / 60** (100.00%)
+- Cangjie 编译通过：**22 / 60** (36.67%)
+- 运行输出匹配：**18 / 60** (30.00%)
+- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**60.67%**
 
 ## 评分公式
 
@@ -27,20 +27,20 @@
 | `02_arithmetic` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `03_vars` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `04_if_else` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `05_for_classic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `05_for_classic` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `06_while_for` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `07_functions` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `07_functions` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `08_recursion` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `09_fibonacci` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `10_multi_return` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `10_multi_return` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `11_slice` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `12_slice_append` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `13_nested_for` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `14_if_elif` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `15_string_concat` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `16_boolean_logic` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `16_boolean_logic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `17_fizzbuzz` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `18_sum_array` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `18_sum_array` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `19_switch` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `20_struct_basic` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `21_struct_methods` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
@@ -49,67 +49,104 @@
 | `24_printf_format` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `25_const_block` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `26_float_math` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `27_typed_func` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `27_typed_func` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `28_count_chars` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `29_nested_func_calls` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `30_mixed_program` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `31_map_basic` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `32_string_basics` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `33_max_min` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `33_max_min` | 3 | 3 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `34_polymorphism` | 6 | 6 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `35_max_in_slice` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `36_gcd` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `36_gcd` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `37_primes` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `38_reverse_slice` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `39_counter` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `40_matrix_sum` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `41_range_index` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `42_swap_tuple` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `43_clamp` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `42_swap_tuple` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `43_clamp` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `44_pair_struct` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `45_even_odd` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `46_bubble_sort` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `47_sum_digits` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `48_power` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `49_lcm` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `50_sum_range` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `51_squares` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `52_point_method` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `53_count_multiples` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `54_counter_pointer` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `55_average` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `56_factorial_table` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `57_max_and` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `58_abs` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `59_map_square` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `60_rect_area` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 
 ## 失败 / 待改进用例诊断
 
 ### `02_arithmetic`
 
-- cjc 诊断：`error: redefinition of declaration 'a'`
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'while'`
 
 ### `03_vars`
 
 - cjc 诊断：`error: expected type name after ':', found literal '10'`
 
+### `05_for_classic`
+
+- cjc 诊断：`error: cannot assign to immutable value`
+
 ### `06_while_for`
 
 - cjc 诊断：`error: cannot assign to immutable value`
 
+### `07_functions`
+
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'return'`
+
+### `10_multi_return`
+
+- cjc 诊断：`error: mismatched types`
+
 ### `11_slice`
 
-- cjc 诊断：`error: expected ';' or '<NL>', found 'ArrayList'`
+- cjc 诊断：`error: expected ';' or '<NL>', found 'println'`
 
 ### `12_slice_append`
 
-- cjc 诊断：`error: expected ';' or '<NL>', found ','`
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'var'`
 
 ### `16_boolean_logic`
 
-- cjc 诊断：`error: redefinition of declaration 'a'`
+- 运行差异：
+  ```
+  want:
+  'false\ntrue\nfalse\n'
+   got:
+  'false\ntrue\ntrue\ntrue\nfalse\n'
+  ```
+
+### `18_sum_array`
+
+- cjc 诊断：`error: expected ';' or '<NL>', found 'println'`
 
 ### `19_switch`
 
-- cjc 诊断：`error: expected '{', found keyword 'return'`
+- cjc 诊断：`error: expected expression or declaration, found keyword 'case'`
 
 ### `20_struct_basic`
 
-- cjc 诊断：`error: 'Z' is not a member of class 'Point'`
+- cjc 诊断：`error: expected ';' or '<NL>', found 'println'`
 
 ### `21_struct_methods`
 
-- cjc 诊断：`error: redefinition of declaration 'Value'`
+- cjc 诊断：`error: unmatched delimiter: ']'`
 
 ### `22_interface`
 
-- cjc 诊断：`error: function 'Greet' has overload conflicts`
+- cjc 诊断：`error: expected member name or constructor call after 'English' type name`
 
 ### `24_printf_format`
 
@@ -117,7 +154,7 @@
 
 ### `25_const_block`
 
-- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'let'`
+- cjc 诊断：`error: 1-element tuple pattern is not allowed`
 
 ### `26_float_math`
 
@@ -129,19 +166,9 @@
   '12.560000\n'
   ```
 
-### `27_typed_func`
-
-- 运行差异：
-  ```
-  want:
-  '7\n10\n'
-   got:
-  '7\n10\n7\n10\n'
-  ```
-
 ### `28_count_chars`
 
-- cjc 诊断：`error: unterminated single-line string`
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'return'`
 
 ### `29_nested_func_calls`
 
@@ -149,23 +176,19 @@
 
 ### `30_mixed_program`
 
-- cjc 诊断：`error: unclosed delimiter: '('`
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'var'`
 
 ### `31_map_basic`
 
-- cjc 诊断：`error: unmatched delimiter: ')'`
+- cjc 诊断：`error: expected ';' or '<NL>', found 'println'`
 
 ### `32_string_basics`
 
-- cjc 诊断：`error: undeclared identifier 'len'`
-
-### `33_max_min`
-
-- cjc 诊断：`error: expected expression after '(', found keyword 'main'`
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'return'`
 
 ### `34_polymorphism`
 
-- cjc 诊断：`error: expected type name after ':', found ''`
+- cjc 诊断：`error: unclosed delimiter: '('`
 
 ### `35_max_in_slice`
 
@@ -173,11 +196,17 @@
 
 ### `36_gcd`
 
-- cjc 诊断：`error: unclosed delimiter: '('`
+- 运行差异：
+  ```
+  want:
+  '6\n25\n'
+   got:
+  '48\n100\n'
+  ```
 
 ### `37_primes`
 
-- cjc 诊断：`error: unclosed delimiter: '('`
+- cjc 诊断：`error: cannot assign to immutable value`
 
 ### `38_reverse_slice`
 
@@ -185,27 +214,69 @@
 
 ### `39_counter`
 
-- cjc 诊断：`error: redefinition of declaration 'count'`
+- cjc 诊断：`error: 'this' cannot be used outside class or struct or interface`
 
 ### `40_matrix_sum`
 
-- cjc 诊断：`error: unclosed delimiter: '['`
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'for'`
 
 ### `41_range_index`
 
 - cjc 诊断：`error: expected ';' or '<NL>', found keyword 'for'`
 
+### `42_swap_tuple`
+
+- cjc 诊断：`error: mismatched types`
+
 ### `43_clamp`
 
-- cjc 诊断：`error: expected expression after '(', found keyword 'main'`
+- 运行差异：
+  ```
+  want:
+  '5\n0\n10\n'
+   got:
+  '5\n3\n10\n'
+  ```
 
 ### `44_pair_struct`
 
-- cjc 诊断：`error: unclosed delimiter: '('`
+- cjc 诊断：`error: expected ';' or '<NL>', found 'println'`
 
 ### `45_even_odd`
 
 - cjc 诊断：`error: extra argument given for parameter list '(UInt64)' in call`
+
+### `46_bubble_sort`
+
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'let'`
+
+### `47_sum_digits`
+
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'while'`
+
+### `49_lcm`
+
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'while'`
+
+### `52_point_method`
+
+- cjc 诊断：`error: expected ';' or '<NL>', found 'println'`
+
+### `54_counter_pointer`
+
+- cjc 诊断：`error: 'this' cannot be used outside class or struct or interface`
+
+### `55_average`
+
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'var'`
+
+### `59_map_square`
+
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'var'`
+
+### `60_rect_area`
+
+- cjc 诊断：`error: expected ';' or '<NL>', found 'println'`
 
 
 ## 质量分析
