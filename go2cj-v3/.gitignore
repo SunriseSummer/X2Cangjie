@@ -1,0 +1,10 @@
+# Base model (downloaded by scripts/download_base.sh into base_model/)
+base_model/
+# Fine-tuned checkpoints (large; reproduce with `python -m go2cj_v3.train`)
+go2cj_v3/finetuned/
+go2cj_v3/finetuned_last/
+# Generated test artefacts
+tests/generated/
+# Python
+__pycache__/
+*.pyc
