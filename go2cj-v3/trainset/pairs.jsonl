@@ -464,3 +464,44 @@
 {"go": "func (c Counter) Get() int { return c.Value }", "cj": "public func Get(): Int64 { return this.Value }"}
 {"go": "type Counter struct { Value int }", "cj": "open class Counter { public var Value: Int64; public init(Value: Int64) { this.Value = Value } }"}
 {"go": "type Rect struct { W int; H int }", "cj": "open class Rect { public var W: Int64; public var H: Int64; public init(W: Int64, H: Int64) { this.W = W; this.H = H } }"}
+{"go": "count++", "cj": "count += 1"}
+{"go": "count--", "cj": "count -= 1"}
+{"go": "n++", "cj": "n += 1"}
+{"go": "i++", "cj": "i += 1"}
+{"go": "x++", "cj": "x += 1"}
+{"go": "c.count++", "cj": "c.count += 1"}
+{"go": "this.count++", "cj": "this.count += 1"}
+{"go": "if i%3 == 0 { count++ }", "cj": "if (i % 3 == 0) { count += 1 }"}
+{"go": "if x > 0 { count++ }", "cj": "if (x > 0) { count += 1 }"}
+{"go": "for i := 1; i <= 20; i++ { if i%3 == 0 { count++ } }", "cj": "for (i in 1..=20) { if (i % 3 == 0) { count += 1 } }"}
+{"go": "count := 0; for i := 1; i <= 20; i++ { if i%3 == 0 { count++ } }; fmt.Println(count)", "cj": "var count = 0; for (i in 1..=20) { if (i % 3 == 0) { count += 1 } }; println(count)"}
+{"go": "for n := 2; n < 20; n++", "cj": "for (n in 2..20)"}
+{"go": "for i := 0; i < 10; i++", "cj": "for (i in 0..10)"}
+{"go": "for i := 1; i <= 6; i++", "cj": "for (i in 1..=6)"}
+{"go": "for i := 1; i <= 20; i++", "cj": "for (i in 1..=20)"}
+{"go": "fmt.Println(i, v)", "cj": "println(\"${i} ${v}\")"}
+{"go": "fmt.Println(i, \"even\")", "cj": "println(\"${i} even\")"}
+{"go": "fmt.Println(i, \"odd\")", "cj": "println(\"${i} odd\")"}
+{"go": "fmt.Println(a, b)", "cj": "println(\"${a} ${b}\")"}
+{"go": "fmt.Println(x, y)", "cj": "println(\"${x} ${y}\")"}
+{"go": "fmt.Println(k, v)", "cj": "println(\"${k} ${v}\")"}
+{"go": "if isEven(i) { fmt.Println(i, \"even\") } else { fmt.Println(i, \"odd\") }", "cj": "if (isEven(i)) { println(\"${i} even\") } else { println(\"${i} odd\") }"}
+{"go": "for i := 1; i <= 6; i++ { if isEven(i) { fmt.Println(i, \"even\") } else { fmt.Println(i, \"odd\") } }", "cj": "for (i in 1..=6) { if (isEven(i)) { println(\"${i} even\") } else { println(\"${i} odd\") } }"}
+{"go": "func isEven(n int) bool { return n%2 == 0 }", "cj": "func isEven(n: Int64): Bool { return n % 2 == 0 }"}
+{"go": "func isOdd(n int) bool { return n%2 != 0 }", "cj": "func isOdd(n: Int64): Bool { return n % 2 != 0 }"}
+{"go": "a, b := swap(1, 2); fmt.Println(a); fmt.Println(b)", "cj": "let (a, b) = swap(1, 2); println(a); println(b)"}
+{"go": "x, y := swap(3, 4); fmt.Println(x); fmt.Println(y)", "cj": "let (x, y) = swap(3, 4); println(x); println(y)"}
+{"go": "return b, a", "cj": "return (b, a)"}
+{"go": "return a, b", "cj": "return (a, b)"}
+{"go": "return x, y", "cj": "return (x, y)"}
+{"go": "func swap(a int, b int) (int, int) { return b, a }", "cj": "func swap(a: Int64, b: Int64): (Int64, Int64) { return (b, a) }"}
+{"go": "for i, v := range xs { fmt.Println(i, v) }", "cj": "for (i in 0..xs.size) { let v = xs[i]; println(\"${i} ${v}\") }"}
+{"go": "xs := []int{1, 2, 3, 4, 5}; for i, v := range xs { fmt.Println(i, v) }", "cj": "var xs = ArrayList<Int64>([1, 2, 3, 4, 5]); for (i in 0..xs.size) { let v = xs[i]; println(\"${i} ${v}\") }"}
+{"go": "c := Counter{count: 0}; c.Inc(); c.Inc(); c.Inc(); fmt.Println(c.Get())", "cj": "var c = Counter(0); c.Inc(); c.Inc(); c.Inc(); println(c.Get())"}
+{"go": "type Counter struct { count int }", "cj": "open class Counter { public var count: Int64; public init(count: Int64) { this.count = count } }"}
+{"go": "func (c *Counter) Inc() { c.count++ }", "cj": "public func Inc(): Unit { this.count += 1 }"}
+{"go": "func (c Counter) Get() int { return c.count }", "cj": "public func Get(): Int64 { return this.count }"}
+{"go": "func (r Rect) Area() int { return r.W * r.H }", "cj": "public func Area(): Int64 { return this.W * this.H }"}
+{"go": "func (p Point) Sum() int { return p.X + p.Y }", "cj": "public func Sum(): Int64 { return this.X + this.Y }"}
+{"go": "r := Rect{W: 4, H: 6}; fmt.Println(r.Area())", "cj": "var r = Rect(4, 6); println(r.Area())"}
+{"go": "p := Point{X: 10, Y: 20}; fmt.Println(p.X); fmt.Println(p.Y); fmt.Println(p.Sum())", "cj": "var p = Point(10, 20); println(p.X); println(p.Y); println(p.Sum())"}
