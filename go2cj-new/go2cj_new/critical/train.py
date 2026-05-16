@@ -137,13 +137,18 @@ def _split_top_level(src: str, semi: str = ";") -> List[str]:
             if cur_str and not cur_str.rstrip().endswith((",", "+", "-", "*",
                                                           "/", "=", "&", "|",
                                                           "(", "[", "{")):
-                # Only emit when this line *isn't* the start of a
-                # function/struct/interface (those need their {…}).
-                if not re.match(
-                        r"^(func|type|interface|struct|class|var|const|"
-                        r"public|private|open|import|package)\b", cur_str):
-                    chunks.append(cur_str)
-                    cur = []
+                # ``func ... {`` / ``type X struct {`` / etc need their
+                # ``{…}`` body before they're a complete statement, so
+                # we don't split *inside* such a declaration.  Detect
+                # via the trailing token: if it ends with ``{`` we
+                # already excluded above.  ``package main`` and
+                # ``import "fmt"`` are complete statements at top
+                # level and *do* deserve their own chunk — previously
+                # the leading-keyword check refused to split them too,
+                # which collapsed whole Go files into a single chunk
+                # at training time.
+                chunks.append(cur_str)
+                cur = []
         i += 1
     tail = "".join(cur).strip()
     if tail:
@@ -151,12 +156,53 @@ def _split_top_level(src: str, semi: str = ";") -> List[str]:
     return [c for c in chunks if c]
 
 
+_GO_MAIN_RE = re.compile(r"^func\s+main\s*\(\s*\)\s*\{(.*)\}\s*$", re.S)
+_CJ_MAIN_RE = re.compile(r"^main\s*\(\s*\)\s*\{(.*)\}\s*$", re.S)
+
+
+def _unfold_main_body(go_chunk: str, cj_chunk: str) -> List[Tuple[str, str]]:
+    """If ``go_chunk`` is ``func main(){…}`` and ``cj_chunk`` is the
+    matching ``main(){…}``, return per-statement pairs from their
+    bodies.
+
+    Cangjie ``main`` bodies are wrapped in an outer ``return 0`` that
+    Go's ``main`` does not have; we strip the trailing ``return 0`` (or
+    ``return``) before splitting so the statement counts line up.
+
+    Returned pairs are *only* yielded when both bodies split into the
+    same number of top-level statements (otherwise alignment is
+    ambiguous and we drop the program).
+    """
+    gm = _GO_MAIN_RE.match(go_chunk.strip())
+    cm = _CJ_MAIN_RE.match(cj_chunk.strip())
+    if not (gm and cm):
+        return []
+    go_body = gm.group(1).strip()
+    cj_body = cm.group(1).strip()
+    # Strip Cangjie's trailing ``return 0`` (synthesised by the
+    # converter, not present in Go).
+    cj_body = re.sub(r"\breturn\s+0\s*$", "", cj_body).strip()
+    cj_body = re.sub(r"\breturn\s*$", "", cj_body).strip()
+    go_stmts = _split_top_level(go_body)
+    cj_stmts = _split_top_level(cj_body)
+    if len(go_stmts) != len(cj_stmts):
+        return []
+    return list(zip(go_stmts, cj_stmts))
+
+
 def _load_programs() -> List[Tuple[str, str]]:
     """Pair-align top-level chunks from ``programs/*.go`` and ``*.cj``.
 
     For each ``foo.go`` / ``foo.cj`` we segment both, drop
     ``package`` / ``import`` decls, and zip the remaining chunks
-    pairwise.  Mismatched chunk counts are skipped (they're noisy).
+    pairwise.  In addition, **when the program contains a
+    ``func main(){…}`` chunk, we also unfold its body into
+    per-statement chunk pairs** — this is critical because the
+    inference-time chunker (`_unfold_main` in converter.py) similarly
+    unfolds main bodies, so training and inference see the same
+    statement-level shapes.
+
+    Mismatched chunk counts are skipped (they're noisy).
     """
     pdir = TRAINSET / "programs"
     if not pdir.is_dir():
@@ -174,6 +220,11 @@ def _load_programs() -> List[Tuple[str, str]]:
             continue
         for g, c in zip(go_chunks, cj_chunks):
             pairs.append((g, c))
+            # If this chunk is a main body, *also* emit each of its
+            # inner statements as a separate training pair.  The
+            # whole-main pair is still kept so we can fall back to it
+            # if the inference-time chunker fails to unfold.
+            pairs.extend(_unfold_main_body(g, c))
     return pairs
 
 

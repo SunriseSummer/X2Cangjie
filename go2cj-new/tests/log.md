@@ -7,9 +7,9 @@
 - 用例总数：**45**
 - 模式覆盖率（confident / chunks）：**97.56%** (160 / 164)
 - Go 源编译（`go vet`）：**45 / 45** (100.00%)
-- Cangjie 编译通过：**18 / 45** (40.00%)
-- 运行输出匹配：**8 / 45** (17.78%)
-- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**58.37%**
+- Cangjie 编译通过：**24 / 45** (53.33%)
+- 运行输出匹配：**10 / 45** (22.22%)
+- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**64.59%**
 
 ## 评分公式
 
@@ -30,17 +30,17 @@
 | `05_for_classic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `06_while_for` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `07_functions` | 2 | 1 | 1 | 50% | ✅ | ✅ | ✅ | 80.00% |
-| `08_recursion` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `09_fibonacci` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `08_recursion` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `09_fibonacci` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `10_multi_return` | 4 | 4 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `11_slice` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `11_slice` | 4 | 4 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `12_slice_append` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `13_nested_for` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `14_if_elif` | 5 | 5 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `14_if_elif` | 5 | 5 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `15_string_concat` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `16_boolean_logic` | 5 | 5 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `16_boolean_logic` | 5 | 5 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `17_fizzbuzz` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `18_sum_array` | 3 | 3 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `18_sum_array` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `19_switch` | 5 | 5 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `20_struct_basic` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `21_struct_methods` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
@@ -51,10 +51,10 @@
 | `26_float_math` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `27_typed_func` | 3 | 2 | 1 | 67% | ✅ | ❌ | ❌ | 26.67% |
 | `28_count_chars` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `29_nested_func_calls` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `29_nested_func_calls` | 3 | 3 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `30_mixed_program` | 8 | 8 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `31_map_basic` | 4 | 4 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `32_string_basics` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `32_string_basics` | 3 | 3 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `33_max_min` | 4 | 2 | 2 | 50% | ✅ | ✅ | ✅ | 80.00% |
 | `34_polymorphism` | 10 | 10 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `35_max_in_slice` | 4 | 4 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
@@ -78,7 +78,7 @@
   want:
   '13\n7\n30\n3\n1\n'
    got:
-  '13\n13\n13\n13\n13\n'
+  '13\n10\n10\n10\n10\n'
   ```
 
 ### `03_vars`
@@ -95,21 +95,19 @@
   ''
   ```
 
-### `08_recursion`
-
-- cjc 诊断：`error: mismatched types`
-
-### `09_fibonacci`
-
-- cjc 诊断：`error: mismatched types`
-
 ### `11_slice`
 
-- cjc 诊断：`error: invalid binary operator '>' on type 'Class-ArrayList<Int64>' and 'Int64'`
+- 运行差异：
+  ```
+  want:
+  '1\n2\n3\n'
+   got:
+  '[1, 2, 3]\n[1, 2, 3]\n[1, 2, 3]\n'
+  ```
 
 ### `12_slice_append`
 
-- cjc 诊断：`error: cannot convert an integer literal to type 'Class-ArrayList<Int64>'`
+- cjc 诊断：`error: no matching function for operator '()' function call`
 
 ### `13_nested_for`
 
@@ -123,7 +121,13 @@
 
 ### `14_if_elif`
 
-- cjc 诊断：`error: redefinition of declaration 'grade'`
+- 运行差异：
+  ```
+  want:
+  'A\nB\nC\nF\n'
+   got:
+  '8550\n90\n90\n90\n'
+  ```
 
 ### `15_string_concat`
 
@@ -131,21 +135,21 @@
 
 ### `16_boolean_logic`
 
-- cjc 诊断：`error: invalid binary operator '+' on type 'Bool' and 'Bool'`
-
-### `17_fizzbuzz`
-
-- cjc 诊断：`error: undeclared identifier 'i'`
-
-### `18_sum_array`
-
 - 运行差异：
   ```
   want:
-  '15\n'
+  'false\ntrue\nfalse\n'
    got:
-  ''
+  'true\ntrue\ntrue\n'
   ```
+
+### `17_fizzbuzz`
+
+- cjc 诊断：`error: unexpected main function in main function body`
+
+### `18_sum_array`
+
+- cjc 诊断：`error: mismatched types`
 
 ### `19_switch`
 
@@ -153,7 +157,7 @@
 
 ### `20_struct_basic`
 
-- cjc 诊断：`error: undeclared identifier 'X'`
+- cjc 诊断：`error: mismatched types`
 
 ### `21_struct_methods`
 
@@ -190,7 +194,7 @@
   want:
   '60\n'
    got:
-  ''
+  '30\n'
   ```
 
 ### `26_float_math`
@@ -213,7 +217,13 @@
 
 ### `29_nested_func_calls`
 
-- cjc 诊断：`error: mismatched types`
+- 运行差异：
+  ```
+  want:
+  '12\n'
+   got:
+  '25\n'
+  ```
 
 ### `30_mixed_program`
 
@@ -237,19 +247,25 @@
 
 ### `32_string_basics`
 
-- cjc 诊断：`error: redefinition of declaration 's'`
+- 运行差异：
+  ```
+  want:
+  '5\nhello world\n'
+   got:
+  'hello\nhello\n'
+  ```
 
 ### `34_polymorphism`
 
-- cjc 诊断：`error: undeclared identifier 'a'`
+- cjc 诊断：`error: undeclared identifier 'name'`
 
 ### `36_gcd`
 
-- cjc 诊断：`error: mismatched types`
+- cjc 诊断：`error: unable to infer generic argument of this function`
 
 ### `37_primes`
 
-- cjc 诊断：`error: invalid binary operator '-' on type '(Int64) -> Int64' and 'Int64'`
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'var'`
 
 ### `38_reverse_slice`
 
@@ -265,19 +281,19 @@
 
 ### `41_range_index`
 
-- cjc 诊断：`error: no matching function for operator '()' function call`
+- cjc 诊断：`error: 'values' is not a member of class 'ArrayList<Int64>'`
 
 ### `43_clamp`
 
-- cjc 诊断：`error: undeclared identifier 'add'`
+- cjc 诊断：`error: missing argument for parameter list '(Int64, Int64, Int64)' in call`
 
 ### `44_pair_struct`
 
-- cjc 诊断：`error: undeclared identifier 'A'`
+- cjc 诊断：`error: mismatched types`
 
 ### `45_even_odd`
 
-- cjc 诊断：`error: cannot convert an integer literal to type '(Int64) -> Int64'`
+- cjc 诊断：`error: cannot convert an integer literal to type '(Int64) -> Bool'`
 
 
 ## 质量分析
