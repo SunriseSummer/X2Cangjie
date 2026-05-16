@@ -1372,6 +1372,49 @@ def _rewrite_go_idioms(text: str) -> str:
         r"\1var (\2, \3) = ", text,
     )
 
+    # --- Slice of struct keyed literals ``[]T{{F:v,…}, {F:v,…}}`` --- #
+    # Convert each inner ``{F:v, …}`` to a positional ``T(v, …)``
+    # call and wrap the whole slice as
+    # ``ArrayList<T>([T(v,…), T(v,…), …])``.  Conservative: only
+    # fires when the element type is a capitalised identifier and
+    # every element body is a keyed literal.
+    def _slice_struct_lit(m: re.Match) -> str:
+        type_name = m.group(1)
+        body = m.group(2)
+        # Find each balanced ``{...}`` element at the top level.
+        elements: List[str] = []
+        depth = 0
+        cur_start = -1
+        for i, ch in enumerate(body):
+            if ch == "{":
+                if depth == 0:
+                    cur_start = i + 1
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0 and cur_start >= 0:
+                    elements.append(body[cur_start:i])
+                    cur_start = -1
+        if not elements:
+            return m.group(0)
+        call_strs: List[str] = []
+        for elem in elements:
+            # Each elem is ``F1: v1, F2: v2, …``.
+            parts = [p.strip() for p in elem.split(",") if p.strip()]
+            vals: List[str] = []
+            for p in parts:
+                km = re.match(r"^[A-Za-z_]\w*\s*:\s*(.+)$", p, flags=re.S)
+                if not km:
+                    return m.group(0)
+                vals.append(km.group(1).strip())
+            call_strs.append(f"{type_name}({', '.join(vals)})")
+        return f"ArrayList<{type_name}>([{', '.join(call_strs)}])"
+    text = re.sub(
+        r"\[\s*\]\s*([A-Z][A-Za-z_]\w*)\s*"
+        r"\{\s*((?:\{[^{}]*\}\s*,?\s*)+)\}",
+        _slice_struct_lit, text,
+    )
+
     # --- Multi-argument ``fmt.Println`` / ``fmt.Print`` ---------- #
     # Cangjie's ``println(x)`` takes a single argument; Go's
     # ``fmt.Println(a, b, c)`` prints space-separated.  Translate by
@@ -1647,6 +1690,13 @@ _FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
     # ``x := y`` → ``var x = y`` keeps the subscript intact.
     re.compile(r"\b[A-Za-z_]\w*\s*:=\s*[A-Za-z_]\w*\s*\[[^\[\]]+\]\s*$",
                re.MULTILINE),
+    # ``IDENT = IDENT [ … ]`` regular assignment whose RHS is a
+    # single indexed read.  CHIME has a template family that
+    # treats one operand as an array and *swaps the subscript
+    # role* (``best = dp[i]`` → ``best[dp] = i``).  The
+    # deterministic identity-rewrite keeps the original shape.
+    re.compile(r"^\s*[A-Za-z_]\w*\s*=\s*[A-Za-z_]\w*\s*\[[^\[\]]+\]\s*$",
+               re.MULTILINE),
     # ``return EXPR`` whose body is a Go boolean comparison /
     # logical combinator.  CHIME's small template set conflates
     # ``return r == original`` with ``return r + original``
@@ -1690,6 +1740,11 @@ _FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
     # rewriter converts to a positional ``Type(val, val, …)``
     # which lines up with the synthesised Cangjie constructor.
     re.compile(r"\b[A-Z][A-Za-z_]\w*\s*\{\s*[A-Za-z_]\w*\s*:\s*[^{}]+\}"),
+    # ``[]T{{…}, {…}}`` slice-of-struct keyed literal.  CHIME
+    # leaves the tokens raw because nothing in the trainset has
+    # this shape; the deterministic rewriter produces
+    # ``ArrayList<T>([T(...), T(...), …])``.
+    re.compile(r"\[\s*\]\s*[A-Z][A-Za-z_]\w*\s*\{\s*\{"),
     # ``IDENT := IDENT OP …`` short-var declaration with an
     # arithmetic RHS (``j := i - 1``).  CHIME's small template set
     # for short-var routinely loses the operator and binds the
