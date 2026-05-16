@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .lexer import Token, tokenize
 
@@ -268,39 +268,130 @@ def _is_func_main(chunk: List[Token]) -> bool:
             and chunk[-1].value == "}")
 
 
-def _unfold_main(chunks: List[List[Token]]) -> Tuple[List[List[Token]], List[bool]]:
-    """Replace any ``func main(){body}`` chunk with the body's per-stmt
-    chunks, and return a parallel ``from_main`` flag list.
+def _func_split(chunk: List[Token]) -> Optional[Tuple[str, List[Token], List[Token]]]:
+    """If ``chunk`` is a ``func NAME(...) <ret>? { body }`` declaration,
+    return ``(name, header_tokens_incl_open_brace, body_tokens)``.
 
-    Motivation: the CHIME associative memory retrieves on a per-chunk
-    basis.  Keeping the entire ``main`` body as a single huge chunk is
-    severely OOD on a small curated trainset (this is the well-known
-    OOD pitfall that hurts go2cj v1's end-to-end pass rate).  By
-    unfolding the body into individual statements, we get many more
-    accurate hits.  The lifted-and-assembled output re-wraps the body
-    in ``main() { ... return 0 }`` automatically.
+    The header includes everything up to and including the opening
+    ``{``; the body excludes both the opening ``{`` and the closing
+    ``}``.  Returns ``None`` for non-function chunks (top-level
+    ``type`` / ``var`` / ``const`` decls etc.).
+    """
+    if (len(chunk) < 6
+            or chunk[0].kind != "KEYWORD" or chunk[0].value != "func"
+            or chunk[1].kind != "IDENT"
+            or chunk[-1].value != "}"):
+        return None
+    name = chunk[1].value
+    # Walk forward to the *first* ``{`` at brace-depth 0 *that opens
+    # the function body* — skip generic ``<...>`` and parameter ``(...)``
+    # without descending into them.  We track paren / bracket depth so
+    # composite-literal-looking ``{`` inside parameter defaults can't
+    # confuse us.
+    paren_depth = bracket_depth = 0
+    body_brace_index = -1
+    for i, tok in enumerate(chunk):
+        if tok.value == "(":
+            paren_depth += 1
+        elif tok.value == ")":
+            paren_depth = max(paren_depth - 1, 0)
+        elif tok.value == "[":
+            bracket_depth += 1
+        elif tok.value == "]":
+            bracket_depth = max(bracket_depth - 1, 0)
+        elif (tok.value == "{" and paren_depth == 0
+              and bracket_depth == 0 and i > 1):
+            body_brace_index = i
+            break
+    if body_brace_index < 0:
+        return None
+    header = chunk[:body_brace_index + 1]
+    body = chunk[body_brace_index + 1:-1]
+    return name, header, body
 
-    The ``from_main`` flag is needed because once the body is unfolded
-    the statements look like top-level decls (e.g. ``var y = 10``)
-    which the assembler would otherwise hoist to module scope.  The
-    flag forces them back into the synthesised main body.
+
+def _unfold_functions(
+    chunks: List[List[Token]],
+) -> Tuple[List[List[Token]], List[Optional[str]]]:
+    """Replace every ``func NAME(...) {body}`` chunk with a flat
+    sequence ``[header, *per_stmt_body_chunks, footer]`` and return a
+    parallel ``from_func`` tag list.
+
+    Recursive Block Unfolding (RBU): the same decomposition that
+    ``_unfold_main`` does for ``main()`` is applied uniformly to every
+    user-defined function as well.  Without this, any non-trivial
+    function (e.g. a 30-line knapsack DP, a 50-line quicksort) enters
+    CHIME as a single 100+-token chunk that has no chance of matching
+    the statement-level templates the engine was trained on.  With RBU,
+    every statement inside every function is independently translated,
+    and the function's structure is reconstructed at assembly time.
+
+    Tag semantics (``from_func[i]``):
+
+    * ``None``  — top-level decl (``type``, ``var``, ``const``,
+      ``interface``, free-standing ``func`` header / footer, etc.).
+    * ``"main"`` — body statement inside ``func main`` (re-wrapped by
+      the synthesised ``main() { … return 0 }`` block).
+    * ``"<name>"`` — body statement inside ``func <name>`` (re-wrapped
+      between the translated header / closing brace of that function).
     """
     out: List[List[Token]] = []
-    from_main: List[bool] = []
+    tags: List[Optional[str]] = []
     for ch in chunks:
         if _is_func_main(ch):
-            # Drop the leading ``func main () {`` and trailing ``}``.
+            # Existing main-unfold behaviour: emit body statements only;
+            # the converter synthesises the surrounding ``main(){…}``.
             body = ch[5:-1]
-            # Re-run the same segmenter on the body — bracketed
-            # control-flow blocks therein stay as single chunks while
-            # top-level statements split.
             for sub in _segment_chunks(body):
                 out.append(sub)
-                from_main.append(True)
-        else:
+                tags.append("main")
+            continue
+        split = _func_split(ch)
+        if split is None:
             out.append(ch)
-            from_main.append(False)
-    return out, from_main
+            tags.append(None)
+            continue
+        name, header, body = split
+        # Emit the function header (the part *up to and including* the
+        # opening ``{``) as its own top-level chunk so CHIME / fallback
+        # can translate the signature.  Body statements are tagged
+        # ``from_func=name``.  A bare ``}`` footer chunk closes it.
+        out.append(header)
+        tags.append(None)
+        for sub in _segment_chunks(body):
+            out.append(sub)
+            tags.append(name)
+        out.append([Token("PUNCT", "}", 0, 0)])
+        tags.append(None)
+    return out, tags
+
+
+# Keep the old name as an alias so any external callers don't break.
+_unfold_main = _unfold_functions
+
+
+def _is_header_only_chunk(chunk: List[Token]) -> bool:
+    """A chunk produced by RBU that is just a function signature
+    ending in ``{`` (no body, no closing ``}``).  These should always
+    take the deterministic ``_rewrite_func_signature`` path to avoid
+    being matched against whole-function neurons in CHIME.
+    """
+    meaningful = [t for t in chunk if t.kind != "NEWLINE"]
+    if len(meaningful) < 4:
+        return False
+    if meaningful[0].kind != "KEYWORD" or meaningful[0].value != "func":
+        return False
+    if meaningful[-1].value != "{":
+        return False
+    # Reject if a closing ``}`` is also present (full function chunk
+    # that happens to end with another ``{``, shouldn't really happen).
+    return not any(t.value == "}" for t in meaningful)
+
+
+def _is_close_brace_chunk(chunk: List[Token]) -> bool:
+    """A chunk consisting of a single ``}`` (RBU function footer)."""
+    meaningful = [t for t in chunk if t.kind != "NEWLINE"]
+    return len(meaningful) == 1 and meaningful[0].value == "}"
 
 
 def _render_chunk(chunk: List[Token]) -> str:
@@ -370,19 +461,55 @@ _FALLBACK_RULES = [
 ]
 
 _FUNC_SIG_RE = re.compile(
-    r"^func\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*([A-Za-z_]\w*)?\s*\{",
+    r"^func\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*"
+    r"(\[\s*\]\s*[A-Za-z_]\w*"        # ``[]int`` slice return
+    r"|\([^)]*\)"                      # ``(int, int)`` tuple return
+    r"|[A-Za-z_]\w*"                  # plain identifier return
+    r")?\s*\{",
     flags=re.S,
 )
+
+
+def _translate_go_type(go_type: str) -> str:
+    """Translate a single Go type fragment to its Cangjie equivalent.
+
+    Supports the common shapes that appear in trainset / test cases:
+    primitive renames (``int`` → ``Int64`` etc.), single-dimensional
+    slice ``[]T`` → ``ArrayList<T>``, and two-dimensional slice
+    ``[][]T`` → ``ArrayList<ArrayList<T>>``.  Unknown shapes pass
+    through unchanged.
+    """
+    t = go_type.strip()
+    # Match ``[][]T`` first to avoid the outer ``[]`` clobbering the
+    # inner pattern.
+    m2 = re.match(r"^\[\s*\]\s*\[\s*\]\s*(.+)$", t)
+    if m2:
+        return f"ArrayList<ArrayList<{_translate_go_type(m2.group(1))}>>"
+    m1 = re.match(r"^\[\s*\]\s*(.+)$", t)
+    if m1:
+        return f"ArrayList<{_translate_go_type(m1.group(1))}>"
+    return {
+        "int": "Int64", "int64": "Int64", "int32": "Int32",
+        "int16": "Int16", "int8": "Int8",
+        "uint": "UInt64", "uint64": "UInt64", "uint32": "UInt32",
+        "uint16": "UInt16", "uint8": "UInt8", "byte": "UInt8",
+        "float32": "Float32", "float64": "Float64",
+        "bool": "Bool", "string": "String", "rune": "Rune",
+    }.get(t, t)
 
 
 def _rewrite_func_signature(text: str) -> str:
     """Rewrite a leading Go ``func`` signature into Cangjie shape.
 
-    Only rewrites when the chunk starts with ``func name(params) ret {``
-    and the params look like ``a int, b int`` (Go-style ``name type``).
-    Cangjie wants ``a: Int64, b: Int64`` and ``: Int64`` after the param
-    list.  ``func main()`` is untouched (Cangjie infers the return type
-    from ``return 0``).
+    Handles four common parameter / return-type shapes:
+
+    * single typed param ``a int``;
+    * shared-type group ``a, b int`` → ``a: Int64, b: Int64``;
+    * slice param ``xs []int`` → ``xs: ArrayList<Int64>``;
+    * tuple return ``(int, int)`` → ``: (Int64, Int64)``.
+
+    Cangjie's ``func main`` is left untouched (no return type
+    needed — Cangjie infers from ``return 0``).
     """
     m = _FUNC_SIG_RE.match(text.lstrip())
     if not m:
@@ -391,18 +518,38 @@ def _rewrite_func_signature(text: str) -> str:
     if name == "main":
         return text
     new_params: List[str] = []
-    for raw in params.split(","):
-        p = raw.strip()
-        if not p:
-            continue
-        bits = p.split()
-        if len(bits) == 2:
-            new_params.append(f"{bits[0]}: {bits[1]}")
+    # First pass: split on commas, then merge ``a , b , c int`` shared-
+    # type groups by walking left-to-right and back-filling missing
+    # types from the next-named-type group.
+    raw_parts = [p.strip() for p in params.split(",") if p.strip()]
+    pending_names: List[str] = []
+    for part in raw_parts:
+        bits = part.split()
+        if len(bits) == 1:
+            # name only, type will come from a later group
+            pending_names.append(bits[0])
+        elif len(bits) >= 2:
+            type_str = " ".join(bits[1:])
+            cj_type = _translate_go_type(type_str)
+            for nm in pending_names:
+                new_params.append(f"{nm}: {cj_type}")
+            pending_names = []
+            new_params.append(f"{bits[0]}: {cj_type}")
         else:
-            new_params.append(p)
+            new_params.append(part)
+    # Unfinished pending names — keep as-is so cjc raises a clear error.
+    for nm in pending_names:
+        new_params.append(nm)
     rewritten_head = f"func {name}({', '.join(new_params)})"
     if ret:
-        rewritten_head += f": {ret}"
+        ret = ret.strip()
+        if ret.startswith("(") and ret.endswith(")"):
+            # tuple return — translate each component
+            inner = ret[1:-1]
+            comps = [_translate_go_type(c) for c in inner.split(",") if c.strip()]
+            rewritten_head += f": ({', '.join(comps)})"
+        else:
+            rewritten_head += f": {_translate_go_type(ret)}"
     rewritten_head += " {"
     return _FUNC_SIG_RE.sub(lambda _: rewritten_head, text.lstrip(), count=1)
 
@@ -436,6 +583,64 @@ def _cosmetic(text: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
+#  RBU assembly: splice per-function body statements between header / footer  #
+# --------------------------------------------------------------------------- #
+
+
+_FUNC_HEADER_RE = re.compile(
+    r"^\s*func\s+([A-Za-z_]\w*)\s*[<(]",
+)
+
+
+def _splice_func_bodies(top_stream: List[str],
+                        func_bodies: Dict[str, List[str]]) -> List[str]:
+    """Walk the linear stream of top-level decl chunks; whenever we hit
+    a ``func F(...) … {`` header chunk, splice ``func_bodies[F]``
+    between the header and the *next* footer ``}`` chunk, collapsing
+    the three into a single multi-line function declaration.
+
+    Body statements are indented four spaces.  If no header is found
+    for a tagged body, the leftover statements are appended at the end
+    of the stream (a defensive fallback — should never happen in
+    practice once RBU is consistent).
+    """
+    out: List[str] = []
+    i = 0
+    n = len(top_stream)
+    used: set = set()
+    while i < n:
+        decl = top_stream[i].rstrip()
+        match = _FUNC_HEADER_RE.match(decl)
+        if match and decl.rstrip().endswith("{"):
+            fn = match.group(1)
+            # Find the matching ``}`` footer chunk (first subsequent
+            # chunk whose stripped text is just ``}``).
+            j = i + 1
+            while j < n and top_stream[j].strip() != "}":
+                j += 1
+            body_stmts = func_bodies.get(fn, [])
+            used.add(fn)
+            indented = "\n".join(
+                "    " + ln for ln in "\n".join(body_stmts).split("\n")
+                if ln.strip()
+            )
+            block = decl + ("\n" + indented if indented else "") + "\n}"
+            out.append(block)
+            i = j + 1 if j < n else n
+            continue
+        out.append(top_stream[i])
+        i += 1
+    # Any function body whose header didn't appear (e.g. CHIME emitted
+    # something unparseable) — emit verbatim so debugging stays
+    # tractable.
+    for fn, stmts in func_bodies.items():
+        if fn in used or not stmts:
+            continue
+        out.append("// orphan body for " + fn + ":\n" + "\n".join(stmts))
+    return out
+
+
+# --------------------------------------------------------------------------- #
 #  Main entry point                                                           #
 # --------------------------------------------------------------------------- #
 
@@ -456,21 +661,24 @@ def convert_source(go_source: str, wrap_main: bool = True) -> ConversionResult:
     tokens = _inject_semis(tokens)
     chunks = _segment_chunks(tokens)
 
-    # 1b. Unfold ``func main() { body }`` into per-statement chunks.
-    # The CHIME associative memory retrieves much more accurately on
-    # short, statement-shaped chunks than on a 200-token main body.
-    # NB: after unfolding there is no ``func main`` chunk left, so we
-    # want the converter to *synthesise* one around the freed body
-    # statements at assembly time.  ``from_main`` is a parallel flag
-    # list that records which output chunks came from inside ``main``
-    # so we don't accidentally hoist them to module scope.
-    chunks, from_main = _unfold_main(chunks)
+    # 1b. Recursive Block Unfolding (RBU).  Replace every ``func F(){…}``
+    # chunk with its header, per-statement body chunks, and footer ``}``.
+    # ``main`` body statements get a special ``"main"`` tag because the
+    # synthesised ``main() { … return 0 }`` wrapper differs from a user
+    # function (no header chunk; trailing ``return 0`` is added).
+    # Other user functions get tagged with their name so the assembler
+    # can group their body statements back under their translated
+    # header.  Without RBU, any non-trivial user function (e.g. a
+    # 30-line knapsack DP) enters CHIME as one giant chunk that has no
+    # chance of matching the statement-level templates the engine was
+    # trained on.
+    chunks, chunk_func = _unfold_functions(chunks)
 
     # 2. Skim ``package`` / ``import`` and identify ``func main``.
     translatable: List[List[Token]] = []
-    translatable_from_main: List[bool] = []
+    translatable_func: List[Optional[str]] = []
     has_user_main = False  # set True only if a non-unfolded main remains
-    for ch, fm in zip(chunks, from_main):
+    for ch, fn in zip(chunks, chunk_func):
         if not ch:
             continue
         if ch[0].kind == "KEYWORD" and ch[0].value in ("package", "import"):
@@ -479,7 +687,7 @@ def convert_source(go_source: str, wrap_main: bool = True) -> ConversionResult:
                 and ch[1].value == "main" and ch[2].value == "("):
             has_user_main = True
         translatable.append(ch)
-        translatable_from_main.append(fm)
+        translatable_func.append(fn)
 
     result = ConversionResult(source="", notes=notes, chunks=len(translatable))
 
@@ -495,6 +703,25 @@ def convert_source(go_source: str, wrap_main: bool = True) -> ConversionResult:
     rendered: List[str] = []
     for ch, cj in zip(translatable, cj_texts):
         cj = cj.strip()
+        # Detect RBU-emitted function header / footer chunks and force
+        # them through the deterministic fallback rewriter.  Reason: a
+        # header chunk like ``func F ( a int ) int {`` has high HD
+        # similarity to *whole-function* neurons (``func F(a int) int
+        # { return ... }``) stored from the pairs.jsonl curated set,
+        # and the CHIME retrieval will happily return the longer
+        # template — which then duplicates the body that the per-stmt
+        # body chunks are *also* about to translate, breaking the
+        # splicer.  Lexical signature rewriting is unambiguous so it
+        # gives a clean header every time.
+        if _is_header_only_chunk(ch):
+            result.fallback_chunks += 1
+            rendered.append(_fallback_rewrite(_render_chunk(ch)))
+            continue
+        if _is_close_brace_chunk(ch):
+            # A solitary ``}`` is identical in both languages.
+            result.confident_chunks += 1
+            rendered.append("}")
+            continue
         if not cj:
             # Fallback: emit the chunk's Go text verbatim, then run a
             # tiny set of textual rewrites bridging the most common
@@ -509,25 +736,49 @@ def convert_source(go_source: str, wrap_main: bool = True) -> ConversionResult:
             result.confident_chunks += 1
             rendered.append(cj)
 
-    # 4. Classify into top-level decls vs main-body free statements.
-    # Chunks unfolded out of ``func main(){…}`` *always* belong in the
-    # main body, regardless of how their leading token looks (a stray
-    # ``var y = 10`` from inside main must not be hoisted to module
-    # scope).
-    top_decls: List[str] = []
+    # 4. Classify each rendered chunk into one of three buckets:
+    #
+    # * top-level decls — emitted before ``main()`` (``type``, ``var``
+    #   / ``const`` block, ``interface``, the *header* chunk of a user
+    #   function, the closing ``}`` footer of a user function, etc.).
+    #   These need to stay in their original linear order so a function
+    #   body assembled in between makes sense.
+    # * ``main`` body statements — wrapped in the synthesised
+    #   ``main() { … return 0 }``.
+    # * user-function body statements — gathered in the order they
+    #   appeared and spliced between the function's header and footer.
+    #
+    # We assemble the top-level stream in one linear pass; when we hit
+    # a chunk tagged ``from_func == fn`` we keep accumulating until the
+    # next chunk's ``from_func`` differs, then we splice the accumulated
+    # body statements right after the corresponding header chunk we
+    # already emitted.  The header chunk's identity is the very last
+    # output line that begins with ``func <fn>`` and ends with ``{``.
+    top_stream: List[str] = []
     main_body: List[str] = []
-    for ch, cj, fm in zip(translatable, rendered, translatable_from_main):
-        first = ch[0].value if ch else ""
-        if (not fm) and first in ("func", "type", "var", "const",
-                                  "interface", "class"):
-            top_decls.append(cj)
-        else:
+    # Indexed by function name → list of rendered body statements (in
+    # source order).  Spliced into the top stream at assembly time.
+    func_bodies: Dict[str, List[str]] = {}
+    for ch, cj, fn in zip(translatable, rendered, translatable_func):
+        if fn == "main":
             main_body.append(cj)
+        elif fn is not None:
+            func_bodies.setdefault(fn, []).append(cj)
+        else:
+            top_stream.append(cj)
 
     # 5. Cross-chunk structural lifting (struct init, methods, interfaces).
-    top_decls = synthesize_class_inits(top_decls)
-    top_decls = promote_methods(top_decls)
-    top_decls = attach_interface_impls(top_decls)
+    # Lifting only inspects top-level decls, so apply it on the linear
+    # stream of decl-like chunks.
+    top_stream = synthesize_class_inits(top_stream)
+    top_stream = promote_methods(top_stream)
+    top_stream = attach_interface_impls(top_stream)
+
+    # 5b. Splice each function's body statements between its translated
+    # header and its closing ``}`` footer.  We walk the top stream and
+    # collect every contiguous block ``func F(...) { → … → }`` into a
+    # single composite declaration.
+    top_decls = _splice_func_bodies(top_stream, func_bodies)
 
     # 6. Assemble.
     parts: List[str] = []

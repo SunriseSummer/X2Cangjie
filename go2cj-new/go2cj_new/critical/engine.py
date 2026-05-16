@@ -120,6 +120,16 @@ class CHIME:
 
     # ------------------------------------------------------------ translate #
 
+    # Minimum HD-similarity for a retrieved template to be trusted.  Below
+    # this threshold the engine declines the match and returns "" so the
+    # caller (converter) routes the chunk to the structural fallback /
+    # recursive sub-statement path.  This implements the
+    # "SOC-as-output-gate" idea from comment.md §15: the threshold floor
+    # is co-driven by the criticality controller's homeostatic theta —
+    # the more the network deviates from σ ≈ 1, the more conservative
+    # we are about emitting a stored template.
+    MIN_CONFIDENCE: float = 0.45
+
     def translate(self, anon_go: str, topk: int = 8) -> Tuple[str, float]:
         """Translate one anonymized Go chunk to anonymized Cangjie.
 
@@ -132,7 +142,10 @@ class CHIME:
         placeholder set.  This guarantees the deanonymized output
         contains no dangling placeholders — emitting ``ID3`` in a
         chunk that only defined ``ID0`` is a guaranteed compile
-        failure.
+        failure.  Candidates whose similarity is below
+        :attr:`MIN_CONFIDENCE` are also rejected to avoid hallucinated
+        templates on OOD chunks (exact-template hits short-circuit
+        this gate since they're unambiguous).
         """
         toks_in = anon_go.split()
         if not toks_in:
@@ -183,6 +196,15 @@ class CHIME:
         seen: set = set()
         best_template = ""
         best_conf = 0.0
+        # SOC-gated minimum: refuse a stored template when its HD
+        # similarity falls below the floor.  This is the difference
+        # between "I know this code" and "I'm guessing".  The gate
+        # uses ``max(MIN_CONFIDENCE, criticality.threshold * 0.5)`` so
+        # the homeostatic theta gradually pulls the floor up when the
+        # network drifts super-critical.
+        gate = max(self.MIN_CONFIDENCE,
+                   0.5 * float(self.criticality.threshold))
+        q_len = len(toks_in)
         for idx, sim in candidates:
             if idx in seen:
                 continue
@@ -192,6 +214,20 @@ class CHIME:
                 continue
             cand_set = set(_placeholders_of(n.template_out))
             if not cand_set.issubset(in_set):
+                continue
+            if sim < gate:
+                continue
+            # Length-of-program guard: a 6-token query must not be
+            # matched against a 60-token whole-function template.  HD
+            # similarity is approximately size-invariant for similar
+            # token sets, which causes short body statements like
+            # ``return ID0 ( ID1 - 1 ) + ID0 ( ID1 - 2 )`` to retrieve
+            # the *entire* fibonacci function neuron.  We require the
+            # stored template_in (Go side) to be within a factor of 2
+            # in token count of the query.  ``template_in`` is stored
+            # space-separated by ``observe``.
+            cand_len = max(1, len(n.template_in.split()))
+            if cand_len > 2 * q_len + 4 or cand_len * 2 + 4 < q_len:
                 continue
             if sim > best_conf:
                 best_template = n.template_out

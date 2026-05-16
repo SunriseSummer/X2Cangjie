@@ -39,7 +39,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 # Make ``import go2cj_new`` work when run as ``python -m
 # go2cj_new.critical.train`` from anywhere.
@@ -62,7 +62,20 @@ MODEL_DIR = HERE / "model"
 
 
 def _load_pairs() -> List[Tuple[str, str]]:
-    """Return the ``[(go, cj), ...]`` list from ``pairs.jsonl``."""
+    """Return the ``[(go, cj), ...]`` list from ``pairs.jsonl``,
+    with any whole-function pairs recursively unfolded into header,
+    per-statement body chunks, and footer.
+
+    This mirrors ``_load_programs`` so the same Recursive Block
+    Unfolding invariants hold for ad-hoc curated pairs as well — a
+    whole-function entry like ``func fib(n int) int { if n < 2 {…};
+    return fib(n-1)+fib(n-2) }`` becomes a header neuron, two body
+    neurons, and a footer neuron.  Without the unfold the body
+    statements of any test program would HD-match the whole-function
+    template at retrieval and the converter would inject a duplicated
+    function into the body of its own function — exactly the failure
+    we observed for ``09_fibonacci`` before this change.
+    """
     p = TRAINSET / "pairs.jsonl"
     pairs: List[Tuple[str, str]] = []
     if not p.exists():
@@ -72,8 +85,17 @@ def _load_pairs() -> List[Tuple[str, str]]:
         if not line or line.startswith("#"):
             continue
         d = json.loads(line)
-        if "go" in d and "cj" in d:
-            pairs.append((d["go"], d["cj"]))
+        if "go" not in d or "cj" not in d:
+            continue
+        go_text, cj_text = d["go"], d["cj"]
+        # Try to unfold as a user function first.  Falls through to
+        # the verbatim pair when the shape doesn't match (most pairs
+        # are already statement-level).
+        unfolded = _unfold_user_func(go_text, cj_text)
+        if unfolded:
+            pairs.extend(unfolded)
+        else:
+            pairs.append((go_text, cj_text))
     return pairs
 
 
@@ -168,6 +190,46 @@ def _split_top_level(src: str, semi: str = ";") -> List[str]:
 
 _GO_MAIN_RE = re.compile(r"^func\s+main\s*\(\s*\)\s*\{(.*)\}\s*$", re.S)
 _CJ_MAIN_RE = re.compile(r"^main\s*\(\s*\)\s*\{(.*)\}\s*$", re.S)
+_GO_FUNC_RE = re.compile(
+    r"^func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*\([^)]*\)[^{]*\{",
+    re.S,
+)
+_CJ_FUNC_RE = re.compile(
+    r"^(?:public\s+)?(?:override\s+)?func\s+([A-Za-z_]\w*)\s*\([^)]*\)[^{]*\{",
+    re.S,
+)
+
+
+def _split_func(chunk: str, header_re: re.Pattern) -> Optional[Tuple[str, str]]:
+    """Return ``(header_through_open_brace, body_before_close_brace)``
+    if ``chunk`` looks like ``func NAME(...) … { body }``, else None.
+
+    Walks the chunk character-by-character to locate the matching
+    closing brace; this is more robust than a single ``re.match`` once
+    the body itself contains nested ``{`` / ``}``.
+    """
+    text = chunk.strip()
+    match = header_re.match(text)
+    if not match:
+        return None
+    open_brace = match.end() - 1
+    # Find the matching ``}`` at depth 1.
+    depth = 1
+    i = open_brace + 1
+    while i < len(text) and depth > 0:
+        ch = text[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        i += 1
+    if depth != 0:
+        return None
+    header = text[:open_brace + 1]
+    body = text[open_brace + 1:i]
+    return header, body
 
 
 def _unfold_main_body(go_chunk: str, cj_chunk: str) -> List[Tuple[str, str]]:
@@ -200,17 +262,54 @@ def _unfold_main_body(go_chunk: str, cj_chunk: str) -> List[Tuple[str, str]]:
     return list(zip(go_stmts, cj_stmts))
 
 
+def _unfold_user_func(go_chunk: str, cj_chunk: str) -> List[Tuple[str, str]]:
+    """Mirror of :func:`go2cj_new.converter._unfold_functions` for user
+    functions, on the **training** side.
+
+    Given a paired Go / Cj user function declaration
+    (``func F(...) ret { body }`` vs ``func F(...): Ret { body }``),
+    emit three kinds of (Go, Cj) chunk pairs that exactly match what
+    the converter's RBU produces at inference time:
+
+    1. A *header* pair — Go ``func F(...) ret {`` ↔ Cj
+       ``func F(...): Ret {``.  Stored as its own neuron so the
+       inference-time header chunk has a clean exact-template hit.
+    2. *Per-statement body* pairs from the function body, aligned by
+       top-level statement count.  Identical aim as
+       ``_unfold_main_body`` — short, statement-shaped chunks retrieve
+       far more accurately than 200-token function chunks.
+    3. A *footer* pair — ``}`` ↔ ``}``.
+
+    Returns ``[]`` when the body statement counts disagree
+    (alignment is ambiguous; rare on well-curated trainsets).
+    """
+    gs = _split_func(go_chunk, _GO_FUNC_RE)
+    cs = _split_func(cj_chunk, _CJ_FUNC_RE)
+    if gs is None or cs is None:
+        return []
+    go_header, go_body = gs
+    cj_header, cj_body = cs
+    go_stmts = _split_top_level(go_body.strip())
+    cj_stmts = _split_top_level(cj_body.strip())
+    if len(go_stmts) != len(cj_stmts):
+        return []
+    pairs: List[Tuple[str, str]] = [(go_header, cj_header)]
+    pairs.extend(zip(go_stmts, cj_stmts))
+    pairs.append(("}", "}"))
+    return pairs
+
+
 def _load_programs() -> List[Tuple[str, str]]:
     """Pair-align top-level chunks from ``programs/*.go`` and ``*.cj``.
 
     For each ``foo.go`` / ``foo.cj`` we segment both, drop
     ``package`` / ``import`` decls, and zip the remaining chunks
-    pairwise.  In addition, **when the program contains a
-    ``func main(){…}`` chunk, we also unfold its body into
-    per-statement chunk pairs** — this is critical because the
-    inference-time chunker (`_unfold_main` in converter.py) similarly
-    unfolds main bodies, so training and inference see the same
-    statement-level shapes.
+    pairwise.  In addition, **for every paired user-function chunk
+    (including ``main``) we recursively unfold the body into
+    per-statement chunk pairs** — this exactly mirrors the
+    inference-time Recursive Block Unfolding in
+    ``converter._unfold_functions`` so the neurons CHIME grows from
+    training have the same shape as the chunks fed to it at inference.
 
     Mismatched chunk counts are skipped (they're noisy).
     """
@@ -229,19 +328,20 @@ def _load_programs() -> List[Tuple[str, str]]:
         if len(go_chunks) != len(cj_chunks):
             continue
         for g, c in zip(go_chunks, cj_chunks):
-            # If this is a paired ``func main(){…}`` / ``main(){…}``
-            # chunk, emit the body's per-statement pairs *instead of*
-            # the whole-main pair.  Reason: at inference time the
-            # converter's ``_unfold_main`` always strips ``main`` and
-            # rebuilds it from per-statement chunks, so a stored
-            # whole-main template can only ever match a *missed*
-            # unfolding — and worse, when it does match, it adds an
-            # extra ``main(){…}`` wrapper *inside* the synthesised
-            # main, producing nested ``main() { main() { … } }`` (we
-            # observed exactly this on ``17_fizzbuzz`` in v0.3.3).
-            unfolded = _unfold_main_body(g, c)
-            if unfolded:
-                pairs.extend(unfolded)
+            # Main bodies still get the "no header / footer / no
+            # ``return 0``" treatment so the synthesised ``main()``
+            # wrapper logic on the converter side keeps working.
+            unfolded_main = _unfold_main_body(g, c)
+            if unfolded_main:
+                pairs.extend(unfolded_main)
+                continue
+            # Generic user functions get the recursive header / body /
+            # footer unfolding.  Falls through to the original whole-
+            # chunk pair when the function shape doesn't match (e.g.
+            # ``type`` / ``var`` decls).
+            unfolded_func = _unfold_user_func(g, c)
+            if unfolded_func:
+                pairs.extend(unfolded_func)
             else:
                 pairs.append((g, c))
     return pairs
