@@ -691,7 +691,7 @@ def _parenthesise_condition(text: str, keyword: str,
 
 _FUNC_SIG_RE = re.compile(
     r"^func\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*"
-    r"(\[\s*\]\s*[A-Za-z_]\w*"        # ``[]int`` slice return
+    r"((?:\[\s*\]\s*)+[A-Za-z_]\w*"   # ``[]int`` / ``[][]int`` slice return
     r"|\([^)]*\)"                      # ``(int, int)`` tuple return
     r"|[A-Za-z_]\w*"                  # plain identifier return
     r")?\s*\{",
@@ -827,6 +827,128 @@ def _resolve_cstyle_steps(text: str) -> str:
             + text[j:]
         )
     return text
+
+
+def _shadow_mutated_params(text: str) -> str:
+    """Cangjie function parameters are immutable (implicit ``let``).
+    Go parameters can be freely reassigned.  When a Go function
+    body reassigns a parameter (``n = n / 10``), the literal
+    Cangjie translation fails to compile with::
+
+        error: cannot assign to immutable value
+        note: parameter 'n' is immutable
+
+    We post-process the assembled output by scanning each
+    ``func NAME(p1: T1, p2: T2, …): R { body }`` block and, for
+    every parameter ``p`` whose ``body`` contains an assignment
+    ``p = …`` or ``p OP= …``, rename the signature slot to
+    ``p_param`` and prepend a single ``var p = p_param`` shadow
+    at the top of the body.  This way every existing reference to
+    ``p`` inside the body — including the assignment that caused
+    the error — works against the shadow, and call sites are
+    unaffected (parameter names are positional in Cangjie).
+    ``main`` has no parameters so this pass is a no-op for it.
+    """
+    out: List[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        # Find ``func NAME(...) ...{``.
+        m = re.search(r"\bfunc\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*"
+                      r"(?::[^{]*)?\{", text[i:])
+        if not m:
+            out.append(text[i:])
+            break
+        # Copy leading text up to the function header.
+        head_start = i + m.start()
+        body_start = i + m.end()  # right after ``{``
+        out.append(text[i:body_start])
+        # Locate the matching closing ``}`` of the body.
+        depth = 1
+        j = body_start
+        in_str = False
+        str_ch = ""
+        while j < n and depth > 0:
+            c = text[j]
+            if in_str:
+                if c == "\\" and j + 1 < n:
+                    j += 2
+                    continue
+                if c == str_ch:
+                    in_str = False
+            else:
+                if c in ('"', "'"):
+                    in_str = True
+                    str_ch = c
+                elif c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+            j += 1
+        if depth != 0:
+            # Unbalanced — give up and copy the rest verbatim.
+            out.append(text[body_start:])
+            break
+        body = text[body_start:j]
+        # Parse parameters: split on top-level commas.
+        params_raw = m.group(2)
+        parts: List[str] = []
+        depth_p = 0
+        cur: List[str] = []
+        for ch in params_raw:
+            if ch == "(" or ch == "<" or ch == "[":
+                depth_p += 1
+            elif ch == ")" or ch == ">" or ch == "]":
+                depth_p -= 1
+            if ch == "," and depth_p == 0:
+                parts.append("".join(cur))
+                cur = []
+            else:
+                cur.append(ch)
+        if cur:
+            parts.append("".join(cur))
+        # For each ``name: type`` slot, see whether body mutates name.
+        new_parts: List[str] = []
+        shadows: List[str] = []
+        changed = False
+        for part in parts:
+            stripped = part.strip()
+            sm = re.match(r"^([A-Za-z_]\w*)\s*:\s*(.+)$", stripped)
+            if not sm:
+                new_parts.append(part)
+                continue
+            pname, ptype = sm.group(1), sm.group(2).strip()
+            mut_re = re.compile(rf"\b{re.escape(pname)}\s*"
+                                rf"(?:[+\-*/%]?=)(?!=)")
+            if mut_re.search(body):
+                shadow_name = f"{pname}_param"
+                # Avoid collision with an existing identifier.
+                while re.search(rf"\b{re.escape(shadow_name)}\b", body):
+                    shadow_name += "_"
+                new_parts.append(f"{shadow_name}: {ptype}")
+                shadows.append(f"    var {pname} = {shadow_name}")
+                changed = True
+            else:
+                new_parts.append(part)
+        if changed:
+            # Rewrite the header in the already-emitted output.
+            old_header = text[head_start:body_start]
+            new_header = re.sub(
+                r"\(([^)]*)\)",
+                "(" + ", ".join(p.strip() for p in new_parts) + ")",
+                old_header, count=1,
+            )
+            out[-1] = text[i:head_start] + new_header
+            shadow_block = "\n".join(shadows) + "\n"
+            out.append(shadow_block + body)
+        else:
+            out.append(body)
+        out.append(text[j])  # the closing ``}``
+        i = j + 1
+    return "".join(out)
+
 
 
 def _dedup_var_in_block(text: str) -> str:
@@ -1413,6 +1535,40 @@ _FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
     # already valid Cangjie, so the fallback's identity-rewrite is
     # always safe here.
     re.compile(r"\b[A-Za-z_]\w*\s*\(\s*[^,()]+\s*,\s*[^,()]+\s*,\s*[^,()]+"),
+    # ``IDENT = IDENT OP …`` self-update assignment.  CHIME has a
+    # tendency to retrieve a *bare expression* template
+    # (``IDENT OP IDENT``) when the LHS and the first RHS token are
+    # the same identifier, silently dropping the ``IDENT =`` prefix
+    # and turning ``s = s + i`` into ``s + i`` (no-op).  Equally
+    # bad: an unrelated shift template can swap ``/ 10`` for
+    # ``>> 1``.  Probe with a backreference so we only fire on the
+    # genuine self-update shape; CHIME still handles other
+    # assignments fine.
+    re.compile(r"\b([A-Za-z_]\w*)\s*=\s*\1\b\s*[+\-*/%]"),
+    # ``IDENT := IDENT [ … ]`` short-var declaration whose RHS is a
+    # single indexed read.  CHIME routinely retrieves an unrelated
+    # short-var template and substitutes the subscript expression
+    # with a literal from that template, e.g. ``tmp := xs[j]`` →
+    # ``var tmp = xs[0]``.  The deterministic fallback's
+    # ``x := y`` → ``var x = y`` keeps the subscript intact.
+    re.compile(r"\b[A-Za-z_]\w*\s*:=\s*[A-Za-z_]\w*\s*\[[^\[\]]+\]\s*$",
+               re.MULTILINE),
+    # ``return EXPR`` whose body is a Go boolean comparison /
+    # logical combinator.  CHIME's small template set conflates
+    # ``return r == original`` with ``return r + original``
+    # (positional alignment against an arithmetic-return template),
+    # so we force the deterministic identity-rewrite which keeps
+    # the ``==`` / ``!=`` / ``<`` / ``>`` / ``&&`` / ``||`` intact.
+    re.compile(r"\breturn\b[^{]*?(==|!=|<=|>=|&&|\|\|)"),
+    # C-style ``for init; cond; step`` whose step is *not* a unit
+    # ``VAR++`` / ``VAR--`` / ``VAR +=`` / ``VAR -=`` but a generic
+    # ``VAR = VAR OP …`` (e.g. ``j = j + i`` in the sieve).  The
+    # narrower ``[+\-*/%]?=|\+\+|--`` probe above misses this
+    # shape; CHIME often retrieves a clean range-form template and
+    # loses the step entirely.  The deterministic rewriter expands
+    # to ``var VAR = START; while (COND) { … VAR = VAR OP …; }``.
+    re.compile(r"\bfor\s+[A-Za-z_]\w*\s*:=\s*[^;]+;\s*[^;{]+;\s*"
+               r"[A-Za-z_]\w*\s*=\s*[A-Za-z_]\w*\s*[+\-*/%]"),
 ]
 
 
@@ -1720,6 +1876,10 @@ def convert_source(go_source: str, wrap_main: bool = True) -> ConversionResult:
     # each loop body is reachable in the same string (chunks have
     # been spliced back into their functions).
     body_text = _resolve_cstyle_steps(body_text)
+    # Cangjie func parameters are immutable; Go's are not.  Shadow
+    # any reassigned param with a local ``var`` to keep the body
+    # legal without changing call sites.
+    body_text = _shadow_mutated_params(body_text)
     # Avoid Cangjie ``redefinition`` errors when two sequential
     # c-style loops in the same scope both expand to ``var i = …``.
     body_text = _dedup_var_in_block(body_text)
