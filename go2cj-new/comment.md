@@ -378,7 +378,7 @@ score = 0.4 * pattern_coverage + 0.4 * cj_compiles + 0.2 * runs_and_matches_expe
 
 这比只看 `val_template_acc` 更接近真实目标。`val_template_acc` 衡量 held-out 模板是否完全匹配；端到端测试衡量生成的仓颉文件是否能编译、运行、输出正确。
 
-当前 v0.3.8 基线（`cjc 1.0.5`）：50 个用例全部通过 Go vet 与 Cangjie 编译，49 个用例运行输出逐字节匹配；唯一未匹配的 `26_float_math` 是 Go `fmt.Println(Float64)` 与 Cangjie `println(Float64)` 默认字符串化精度不同（`12.56` vs `12.560000`）。
+当前 v0.3.8 基线（`cjc 1.0.5`）：50 个用例全部通过 Go vet 与 Cangjie 编译，49 个用例运行输出逐字节匹配；唯一未匹配的 `26_float_math` 是实测输出差异：Go `fmt.Println(Float64)` 输出 `12.56`，Cangjie `println(Float64)` 输出 `12.560000`，源于两种标准库默认字符串化精度不同。
 
 ---
 
