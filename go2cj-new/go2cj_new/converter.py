@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from .lexer import Token, tokenize
 
@@ -549,10 +549,11 @@ _NEEDS_COLLECTION = re.compile(r"\b(?:ArrayList|HashMap|HashSet)\b")
 # translator, only to keep the fallback path useful.
 
 _FALLBACK_RULES = [
-    # fmt.Println(x)  →  println(x)   (also Print/Printf as best-effort)
-    (re.compile(r"\bfmt\s*\.\s*Println\s*\("), "println("),
-    (re.compile(r"\bfmt\s*\.\s*Print\s*\("),   "print("),
-    (re.compile(r"\bfmt\s*\.\s*Printf\s*\("),  "print("),
+    # ``fmt.Println`` / ``fmt.Print`` / ``fmt.Printf`` are handled by
+    # the balanced-paren multi-arg rewriter inside
+    # :func:`_rewrite_go_idioms`, so we don't list them here.  This
+    # leaves only the cheap, context-free token-level rewrites for
+    # primitive type renames and a chunk-start ``x := …`` short-var.
     # Function decls:  func name(a int, b int) int {  →
     #                   func name(a: Int64, b: Int64): Int64 {
     # Conservative: only rewrites when the entire chunk *starts* with
@@ -565,9 +566,14 @@ _FALLBACK_RULES = [
     (re.compile(r"\b(float64)\b"),         "Float64"),
     (re.compile(r"\bbool\b"),              "Bool"),
     (re.compile(r"\bstring\b"),            "String"),
-    # Go short var:  x := expr  →  var x = expr   (only when at chunk start
-    # so we don't break `for i := 0;` headers etc.).
-    (re.compile(r"^\s*([A-Za-z_]\w*)\s*:=\s*"), r"var \1 = "),
+    # Go short var:  x := expr  →  var x = expr.  Match anywhere in
+    # the chunk (not just at the start) so range loops merged on a
+    # single line still get rewritten — e.g.
+    # ``for (row in m) { sum := 0 ; for (v in row) ...``.  The lookbehind
+    # rejects ``:= 0`` produced by an already-translated Cangjie
+    # range form (which wouldn't contain ``:=`` anyway) and the leading
+    # ``\b`` keeps it from matching inside identifiers.
+    (re.compile(r"(^|[;{\s])([A-Za-z_]\w*)\s*:=\s*"), r"\1var \2 = "),
     # ``len(x)``  →  ``x.size``   — applied last so any preceding
     # rewrites still see the parentheses-form when relevant.
     (re.compile(r"\blen\s*\(\s*([A-Za-z_]\w*(?:\s*\.\s*[A-Za-z_]\w*)*)\s*\)"),
@@ -773,8 +779,637 @@ def _rewrite_func_signature(text: str) -> str:
             rewritten_head += f": ({', '.join(comps)})"
         else:
             rewritten_head += f": {_translate_go_type(ret)}"
+    else:
+        # Cangjie needs an explicit ``: Unit`` for void functions
+        # that are *recursive* — without it, type inference fails
+        # at the recursive call site.  Emitting it unconditionally
+        # is also safe for non-recursive void functions.
+        rewritten_head += ": Unit"
     rewritten_head += " {"
     return _FUNC_SIG_RE.sub(lambda _: rewritten_head, text.lstrip(), count=1)
+
+
+def _resolve_cstyle_steps(text: str) -> str:
+    """Resolve ``__cstyle_step__`` markers planted by the c-style
+    ``for`` rewriter.  Each marker sits immediately after the
+    ``{`` of a ``while`` block; this scan walks forward through the
+    text, tracking brace depth, and injects the step statement
+    just before the matching ``}``.  The marker comment is then
+    removed.  Markers can be nested (one per ``for`` scope).
+    """
+    marker = "/*__cstyle_step__:"
+    while marker in text:
+        idx = text.index(marker)
+        end_marker = text.index("*/", idx)
+        step = text[idx + len(marker):end_marker].strip()
+        depth = 1
+        j = end_marker + 2
+        while j < len(text) and depth > 0:
+            c = text[j]
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        if depth != 0:
+            # Couldn't find the closing ``}`` — drop the marker so
+            # the source at least parses.
+            text = text[:idx] + text[end_marker + 2:]
+            continue
+        # Insert ``step;\n`` before position ``j`` and strip the
+        # marker comment.
+        text = (
+            text[:idx].rstrip()
+            + text[end_marker + 2:j]
+            + f"\n        {step}\n    "
+            + text[j:]
+        )
+    return text
+
+
+def _dedup_var_in_block(text: str) -> str:
+    """Rename successive ``var X`` declarations in the same brace
+    scope to avoid the ``redefinition of declaration 'X'`` error
+    that Cangjie raises when two c-style ``for`` loops in the
+    same enclosing block both translate into ``var i = ...; while
+    (...) { … }`` with the same loop variable ``i``.
+
+    Cangjie's lexical scope rule means even though the second
+    ``i`` was originally scoped to its loop, our flattened
+    ``var i`` lives at the enclosing scope.  We post-process by
+    appending a numeric suffix to repeat ``var IDENT`` decls
+    within the same brace block (tracking depth so an inner
+    ``{ var i ... }`` shadow is allowed).  The corresponding
+    references inside the same loop are also renamed.
+    """
+    # Pass 1: walk the source, track brace depth, collect ``var X``
+    # occurrences per (depth, name) and rename second+ occurrences.
+    out: List[str] = []
+    i = 0
+    n = len(text)
+    # Per-depth: set of names already declared at that depth.
+    seen: Dict[int, Dict[str, int]] = {0: {}}
+    depth = 0
+    rename_stack: List[Dict[str, str]] = [{}]
+    in_str = False
+    str_ch = ""
+
+    def _flush_word(buf: List[str], word: str) -> str:
+        # If word is being renamed at any visible scope, substitute.
+        for scope in reversed(rename_stack):
+            if word in scope:
+                return scope[word]
+        return word
+
+    while i < n:
+        c = text[i]
+        if in_str:
+            out.append(c)
+            if c == "\\" and i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if c == str_ch:
+                in_str = False
+            i += 1
+            continue
+        if c in '"\'`':
+            in_str = True
+            str_ch = c
+            out.append(c)
+            i += 1
+            continue
+        if c == "{":
+            depth += 1
+            seen.setdefault(depth, {})
+            rename_stack.append({})
+            out.append(c)
+            i += 1
+            continue
+        if c == "}":
+            seen.pop(depth, None)
+            if len(rename_stack) > 1:
+                rename_stack.pop()
+            depth = max(depth - 1, 0)
+            out.append(c)
+            i += 1
+            continue
+        # Match ``var IDENT`` at word boundary.
+        m_var = re.match(r"\b(var|let)\s+([A-Za-z_]\w*)\b", text[i:])
+        if m_var:
+            kw, name = m_var.group(1), m_var.group(2)
+            scope = seen.setdefault(depth, {})
+            if name in scope:
+                scope[name] += 1
+                new_name = f"{name}_{scope[name]}"
+                rename_stack[-1][name] = new_name
+                out.append(f"{kw} {new_name}")
+            else:
+                scope[name] = 1
+                # Clear any prior rename for this name in our scope
+                rename_stack[-1].pop(name, None)
+                out.append(m_var.group(0))
+            i += m_var.end()
+            continue
+        # Match identifier (word) — substitute if renamed.
+        m_id = re.match(r"\b([A-Za-z_]\w*)\b", text[i:])
+        if m_id:
+            word = m_id.group(1)
+            out.append(_flush_word(out, word))
+            i += m_id.end()
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _rewrite_go_idioms(text: str) -> str:
+    """Apply shape-restricted rewrites for Go idioms that have a
+    deterministic Cangjie equivalent.
+
+    These rules are the *deterministic* spine of the fallback path —
+    they fire only when their pattern matches unambiguously, so the
+    transform is always correct (no half-translated leftovers).  The
+    set of rules deliberately targets the high-frequency idioms seen
+    in real-world algorithm code (DP, sort, search) that the
+    CHIME associative memory cannot reliably retrieve from a small
+    curated trainset:
+
+    * Range loops — ``for _, v := range xs {`` /
+      ``for i := range xs {`` / ``for i, v := range xs {``.
+    * C-style for header — ``for i := 0; i < n; i++ {`` /
+      ``for i := lo; i <= hi; i++ {``.
+    * Tuple swap — ``a, b = b, a`` (and indexed forms
+      ``xs[i], xs[j] = xs[j], xs[i]``).
+    * Slice literal — ``[]int{a, b, c}`` → ``Array<Int64>([a, b, c])``.
+    * 2-D ``make`` — ``make([][]int, n)`` →
+      ``Array<Array<Int64>>(n, {_ => Array<Int64>(0, {_ => 0})})``.
+    * 1-D ``make`` — ``make([]int, n)`` →
+      ``Array<Int64>(n, {_ => 0})``.
+    * ``len(x)``  →  ``x.size``.
+    * Float-typed integer literal coercion —
+      ``var x: Float64 = 10`` → ``var x: Float64 = 10.0``.
+    """
+    # --- 2-D and 1-D ``make`` ------------------------------------- #
+    # ``make([][]T, n)``  (matches before the 1-D form so the outer
+    # brackets aren't shadowed by it).  Emit
+    # ``ArrayList<ArrayList<T>>`` for consistency with the 1-D form
+    # (also ``ArrayList<T>``) so that later
+    # ``dp[i] = make([]T, m+1)`` row assignments have matching
+    # element types.
+    def _make_2d(m: re.Match) -> str:
+        inner = _translate_go_type(m.group(1))
+        size = m.group(2).strip()
+        return (f"ArrayList<ArrayList<{inner}>>({size}, "
+                f"{{_ => ArrayList<{inner}>()}})")
+    text = re.sub(
+        r"\bmake\s*\(\s*\[\s*\]\s*\[\s*\]\s*([A-Za-z_]\w*)\s*,\s*([^)]+?)\s*\)",
+        _make_2d, text,
+    )
+    # ``make([]T, n)``.  Cangjie's ``ArrayList<T>(size: Int64,
+    # initElement: (Int64) -> T)`` matches Go's ``make`` shape
+    # exactly and keeps the result type consistent with slice
+    # signatures (``[]T`` → ``ArrayList<T>``), so an
+    # ``out := make([]int, n); return out`` from a function with
+    # return type ``[]int`` round-trips cleanly.  Default element
+    # is ``0`` for numeric types, ``""`` for ``string``, ``false``
+    # for ``bool``.
+    def _make_1d(m: re.Match) -> str:
+        inner = _translate_go_type(m.group(1))
+        size = m.group(2).strip()
+        default = '""' if inner == "String" else ("false" if inner == "Bool" else "0")
+        return f"ArrayList<{inner}>({size}, {{_ => {default}}})"
+    text = re.sub(
+        r"\bmake\s*\(\s*\[\s*\]\s*([A-Za-z_]\w*)\s*,\s*([^)]+?)\s*\)",
+        _make_1d, text,
+    )
+
+    # --- 2-D slice literal ``[][]T{{a,b},{c,d}}`` ----------------- #
+    # Emitted as a nested ``ArrayList<ArrayList<T>>([...])``.  Match
+    # the *outer* literal greedy-but-bracket-balanced; trailing
+    # commas inside both inner and outer braces are stripped.
+    def _slice_lit_2d(m: re.Match) -> str:
+        inner = _translate_go_type(m.group(1))
+        rows_raw = m.group(2)
+        # Find each ``{...}`` row literal and rewrap as ArrayList.
+        rows: List[str] = []
+        depth = 0
+        cur: List[str] = []
+        i = 0
+        n = len(rows_raw)
+        in_row = False
+        while i < n:
+            c = rows_raw[i]
+            if c == "{":
+                if depth == 0:
+                    in_row = True
+                    cur = []
+                else:
+                    cur.append(c)
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0 and in_row:
+                    elems = "".join(cur).strip().rstrip(",").strip()
+                    rows.append(f"ArrayList<{inner}>([{elems}])")
+                    in_row = False
+                else:
+                    cur.append(c)
+            else:
+                if in_row:
+                    cur.append(c)
+            i += 1
+        if not rows:
+            return m.group(0)
+        return f"ArrayList<ArrayList<{inner}>>([{', '.join(rows)}])"
+    text = re.sub(
+        r"\[\s*\]\s*\[\s*\]\s*([A-Za-z_]\w*)\s*\{((?:[^{}]*\{[^{}]*\}[^{}]*)+)\}",
+        _slice_lit_2d, text,
+    )
+
+    # --- Slice literal ``[]T{a, b, c}`` --------------------------- #
+    # Emit ``ArrayList`` rather than ``Array`` because Go slices are
+    # dynamically-sized (``append``-friendly), and the Cangjie
+    # standard ``ArrayList<T>([…])`` constructor matches the
+    # element-list literal exactly.  ``Array<T>`` has only an
+    # ``(size, init: (Int64)->T)`` constructor and would reject a
+    # bare array literal.  Nested literals like ``[][]int{{1,2},…}``
+    # are handled by the 2-D ``make`` rule plus separate
+    # row-assignment statements; we don't synthesise a nested
+    # literal here because the converter would need access to the
+    # whole expression's surrounding type context.
+    def _slice_lit(m: re.Match) -> str:
+        inner = _translate_go_type(m.group(1))
+        elems = m.group(2).strip()
+        # Drop a trailing comma — Go allows it, Cangjie's literal
+        # forms don't.
+        elems = re.sub(r",\s*$", "", elems)
+        return f"ArrayList<{inner}>([{elems}])"
+    text = re.sub(
+        r"\[\s*\]\s*([A-Za-z_]\w*)\s*\{\s*([^{}]*?)\s*\}",
+        _slice_lit, text,
+    )
+
+    # --- Range loops --------------------------------------------- #
+    # ``for _, v := range expr {``  →  ``for (v in expr) {``
+    text = re.sub(
+        r"\bfor\s+_\s*,\s*([A-Za-z_]\w*)\s*:=\s*range\s+(.+?)\s*\{",
+        r"for (\1 in \2) {",
+        text,
+    )
+    # ``for i, v := range expr {``  →  index-driven loop with
+    # destructure-on-step.  Cangjie has no ``enumerate`` global, so
+    # we use the explicit index form ``for (i in 0..(expr).size)``
+    # and bind ``v`` to ``(expr)[i]`` inside.  This is emitted as a
+    # *single* line so the brace structure stays intact — the body
+    # will follow on subsequent lines.
+    text = re.sub(
+        r"\bfor\s+([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*)\s*:=\s*range\s+(.+?)\s*\{",
+        r"for (\1 in 0..(\3).size) { let \2 = (\3)[\1];",
+        text,
+    )
+    # ``for i := range expr {``  →  ``for (i in 0..(expr).size) {``
+    text = re.sub(
+        r"\bfor\s+([A-Za-z_]\w*)\s*:=\s*range\s+(.+?)\s*\{",
+        r"for (\1 in 0..(\2).size) {",
+        text,
+    )
+    # ``for _ = range expr {``  →  ``for (_ in expr) {``
+    text = re.sub(
+        r"\bfor\s+_\s*:=\s*range\s+(.+?)\s*\{",
+        r"for (_ in \1) {",
+        text,
+    )
+
+    # --- C-style ``for init; cond; step {`` ---------------------- #
+    # Recognise the canonical algorithm-loop shape ``for VAR :=
+    # START ; COND ; STEP {``.  Map onto a Cangjie range form when
+    # COND is the simple ``VAR OP END`` shape (where OP is ``<`` /
+    # ``<=`` / ``>`` / ``>=``) AND the step is a unit ``VAR++`` /
+    # ``VAR--`` — that gives the cleanest output and dovetails with
+    # the explicit ``for (i in 0..n)`` form CHIME already knows.
+    # Anything else (compound conditions like ``i*i <= n`` or
+    # multi-step ``VAR += k``) falls back to an expanded
+    # ``var VAR = START ; while (COND) { … VAR STEP }`` form — the
+    # step is emitted at the *end* of the loop body, which the
+    # closing-``}`` assembly step handles by appending the step
+    # before the final brace.
+    def _cstyle_for(m: re.Match) -> str:
+        var, start, cond, step = m.groups()
+        cond = cond.strip()
+        step = step.strip()
+        step_packed = re.sub(r"\s+", "", step)
+        # Try the clean range form first.
+        m_simple = re.fullmatch(
+            rf"\s*{re.escape(var)}\s*(<=|<|>=|>)\s*(.+)", cond,
+        )
+        m_step_plus_plus = step_packed in (f"{var}++", f"{var}--")
+        if m_simple and m_step_plus_plus:
+            op, end = m_simple.group(1), m_simple.group(2).strip()
+            if op == "<" and step_packed.endswith("++"):
+                return f"for ({var} in {start}..{end}) {{"
+            if op == "<=" and step_packed.endswith("++"):
+                return f"for ({var} in {start}..={end}) {{"
+        # Generic fallback: expand into ``var VAR = START; while
+        # (COND) { … }`` with the step appended at the loop body's
+        # end via the ``__cstyle_step__`` marker.  The marker is
+        # picked up by ``_inject_cstyle_step`` below to insert
+        # before the loop's closing ``}``.
+        return (
+            f"var {var} = {start}; "
+            f"while ({cond}) {{ /*__cstyle_step__:{step}*/"
+        )
+    text = re.sub(
+        r"\bfor\s+([A-Za-z_]\w*)\s*:=\s*([^;]+?)\s*;\s*"
+        r"([^;{]+?)\s*;\s*"
+        r"([^{]+?)\s*\{",
+        _cstyle_for, text,
+    )
+    # ``__cstyle_step__`` markers are resolved *after* RBU assembly
+    # (in :func:`_resolve_cstyle_steps`) — at that point the matching
+    # closing ``}`` of the loop body is reachable in the same string.
+
+    # --- Tuple swap: ``a, b = b, a``  (incl. indexed) ------------ #
+    # Conservative: only matches the canonical swap (LHS-rev == RHS).
+    def _tuple_swap(m: re.Match) -> str:
+        lhs1, lhs2, rhs1, rhs2 = (g.strip() for g in m.groups())
+        if lhs1 == rhs2 and lhs2 == rhs1:
+            return f"let __tmp_swap = {lhs1}; {lhs1} = {lhs2}; {lhs2} = __tmp_swap"
+        return m.group(0)
+    text = re.sub(
+        r"([A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?)\s*,\s*"
+        r"([A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?)\s*=\s*"
+        r"([A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?)\s*,\s*"
+        r"([A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?)",
+        _tuple_swap, text,
+    )
+
+    # --- Float-typed integer literal coercion --------------------- #
+    # ``var x: Float64 = 10``  →  ``var x: Float64 = 10.0``.  Cangjie
+    # refuses to implicitly widen an int literal into a Float64 binding.
+    text = re.sub(
+        r"(\b(?:var|let)\s+[A-Za-z_]\w*\s*:\s*Float(?:32|64)\s*=\s*)"
+        r"(-?\d+)(\s*(?:;|$|\n))",
+        lambda m: m.group(1) + m.group(2) + ".0" + m.group(3),
+        text,
+    )
+
+    # --- Multi-argument ``fmt.Println`` / ``fmt.Print`` ---------- #
+    # Cangjie's ``println(x)`` takes a single argument; Go's
+    # ``fmt.Println(a, b, c)`` prints space-separated.  Translate by
+    # interpolating: ``println("${a} ${b} ${c}")``.  Argument
+    # splitting is paren / bracket / brace aware so calls like
+    # ``fmt.Println(foo(x, y), z)`` parse correctly.
+    def _split_args(arg_text: str) -> List[str]:
+        parts: List[str] = []
+        cur: List[str] = []
+        depth = 0
+        in_str = False
+        str_ch = ""
+        i = 0
+        n = len(arg_text)
+        while i < n:
+            c = arg_text[i]
+            if in_str:
+                cur.append(c)
+                if c == "\\" and i + 1 < n:
+                    cur.append(arg_text[i + 1])
+                    i += 2
+                    continue
+                if c == str_ch:
+                    in_str = False
+                i += 1
+                continue
+            if c in '"\'`':
+                in_str = True
+                str_ch = c
+                cur.append(c)
+                i += 1
+                continue
+            if c in "([{":
+                depth += 1
+            elif c in ")]}":
+                depth = max(depth - 1, 0)
+            if c == "," and depth == 0:
+                parts.append("".join(cur).strip())
+                cur = []
+            else:
+                cur.append(c)
+            i += 1
+        tail = "".join(cur).strip()
+        if tail:
+            parts.append(tail)
+        return parts
+
+    def _fmt_println(m: re.Match, newline: bool) -> str:
+        # ``m`` spans ``fmt.Println(`` through the matching ``)``;
+        # group 1 holds the argument text.
+        args = _split_args(m.group(1))
+        if len(args) <= 1:
+            inner = args[0] if args else ""
+            return ("println(" if newline else "print(") + inner + ")"
+        parts: List[str] = []
+        for arg in args:
+            if (len(arg) >= 2 and arg[0] == '"' and arg[-1] == '"'
+                    and "${" not in arg):
+                # Bare string literal — embed its body verbatim.
+                parts.append(arg[1:-1])
+            else:
+                parts.append("${" + arg + "}")
+        joined = " ".join(parts)
+        return ("println(\"" if newline else "print(\"") + joined + "\")"
+
+    def _balanced_call_rewrite(text_in: str, prefix_re: re.Pattern,
+                               make: Callable[[re.Match], str]) -> str:
+        """Repeatedly find ``prefix_re`` (which must end at the call's
+        opening ``(``) and rewrite up to the *balanced* closing
+        ``)``.  ``make`` receives a ``re.Match`` whose ``.group(1)``
+        is set to the argument text between the parens.
+        """
+        out: List[str] = []
+        last = 0
+        for m in prefix_re.finditer(text_in):
+            start = m.end()
+            depth = 1
+            j = start
+            in_s = False
+            sc = ""
+            while j < len(text_in) and depth > 0:
+                ch = text_in[j]
+                if in_s:
+                    if ch == "\\" and j + 1 < len(text_in):
+                        j += 2
+                        continue
+                    if ch == sc:
+                        in_s = False
+                    j += 1
+                    continue
+                if ch in '"\'`':
+                    in_s = True
+                    sc = ch
+                    j += 1
+                    continue
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            if depth != 0:
+                continue
+            args_text = text_in[start:j]
+            class _Synth:
+                def __init__(self, t):
+                    self._t = t
+                def group(self, i):
+                    return self._t
+            out.append(text_in[last:m.start()])
+            out.append(make(_Synth(args_text)))
+            last = j + 1
+        out.append(text_in[last:])
+        return "".join(out)
+
+    def _fmt_printf(m: re.Match) -> str:
+        """Translate ``fmt.Printf(fmt_str, a, b, …)`` to Cangjie's
+        ``print("…${a}…${b}…")`` by parsing the format string for
+        ``%s`` / ``%d`` / ``%f`` / ``%v`` / ``%t`` placeholders and
+        substituting each successive argument into a ``${…}``
+        interpolation.  Width / precision specifiers are stripped
+        (best-effort — algorithmic test cases rarely use them).
+        The trailing ``\n`` in the format string is honoured by
+        switching to ``println``.
+        """
+        args = _split_args(m.group(1))
+        if not args:
+            return "print(\"\")"
+        fmt_arg = args[0]
+        rest = args[1:]
+        if not (len(fmt_arg) >= 2 and fmt_arg[0] == '"' and fmt_arg[-1] == '"'):
+            # Non-literal format string — emit a best-effort
+            # interpolation that prints all positional arguments.
+            joined = " ".join("${" + a + "}" for a in rest)
+            return f"println({fmt_arg} + \"{joined}\")"
+        body = fmt_arg[1:-1]
+        ends_nl = body.endswith("\\n")
+        if ends_nl:
+            body = body[:-2]
+        out_parts: List[str] = []
+        i = 0
+        arg_idx = 0
+        spec_re = re.compile(r"%[-+ 0#]?\d*(?:\.\d+)?[sdvtfqobxXc]")
+        while i < len(body):
+            m2 = spec_re.match(body, i)
+            if m2:
+                if arg_idx < len(rest):
+                    out_parts.append("${" + rest[arg_idx] + "}")
+                    arg_idx += 1
+                i = m2.end()
+            else:
+                out_parts.append(body[i])
+                i += 1
+        printer = "println" if ends_nl else "print"
+        return printer + "(\"" + "".join(out_parts) + "\")"
+
+    text = _balanced_call_rewrite(
+        text, re.compile(r"\bfmt\s*\.\s*Printf\s*\("), _fmt_printf,
+    )
+    text = _balanced_call_rewrite(
+        text, re.compile(r"\bfmt\s*\.\s*Println\s*\("),
+        lambda m: _fmt_println(m, newline=True),
+    )
+    text = _balanced_call_rewrite(
+        text, re.compile(r"\bfmt\s*\.\s*Print\s*\("),
+        lambda m: _fmt_println(m, newline=False),
+    )
+
+    return text
+# fallback over a confident CHIME retrieval for chunks the
+# associative memory routinely mangles.  See
+# :func:`_has_fragile_idiom` for the rationale.
+_FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
+    # ``a, b = b, a`` tuple swap (incl. indexed forms).
+    re.compile(r"[A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?\s*,\s*"
+               r"[A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?\s*=\s*"
+               r"[A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?\s*,\s*"
+               r"[A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?"),
+    # ``for _, v := range expr`` and friends.
+    re.compile(r"\bfor\s+(?:_|[A-Za-z_]\w*)\s*(?:,\s*[A-Za-z_]\w*\s*)?"
+               r":=\s*range\b"),
+    # ``make([]T, …)`` or ``make([][]T, …)``.
+    re.compile(r"\bmake\s*\(\s*\[\s*\]"),
+    # Slice literal ``[]T{...}`` (incl. ``[][]T{...}``).
+    re.compile(r"\[\s*\]\s*(?:\[\s*\]\s*)?[A-Za-z_]\w*\s*\{"),
+    # ``a[i] = max(a[i], ...)``-style indexed compound update.  This
+    # is the canonical DP update that CHIME's positional alignment
+    # tends to mangle (swapping array / index roles).  The probe
+    # fires for any ``IDENT [ … ] = IDENT ( IDENT [ … ]`` pattern.
+    re.compile(r"[A-Za-z_]\w*\s*\[[^\[\]]+\]\s*=\s*"
+               r"[A-Za-z_]\w*\s*\(\s*[A-Za-z_]\w*\s*\["),
+    # Two-dimensional indexing (``dp[i][j]``).  CHIME templates with
+    # one-level indexing routinely drop the second subscript when
+    # retrieved.  Forcing fallback preserves the original 2-D form,
+    # which is valid Cangjie when ``dp`` is ``Array<Array<T>>`` or
+    # ``ArrayList<ArrayList<T>>``.
+    re.compile(r"[A-Za-z_]\w*\s*\[[^\[\]]+\]\s*\[[^\[\]]+\]"),
+    # ``var IDENT = INT_LITERAL`` (untyped) — CHIME has a tendency
+    # to retrieve a typed-annotation template (``var x: Float64 =
+    # NUM``) for chunks of this shape, then emit an int literal in
+    # the slot.  The verbatim Go form compiles directly in Cangjie.
+    re.compile(r"^\s*var\s+[A-Za-z_]\w*\s*=\s*-?\d+(?:\.\d+)?\s*$"),
+    # C-style ``for init; cond; step`` headers — the deterministic
+    # rewriter has explicit handling and CHIME often retrieves a
+    # range-form template that loses the init / step state.  The
+    # cond is matched generously (``[^;]+``) so non-trivial bounds
+    # like ``i*i <= n`` or ``i+1 < len(xs)`` still trigger.
+    re.compile(r"\bfor\s+[A-Za-z_]\w*\s*:=\s*[^;]+;\s*[^;{]+;\s*"
+               r"[^{]*?(?:\+\+|--|\+=|-=)"),
+    # ``if … { … } else { … }`` blocks where both branches sit in
+    # the same chunk — CHIME has a habit of retrieving an
+    # ``if`` template and dropping the ``else`` arm entirely
+    # (turning a binary search ``hi = mid - 1`` into a missing
+    # update and thus an infinite loop).  Fallback's deterministic
+    # parenthesisation preserves both branches verbatim.
+    re.compile(r"}\s*else\s*\{"),
+    # Indexed assignment ``arr[idx] = value`` (not ``==``).  This
+    # catches simple writes that CHIME otherwise rewrites as
+    # ``arr.add(value)`` by retrieving an ``append`` template
+    # whose Go side has the same structural shape.
+    re.compile(r"[A-Za-z_]\w*\s*\[[^\[\]]+\]\s*=(?!=)"),
+    # Multi-argument ``fmt.Println(a, b, …)`` or any ``fmt.Printf``
+    # / ``fmt.Print`` call — Cangjie's ``println`` is single-arg, so
+    # we need the balanced-paren rewriter to interpolate / parse
+    # printf placeholders.  The probe fires when there's at least
+    # one top-level comma inside the call's argument list, OR for
+    # any ``Printf`` call regardless (since the format string
+    # always needs translation).
+    re.compile(r"\bfmt\s*\.\s*Print(?:ln|f)?\s*\(\s*[^,)]+,"),
+    re.compile(r"\bfmt\s*\.\s*Printf\s*\("),
+    # Function call with 3+ arguments — these are highly
+    # susceptible to CHIME mis-retrieval (a knapsack
+    # ``f(a, b, c)`` retrieving a template whose Cj output uses
+    # ``.add(x); .add(y); …``).  The Go ``f(a, b, c)`` syntax is
+    # already valid Cangjie, so the fallback's identity-rewrite is
+    # always safe here.
+    re.compile(r"\b[A-Za-z_]\w*\s*\(\s*[^,()]+\s*,\s*[^,()]+\s*,\s*[^,()]+"),
+]
+
+
+def _has_fragile_idiom(go_text: str) -> bool:
+    """Return ``True`` when ``go_text`` contains a Go idiom that the
+    deterministic fallback rewrites correctly but CHIME's small
+    associative memory frequently misroutes.
+
+    The probes are deliberately narrow — anything not matched here
+    still benefits from the CHIME engine's similarity-based template
+    retrieval.  See :data:`_FRAGILE_IDIOM_PROBES` for the list.
+    """
+    for probe in _FRAGILE_IDIOM_PROBES:
+        if probe.search(go_text):
+            return True
+    return False
 
 
 def _fallback_rewrite(go_text: str) -> str:
@@ -786,6 +1421,13 @@ def _fallback_rewrite(go_text: str) -> str:
     responsibility of the CHIME engine.
     """
     text = _rewrite_func_signature(go_text)
+    # Idiom-aware rewrites first — these are the deterministic spine
+    # for Go patterns that CHIME's small associative memory cannot
+    # reliably handle (range loops, swaps, slice literals, etc.).
+    # Applied *before* the plain primitive-type renames so we don't
+    # have to worry about whether ``int`` has already been replaced
+    # by ``Int64`` inside a ``make([]int, n)`` etc.
+    text = _rewrite_go_idioms(text)
     for pat, sub in _FALLBACK_RULES:
         text = pat.sub(sub, text)
     # Add Cangjie ``(`` / ``)`` around the condition of bare Go
@@ -980,8 +1622,23 @@ def convert_source(go_source: str, wrap_main: bool = True) -> ConversionResult:
             result.fallback_chunks += 1
             rendered.append(_fallback_rewrite(_render_chunk(ch)))
         else:
-            result.confident_chunks += 1
-            rendered.append(cj)
+            go_text = _render_chunk(ch)
+            # Prefer the deterministic fallback for chunks containing
+            # *fragile Go idioms* that the deterministic rewriter
+            # handles correctly but CHIME's small associative memory
+            # routinely mangles by retrieving a structurally-similar
+            # template from an unrelated program (e.g. a knapsack
+            # ``dp[w] = max(dp[w], dp[w-weights[i]]+values[i])``
+            # retrieving a 2-index pattern with the wrong variable
+            # binding).  The idiom list below is the smallest set
+            # that covers the failures seen in real-world algorithm
+            # code; anything else still goes through CHIME.
+            if _has_fragile_idiom(go_text):
+                result.fallback_chunks += 1
+                rendered.append(_fallback_rewrite(go_text))
+            else:
+                result.confident_chunks += 1
+                rendered.append(cj)
 
     # 4. Classify each rendered chunk into one of three buckets:
     #
@@ -1039,6 +1696,14 @@ def convert_source(go_source: str, wrap_main: bool = True) -> ConversionResult:
         parts.extend(main_body)
 
     body_text = "\n\n".join(p for p in parts if p)
+    # Resolve any ``__cstyle_step__`` markers planted by the c-style
+    # ``for`` rewriter: at this point the matching closing ``}`` of
+    # each loop body is reachable in the same string (chunks have
+    # been spliced back into their functions).
+    body_text = _resolve_cstyle_steps(body_text)
+    # Avoid Cangjie ``redefinition`` errors when two sequential
+    # c-style loops in the same scope both expand to ``var i = …``.
+    body_text = _dedup_var_in_block(body_text)
     body_text = _cosmetic(body_text)
 
     header = ""
