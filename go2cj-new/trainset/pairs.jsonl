@@ -362,3 +362,30 @@
 {"go": "fmt.Println(int(sh.Area()))", "cj": "println(Int64(sh.Area()))"}
 {"go": "describe(Dog{name: \"Rex\"})", "cj": "describe(Dog(\"Rex\"))"}
 {"go": "for i := len(xs) - 1; i >= 0; i-- { r = append(r, xs[i]) }", "cj": "var i = xs.size - 1; while (i >= 0) { r.add(xs[i]); i -= 1 }"}
+{"go": "c := a + b", "cj": "var c = a + b"}
+{"go": "s := a + b", "cj": "var s = a + b"}
+{"go": "area := pi * r * r", "cj": "var area = pi * r * r"}
+{"go": "area := w * h", "cj": "var area = w * h"}
+{"go": "x := y * z", "cj": "var x = y * z"}
+{"go": "fmt.Println(sum(xs))", "cj": "println(sum(xs))"}
+{"go": "fmt.Println(reverse(xs))", "cj": "println(reverse(xs))"}
+{"go": "r := reverse(xs)", "cj": "var r = reverse(xs)"}
+{"go": "n := len(xs)", "cj": "var n = xs.size"}
+{"go": "n := len(s)", "cj": "var n = s.size"}
+{"go": "xs = append(xs, 4)", "cj": "xs.add(4)"}
+{"go": "xs = append(xs, x)", "cj": "xs.add(x)"}
+{"go": "xs = append(xs, n)", "cj": "xs.add(n)"}
+{"go": "fmt.Println(i, \"even\")", "cj": "println(\"${i} even\")"}
+{"go": "fmt.Println(i, \"odd\")", "cj": "println(\"${i} odd\")"}
+{"go": "fmt.Println(n, \"is prime\")", "cj": "println(\"${n} is prime\")"}
+{"go": "fmt.Println(n, \"is not prime\")", "cj": "println(\"${n} is not prime\")"}
+{"go": "if isEven(i) { fmt.Println(i, \"even\") } else { fmt.Println(i, \"odd\") }", "cj": "if (isEven(i)) { println(\"${i} even\") } else { println(\"${i} odd\") }"}
+{"go": "func gcd(a, b int) int { for b != 0 { t := b; b = a % b; a = t }; return a }", "cj": "func gcd(a: Int64, b: Int64): Int64 { var x = a; var y = b; while (y != 0) { let t = y; y = x % y; x = t }; return x }"}
+{"go": "for b != 0 { a, b = b, a%b }", "cj": "while (b != 0) { let t = b; b = a % b; a = t }"}
+{"go": "func sum(xs []int) int { s := 0; for _, v := range xs { s += v }; return s }", "cj": "func sum(xs: ArrayList<Int64>): Int64 { var s = 0; for (v in xs) { s += v }; return s }"}
+{"go": "func reverse(xs []int) []int { n := len(xs); out := make([]int, 0, n); for i := 0; i < n; i++ { out = append(out, xs[n-1-i]) }; return out }", "cj": "func reverse(xs: ArrayList<Int64>): ArrayList<Int64> { let n = xs.size; var out = ArrayList<Int64>(); for (i in 0..n) { out.add(xs[n - 1 - i]) }; return out }"}
+{"go": "func dayName(d int) string { switch d { case 1: return \"Mon\"; case 2: return \"Tue\"; case 3: return \"Wed\"; default: return \"?\" } }", "cj": "func dayName(d: Int64): String { match (d) { case 1 => return \"Mon\"; case 2 => return \"Tue\"; case 3 => return \"Wed\"; case _ => return \"?\" } }"}
+{"go": "var pi = 3.14", "cj": "var pi: Float64 = 3.14"}
+{"go": "var r = 2.0", "cj": "var r: Float64 = 2.0"}
+{"go": "fmt.Println(area)", "cj": "println(area)"}
+{"go": "fmt.Println(c)", "cj": "println(c)"}

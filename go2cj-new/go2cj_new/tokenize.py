@@ -167,6 +167,22 @@ def detokenize(tokens: List[str]) -> str:
     s = re.sub(r" *; *", "\n", s)
     s = re.sub(r"\{ *", "{\n", s)
     s = re.sub(r" *\}", "\n}", s)
+    # When two statements got separated only by whitespace inside the
+    # template (the common case for multi-line bodies whose newlines
+    # were collapsed to spaces during tokenisation), insert a newline
+    # between ``}`` and the next non-keyword-continuation token so the
+    # rendered Cangjie has one statement per line.  We deliberately
+    # don't break before ``else``/``catch``/``,``/``)``/``]``/``;``.
+    s = re.sub(r"\}\s+(?=(?!else\b|catch\b|finally\b)[A-Za-z_])",
+               "}\n", s)
+    # Also break *before* statement-introducing keywords when the
+    # previous token sequence was a complete simple statement (i.e.
+    # ends with an identifier / literal / ``++``/``--``/``)``).  This
+    # recovers newlines that were collapsed to spaces when the
+    # multi-statement Cangjie template was tokenised.
+    _STMT_KW = r"(?:var|let|const|while|for|if|return|match|break|continue)"
+    s = re.sub(r"(?<=[A-Za-z0-9_)\]])\s+(?=" + _STMT_KW + r"\b)",
+               "\n", s)
     return s
 
 
