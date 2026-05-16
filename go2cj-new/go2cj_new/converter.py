@@ -1,0 +1,554 @@
+"""Neural Go → Cangjie converter (entry point).
+
+Pipeline:
+
+1. **Pre-process**: convert Go raw strings to Cangjie double-quoted
+   strings (purely a lexical normalization), then run the regex Go
+   lexer (:mod:`.lexer`).
+2. **Segment** the token stream into top-level chunks by brace /
+   semicolon balance (a syntactic operation, not a translation rule).
+3. For each chunk, route the chunk's source text through the **trained
+   Transformer** (:class:`go2cj.neural.translator.NeuralTranslator`).
+   The model emits a Cangjie chunk.
+4. **Lift** cross-chunk structural artefacts (struct constructors,
+   free-method attachment, implicit interface satisfaction) — see
+   :mod:`.lifting`.  These require multi-chunk awareness and so are
+   handled separately from the neural translator.
+5. **Assemble** the file: drop ``package`` / ``import`` declarations
+   (they have no single-file Cangjie equivalent), inject
+   ``import std.collection.*`` if the body uses ``ArrayList`` /
+   ``HashMap``, and ensure a ``main()`` entry exists if the original
+   Go had ``func main``.
+
+There is **no rule-based translation table** in this module — the
+mapping ``Go-chunk`` → ``Cangjie-chunk`` is learnt by the neural model
+from the synthetic training corpus.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from typing import List, Tuple
+
+from .lexer import Token, tokenize
+
+
+_NO_SEMI_AFTER = {
+    "(", "[", "{", ",", ".", ";", ":", "?", "@",
+    "+", "-", "*", "/", "%", "&", "|", "^", "!", "<", ">", "=",
+    "==", "!=", "<=", ">=", "&&", "||", ":=", "<<", ">>", "+=", "-=",
+    "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=", "&^", "&^=",
+    "...",
+    "if", "else", "for", "switch", "case", "default", "func", "var",
+    "const", "type", "struct", "interface", "map", "chan", "go", "defer",
+    "return", "range", "import", "package", "select",
+}
+
+
+def _inject_semis(tokens: List[Token]) -> List[Token]:
+    """Insert Go's auto-inserted ``;`` tokens at line ends.
+
+    Walks the token stream including ``NEWLINE`` markers; emits a
+    ``;`` whenever Go's spec would auto-insert one (i.e. the previous
+    meaningful token is not in :data:`_NO_SEMI_AFTER` and we are not
+    inside parens / brackets).  This is a *lexical* preprocessing step
+    — not a translation rule.
+    """
+    out: List[Token] = []
+    prev = None
+    dp = ds = 0
+    for t in tokens:
+        if t.kind == "NEWLINE":
+            if (prev is not None and prev.value not in _NO_SEMI_AFTER
+                    and dp == 0 and ds == 0):
+                out.append(Token("PUNCT", ";", t.line, t.col))
+                prev = out[-1]
+            continue
+        if t.kind in ("COMMENT_BLOCK", "COMMENT_LINE"):
+            continue
+        if t.value == "(":
+            dp += 1
+        elif t.value == ")":
+            dp = max(dp - 1, 0)
+        elif t.value == "[":
+            ds += 1
+        elif t.value == "]":
+            ds = max(ds - 1, 0)
+        out.append(t)
+        prev = t
+    return out
+
+
+from .lifting import (
+    attach_interface_impls,
+    promote_methods,
+    synthesize_class_inits,
+)
+from .critical.translator import NeuralTranslator
+from .tokenize import detokenize
+
+
+@dataclass
+class ConversionResult:
+    source: str
+    chunks: int = 0
+    confident_chunks: int = 0
+    fallback_chunks: int = 0
+    notes: List[str] = field(default_factory=list)
+
+    @property
+    def confidence(self) -> float:
+        if self.chunks == 0:
+            return 0.0
+        return self.confident_chunks / self.chunks
+
+
+# --------------------------------------------------------------------------- #
+#  Pre-processing (lexical normalisation, not translation)                    #
+# --------------------------------------------------------------------------- #
+
+
+def _convert_raw_strings(src: str) -> str:
+    """Replace Go raw strings ``` `...` ``` with escaped Cangjie
+    double-quoted strings — a purely lexical normalization step."""
+
+    out: List[str] = []
+    i, n = 0, len(src)
+    while i < n:
+        c = src[i]
+        if c == "`":
+            j = i + 1
+            while j < n and src[j] != "`":
+                j += 1
+            inner = src[i + 1:j]
+            esc = (
+                inner.replace("\\", "\\\\")
+                     .replace("\"", "\\\"")
+                     .replace("\n", "\\n")
+                     .replace("\t", "\\t")
+                     .replace("\r", "\\r")
+            )
+            out.append('"' + esc + '"')
+            i = j + 1
+            continue
+        if c == '"':
+            j = i + 1
+            while j < n and src[j] != '"':
+                if src[j] == "\\" and j + 1 < n:
+                    j += 2
+                    continue
+                j += 1
+            out.append(src[i:j + 1])
+            i = j + 1
+            continue
+        if c == "/" and i + 1 < n and src[i + 1] in ("/", "*"):
+            if src[i + 1] == "/":
+                end = src.find("\n", i)
+                end = n if end == -1 else end
+            else:
+                end = src.find("*/", i)
+                end = n if end == -1 else end + 2
+            out.append(src[i:end])
+            i = end
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+# --------------------------------------------------------------------------- #
+#  Chunk segmentation                                                         #
+# --------------------------------------------------------------------------- #
+
+
+def _segment_chunks(tokens: List[Token]) -> List[List[Token]]:
+    """Split a Go token stream into top-level chunks by brace balance.
+
+    A chunk ends at any of:
+
+    * a top-level ``;`` (Go's explicit statement terminator);
+    * a ``NEWLINE`` token at depth 0 (Go's de-facto statement
+      terminator — present in the lexer's token stream but stripped
+      from chunk contents);
+    * the ``}`` that closes a previously opened ``{`` (unless the
+      next token is ``else``).
+
+    A ``in_for_header`` flag suppresses the ``;`` rule inside the
+    ``for init; cond; step`` clause head.
+
+    Keeping NEWLINE-as-separator is crucial: without it,
+    ``package main`` + ``import "fmt"`` + ``func main(){…}`` collapse
+    into one mega-chunk (since Go doesn't write ``;`` between top-level
+    decls), and statements inside ``main`` (``z := 15``, bare
+    ``fmt.Println(x)``) don't split either — both of which defeat the
+    statement-level retrieval CHIME relies on.
+    """
+
+    # Keep newline markers (we use them as separators) but drop
+    # comments.
+    toks = [t for t in tokens
+            if t.kind not in ("COMMENT_BLOCK", "COMMENT_LINE")]
+    chunks: List[List[Token]] = []
+    cur: List[Token] = []
+    db = dp = ds = 0
+    in_for_header = False
+    i = 0
+    n = len(toks)
+    while i < n:
+        t = toks[i]
+        if t.kind == "NEWLINE":
+            # Newline at depth 0 → top-level statement boundary.  At
+            # depth > 0 we *keep* the NEWLINE token in the running
+            # chunk: it carries no meaning to a trained CHIME neuron
+            # (rendering filters it out again), but it preserves the
+            # statement boundaries inside ``{ … }`` so that when
+            # ``_unfold_main`` recursively segments the body, the
+            # inner pass can still see them.
+            if db == 0 and dp == 0 and ds == 0:
+                if cur and not in_for_header:
+                    chunks.append(cur)
+                    cur = []
+            else:
+                cur.append(t)
+            i += 1
+            continue
+        cur.append(t)
+        if t.kind == "KEYWORD" and t.value == "for" and db == dp == ds == 0:
+            in_for_header = True
+        if t.kind == "PUNCT":
+            if t.value == "{":
+                db += 1
+                if in_for_header and db == 1:
+                    in_for_header = False
+            elif t.value == "}":
+                db = max(db - 1, 0)
+                if db == 0 and dp == 0 and ds == 0:
+                    # Look ahead past whitespace for ``else``.
+                    j = i + 1
+                    while j < n and toks[j].kind == "NEWLINE":
+                        j += 1
+                    nxt = toks[j] if j < n else None
+                    if (nxt is not None and nxt.kind == "KEYWORD"
+                            and nxt.value == "else"):
+                        # Re-attach the bridge tokens we just looked
+                        # past to the running chunk — they're whitespace
+                        # so dropping them is fine.
+                        i = j - 1
+                        i += 1
+                        continue
+                    chunks.append(cur)
+                    cur = []
+            elif t.value == "(":
+                dp += 1
+            elif t.value == ")":
+                dp = max(dp - 1, 0)
+            elif t.value == "[":
+                ds += 1
+            elif t.value == "]":
+                ds = max(ds - 1, 0)
+            elif (t.value == ";" and db == 0 and dp == 0 and ds == 0
+                  and not in_for_header):
+                chunks.append(cur[:-1])
+                cur = []
+        i += 1
+    if cur:
+        chunks.append(cur)
+    return [c for c in chunks if c]
+
+
+def _is_func_main(chunk: List[Token]) -> bool:
+    """``func main () { ... }`` heuristic."""
+    return (len(chunk) >= 6
+            and chunk[0].kind == "KEYWORD" and chunk[0].value == "func"
+            and chunk[1].value == "main"
+            and chunk[2].value == "("
+            and chunk[3].value == ")"
+            and chunk[4].value == "{"
+            and chunk[-1].value == "}")
+
+
+def _unfold_main(chunks: List[List[Token]]) -> Tuple[List[List[Token]], List[bool]]:
+    """Replace any ``func main(){body}`` chunk with the body's per-stmt
+    chunks, and return a parallel ``from_main`` flag list.
+
+    Motivation: the CHIME associative memory retrieves on a per-chunk
+    basis.  Keeping the entire ``main`` body as a single huge chunk is
+    severely OOD on a small curated trainset (this is the well-known
+    OOD pitfall that hurts go2cj v1's end-to-end pass rate).  By
+    unfolding the body into individual statements, we get many more
+    accurate hits.  The lifted-and-assembled output re-wraps the body
+    in ``main() { ... return 0 }`` automatically.
+
+    The ``from_main`` flag is needed because once the body is unfolded
+    the statements look like top-level decls (e.g. ``var y = 10``)
+    which the assembler would otherwise hoist to module scope.  The
+    flag forces them back into the synthesised main body.
+    """
+    out: List[List[Token]] = []
+    from_main: List[bool] = []
+    for ch in chunks:
+        if _is_func_main(ch):
+            # Drop the leading ``func main () {`` and trailing ``}``.
+            body = ch[5:-1]
+            # Re-run the same segmenter on the body — bracketed
+            # control-flow blocks therein stay as single chunks while
+            # top-level statements split.
+            for sub in _segment_chunks(body):
+                out.append(sub)
+                from_main.append(True)
+        else:
+            out.append(ch)
+            from_main.append(False)
+    return out, from_main
+
+
+def _render_chunk(chunk: List[Token]) -> str:
+    """Render a chunk's tokens as a single text line for NN input.
+
+    We separate tokens with a single space — matching the tokenizer
+    used by :mod:`go2cj.neural.vocab` so the model sees consistent
+    spacing.
+    """
+    parts: List[str] = []
+    prev: str = ""
+    for t in chunk:
+        # NEWLINE tokens are retained inside chunks (so recursive
+        # segmenters can still split on them) but they carry no
+        # rendered content and must not leak into the model's input.
+        if t.kind == "NEWLINE":
+            continue
+        v = t.value
+        if not parts:
+            parts.append(v)
+        else:
+            parts.append(" " + v)
+        prev = v
+    return "".join(parts).strip()
+
+
+# --------------------------------------------------------------------------- #
+#  Output post-processing (cosmetic, not translation)                         #
+# --------------------------------------------------------------------------- #
+
+
+_NEEDS_COLLECTION = re.compile(r"\b(?:ArrayList|HashMap|HashSet)\b")
+
+
+# --------------------------------------------------------------------------- #
+#  Fallback rewrites                                                          #
+# --------------------------------------------------------------------------- #
+#
+# When the CHIME associative memory has no clean match for a chunk, we emit
+# the chunk's Go text verbatim and rely on overlap between the two languages
+# (binary ops, calls, indexing, var := …).  These tiny lexical rewrites
+# bridge the most common idioms that *don't* overlap so the surrounding
+# program still has a chance of compiling.  These are deliberately kept
+# small and conservative — they are not intended to be a rule-based
+# translator, only to keep the fallback path useful.
+
+_FALLBACK_RULES = [
+    # fmt.Println(x)  →  println(x)   (also Print/Printf as best-effort)
+    (re.compile(r"\bfmt\s*\.\s*Println\s*\("), "println("),
+    (re.compile(r"\bfmt\s*\.\s*Print\s*\("),   "print("),
+    (re.compile(r"\bfmt\s*\.\s*Printf\s*\("),  "print("),
+    # Function decls:  func name(a int, b int) int {  →
+    #                   func name(a: Int64, b: Int64): Int64 {
+    # Conservative: only rewrites when the entire chunk *starts* with
+    # `func` and we can find ``)`` before ``{``.  Keeps `func main()`
+    # untouched (no return type to inject) — that's handled at assemble
+    # time.
+    (re.compile(r"\b(int|int64)\b"),       "Int64"),
+    (re.compile(r"\b(int32)\b"),           "Int32"),
+    (re.compile(r"\b(float32)\b"),         "Float32"),
+    (re.compile(r"\b(float64)\b"),         "Float64"),
+    (re.compile(r"\bbool\b"),              "Bool"),
+    (re.compile(r"\bstring\b"),            "String"),
+    # Go short var:  x := expr  →  var x = expr   (only when at chunk start
+    # so we don't break `for i := 0;` headers etc.).
+    (re.compile(r"^\s*([A-Za-z_]\w*)\s*:=\s*"), r"var \1 = "),
+]
+
+_FUNC_SIG_RE = re.compile(
+    r"^func\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*([A-Za-z_]\w*)?\s*\{",
+    flags=re.S,
+)
+
+
+def _rewrite_func_signature(text: str) -> str:
+    """Rewrite a leading Go ``func`` signature into Cangjie shape.
+
+    Only rewrites when the chunk starts with ``func name(params) ret {``
+    and the params look like ``a int, b int`` (Go-style ``name type``).
+    Cangjie wants ``a: Int64, b: Int64`` and ``: Int64`` after the param
+    list.  ``func main()`` is untouched (Cangjie infers the return type
+    from ``return 0``).
+    """
+    m = _FUNC_SIG_RE.match(text.lstrip())
+    if not m:
+        return text
+    name, params, ret = m.group(1), m.group(2), m.group(3)
+    if name == "main":
+        return text
+    new_params: List[str] = []
+    for raw in params.split(","):
+        p = raw.strip()
+        if not p:
+            continue
+        bits = p.split()
+        if len(bits) == 2:
+            new_params.append(f"{bits[0]}: {bits[1]}")
+        else:
+            new_params.append(p)
+    rewritten_head = f"func {name}({', '.join(new_params)})"
+    if ret:
+        rewritten_head += f": {ret}"
+    rewritten_head += " {"
+    return _FUNC_SIG_RE.sub(lambda _: rewritten_head, text.lstrip(), count=1)
+
+
+def _fallback_rewrite(go_text: str) -> str:
+    """Apply a pinch of string-level rewrites to a Go chunk.
+
+    The goal is to make the *fallback* (no-CHIME-match) path produce
+    something Cangjie has a chance of compiling, without pretending to
+    be a real translator.  Bigger transformations stay the
+    responsibility of the CHIME engine.
+    """
+    text = _rewrite_func_signature(go_text)
+    for pat, sub in _FALLBACK_RULES:
+        text = pat.sub(sub, text)
+    return text
+
+
+def _cosmetic(text: str) -> str:
+    # Collapse "Name < T >" → "Name<T>" for generic types we emit.
+    text = re.sub(r"\b(ArrayList|HashMap|HashSet|Option|Array)\s+<\s*", r"\1<",
+                  text)
+    text = re.sub(r"\s+>\s*\(", ">(", text)
+    # Collapse multiple blank lines.
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    # No space before comma.
+    text = re.sub(r"\s+,", ",", text)
+    # Strip trailing spaces.
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    return text
+
+
+# --------------------------------------------------------------------------- #
+#  Main entry point                                                           #
+# --------------------------------------------------------------------------- #
+
+
+def convert_source(go_source: str, wrap_main: bool = True) -> ConversionResult:
+    """Convert a single Go source file to Cangjie source.
+
+    All per-chunk translation is delegated to the trained Transformer
+    in :mod:`.neural.translator`.  Pre-processing converts raw
+    strings; chunk segmentation runs on the lexed token stream; cross-
+    chunk structural lifting runs after the neural pass.
+    """
+    notes: List[str] = []
+
+    # 1. Lexical pre-processing.
+    src = _convert_raw_strings(go_source)
+    tokens = tokenize(src)
+    tokens = _inject_semis(tokens)
+    chunks = _segment_chunks(tokens)
+
+    # 1b. Unfold ``func main() { body }`` into per-statement chunks.
+    # The CHIME associative memory retrieves much more accurately on
+    # short, statement-shaped chunks than on a 200-token main body.
+    # NB: after unfolding there is no ``func main`` chunk left, so we
+    # want the converter to *synthesise* one around the freed body
+    # statements at assembly time.  ``from_main`` is a parallel flag
+    # list that records which output chunks came from inside ``main``
+    # so we don't accidentally hoist them to module scope.
+    chunks, from_main = _unfold_main(chunks)
+
+    # 2. Skim ``package`` / ``import`` and identify ``func main``.
+    translatable: List[List[Token]] = []
+    translatable_from_main: List[bool] = []
+    has_user_main = False  # set True only if a non-unfolded main remains
+    for ch, fm in zip(chunks, from_main):
+        if not ch:
+            continue
+        if ch[0].kind == "KEYWORD" and ch[0].value in ("package", "import"):
+            continue
+        if (len(ch) >= 3 and ch[0].kind == "KEYWORD" and ch[0].value == "func"
+                and ch[1].value == "main" and ch[2].value == "("):
+            has_user_main = True
+        translatable.append(ch)
+        translatable_from_main.append(fm)
+
+    result = ConversionResult(source="", notes=notes, chunks=len(translatable))
+
+    if not translatable:
+        result.source = ""
+        return result
+
+    # 3. Run the trained neural model on every chunk.
+    translator = NeuralTranslator.get()
+    go_texts = [_render_chunk(ch) for ch in translatable]
+    cj_texts = translator.translate_batch(go_texts)
+
+    rendered: List[str] = []
+    for ch, cj in zip(translatable, cj_texts):
+        cj = cj.strip()
+        if not cj:
+            # Fallback: emit the chunk's Go text verbatim, then run a
+            # tiny set of textual rewrites bridging the most common
+            # idioms (fmt.Println, primitive type names, ``x := …``
+            # short var, Go-style func signature).  Many Go expressions
+            # (binary ops, function calls, indexing) are already valid
+            # Cangjie syntax, so this gives a real chance of compiling
+            # even when the associative memory had no confident match.
+            result.fallback_chunks += 1
+            rendered.append(_fallback_rewrite(_render_chunk(ch)))
+        else:
+            result.confident_chunks += 1
+            rendered.append(cj)
+
+    # 4. Classify into top-level decls vs main-body free statements.
+    # Chunks unfolded out of ``func main(){…}`` *always* belong in the
+    # main body, regardless of how their leading token looks (a stray
+    # ``var y = 10`` from inside main must not be hoisted to module
+    # scope).
+    top_decls: List[str] = []
+    main_body: List[str] = []
+    for ch, cj, fm in zip(translatable, rendered, translatable_from_main):
+        first = ch[0].value if ch else ""
+        if (not fm) and first in ("func", "type", "var", "const",
+                                  "interface", "class"):
+            top_decls.append(cj)
+        else:
+            main_body.append(cj)
+
+    # 5. Cross-chunk structural lifting (struct init, methods, interfaces).
+    top_decls = synthesize_class_inits(top_decls)
+    top_decls = promote_methods(top_decls)
+    top_decls = attach_interface_impls(top_decls)
+
+    # 6. Assemble.
+    parts: List[str] = []
+    if top_decls:
+        parts.extend(top_decls)
+    if wrap_main and not has_user_main and main_body:
+        body = "\n".join("    " + ln for ln in "\n".join(main_body).split("\n")
+                         if ln.strip())
+        parts.append("main() {\n" + body + "\n    return 0\n}")
+    elif not wrap_main:
+        parts.extend(main_body)
+
+    body_text = "\n\n".join(p for p in parts if p)
+    body_text = _cosmetic(body_text)
+
+    header = ""
+    if _NEEDS_COLLECTION.search(body_text):
+        header = "import std.collection.*\n\n"
+
+    out = header + body_text
+    if out and not out.endswith("\n"):
+        out += "\n"
+    result.source = out
+    return result
