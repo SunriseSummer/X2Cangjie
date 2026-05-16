@@ -137,6 +137,28 @@ class CHIME:
         toks_in = anon_go.split()
         if not toks_in:
             return "", 0.0
+        # Exact-template short-circuit.  When the query's anonymised
+        # form is byte-identical to a stored neuron's ``template_in``,
+        # that is an unambiguous, deterministic hit and we should
+        # short-cut HD-similarity retrieval entirely.  This is
+        # particularly valuable on a small trainset where HD lookup
+        # can otherwise rank a *near*-match higher than the
+        # *exact*-match it should always prefer.
+        exact_idx = self.soinn._by_template_in.get(anon_go)
+        if exact_idx is not None:
+            n = self.soinn.neurons[exact_idx]
+            if n.template_out:
+                # Still enforce the placeholder-subset rule so
+                # symmetric cases (a stored chunk with extra
+                # placeholders not in the query) can't leak.
+                in_set = set(_placeholders_of(anon_go))
+                cand_set = set(_placeholders_of(n.template_out))
+                if cand_set.issubset(in_set):
+                    # Refresh context with the input HV before
+                    # returning — keep the leaky integrator consistent.
+                    hv_in = hdc.encode_sequence(toks_in)
+                    self.context.update(hv_in)
+                    return n.template_out, 1.0
         hv_in = hdc.encode_sequence(toks_in)
         # Context-modulated retrieval.  We try *both* the raw HV and the
         # context-bound HV and pick the more confident hit; this

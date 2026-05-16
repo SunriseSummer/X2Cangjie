@@ -165,14 +165,30 @@ def _convert_raw_strings(src: str) -> str:
 def _segment_chunks(tokens: List[Token]) -> List[List[Token]]:
     """Split a Go token stream into top-level chunks by brace balance.
 
-    A chunk ends at a top-level ``;`` *or* at the ``}`` that closes a
-    previously opened ``{`` — unless followed by ``else``.  We track a
-    ``in_for_header`` flag so the ``;`` inside ``for init; cond; step``
-    are kept inside the chunk rather than separating it.
+    A chunk ends at any of:
+
+    * a top-level ``;`` (Go's explicit statement terminator);
+    * a ``NEWLINE`` token at depth 0 (Go's de-facto statement
+      terminator — present in the lexer's token stream but stripped
+      from chunk contents);
+    * the ``}`` that closes a previously opened ``{`` (unless the
+      next token is ``else``).
+
+    A ``in_for_header`` flag suppresses the ``;`` rule inside the
+    ``for init; cond; step`` clause head.
+
+    Keeping NEWLINE-as-separator is crucial: without it,
+    ``package main`` + ``import "fmt"`` + ``func main(){…}`` collapse
+    into one mega-chunk (since Go doesn't write ``;`` between top-level
+    decls), and statements inside ``main`` (``z := 15``, bare
+    ``fmt.Println(x)``) don't split either — both of which defeat the
+    statement-level retrieval CHIME relies on.
     """
 
+    # Keep newline markers (we use them as separators) but drop
+    # comments.
     toks = [t for t in tokens
-            if t.kind not in ("NEWLINE", "COMMENT_BLOCK", "COMMENT_LINE")]
+            if t.kind not in ("COMMENT_BLOCK", "COMMENT_LINE")]
     chunks: List[List[Token]] = []
     cur: List[Token] = []
     db = dp = ds = 0
@@ -181,6 +197,22 @@ def _segment_chunks(tokens: List[Token]) -> List[List[Token]]:
     n = len(toks)
     while i < n:
         t = toks[i]
+        if t.kind == "NEWLINE":
+            # Newline at depth 0 → top-level statement boundary.  At
+            # depth > 0 we *keep* the NEWLINE token in the running
+            # chunk: it carries no meaning to a trained CHIME neuron
+            # (rendering filters it out again), but it preserves the
+            # statement boundaries inside ``{ … }`` so that when
+            # ``_unfold_main`` recursively segments the body, the
+            # inner pass can still see them.
+            if db == 0 and dp == 0 and ds == 0:
+                if cur and not in_for_header:
+                    chunks.append(cur)
+                    cur = []
+            else:
+                cur.append(t)
+            i += 1
+            continue
         cur.append(t)
         if t.kind == "KEYWORD" and t.value == "for" and db == dp == ds == 0:
             in_for_header = True
@@ -192,9 +224,17 @@ def _segment_chunks(tokens: List[Token]) -> List[List[Token]]:
             elif t.value == "}":
                 db = max(db - 1, 0)
                 if db == 0 and dp == 0 and ds == 0:
-                    nxt = toks[i + 1] if i + 1 < n else None
+                    # Look ahead past whitespace for ``else``.
+                    j = i + 1
+                    while j < n and toks[j].kind == "NEWLINE":
+                        j += 1
+                    nxt = toks[j] if j < n else None
                     if (nxt is not None and nxt.kind == "KEYWORD"
                             and nxt.value == "else"):
+                        # Re-attach the bridge tokens we just looked
+                        # past to the running chunk — they're whitespace
+                        # so dropping them is fine.
+                        i = j - 1
                         i += 1
                         continue
                     chunks.append(cur)
@@ -273,6 +313,11 @@ def _render_chunk(chunk: List[Token]) -> str:
     parts: List[str] = []
     prev: str = ""
     for t in chunk:
+        # NEWLINE tokens are retained inside chunks (so recursive
+        # segmenters can still split on them) but they carry no
+        # rendered content and must not leak into the model's input.
+        if t.kind == "NEWLINE":
+            continue
         v = t.value
         if not parts:
             parts.append(v)

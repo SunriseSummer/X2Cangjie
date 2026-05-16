@@ -7,9 +7,9 @@
 - 用例总数：**45**
 - 模式覆盖率（confident / chunks）：**97.56%** (160 / 164)
 - Go 源编译（`go vet`）：**45 / 45** (100.00%)
-- Cangjie 编译通过：**21 / 45** (46.67%)
+- Cangjie 编译通过：**18 / 45** (40.00%)
 - 运行输出匹配：**8 / 45** (17.78%)
-- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**61.04%**
+- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**58.37%**
 
 ## 评分公式
 
@@ -33,14 +33,14 @@
 | `08_recursion` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `09_fibonacci` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `10_multi_return` | 4 | 4 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `11_slice` | 4 | 4 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `11_slice` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `12_slice_append` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `13_nested_for` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `14_if_elif` | 5 | 5 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `15_string_concat` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `16_boolean_logic` | 5 | 5 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `16_boolean_logic` | 5 | 5 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `17_fizzbuzz` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `18_sum_array` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `18_sum_array` | 3 | 3 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `19_switch` | 5 | 5 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `20_struct_basic` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `21_struct_methods` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
@@ -54,12 +54,12 @@
 | `29_nested_func_calls` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `30_mixed_program` | 8 | 8 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `31_map_basic` | 4 | 4 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `32_string_basics` | 3 | 3 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `32_string_basics` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `33_max_min` | 4 | 2 | 2 | 50% | ✅ | ✅ | ✅ | 80.00% |
 | `34_polymorphism` | 10 | 10 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `35_max_in_slice` | 4 | 4 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `36_gcd` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `37_primes` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `37_primes` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `38_reverse_slice` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `39_counter` | 8 | 8 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `40_matrix_sum` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
@@ -78,7 +78,7 @@
   want:
   '13\n7\n30\n3\n1\n'
    got:
-  '13\n10\n10\n10\n10\n'
+  '13\n13\n13\n13\n13\n'
   ```
 
 ### `03_vars`
@@ -105,17 +105,11 @@
 
 ### `11_slice`
 
-- 运行差异：
-  ```
-  want:
-  '1\n2\n3\n'
-   got:
-  '[1, 2, 3]\n[1, 2, 3]\n[1, 2, 3]\n'
-  ```
+- cjc 诊断：`error: invalid binary operator '>' on type 'Class-ArrayList<Int64>' and 'Int64'`
 
 ### `12_slice_append`
 
-- cjc 诊断：`error: no matching function for operator '()' function call`
+- cjc 诊断：`error: cannot convert an integer literal to type 'Class-ArrayList<Int64>'`
 
 ### `13_nested_for`
 
@@ -129,7 +123,7 @@
 
 ### `14_if_elif`
 
-- cjc 诊断：`error: mismatched types`
+- cjc 诊断：`error: redefinition of declaration 'grade'`
 
 ### `15_string_concat`
 
@@ -137,13 +131,7 @@
 
 ### `16_boolean_logic`
 
-- 运行差异：
-  ```
-  want:
-  'false\ntrue\nfalse\n'
-   got:
-  'true\ntrue\ntrue\n'
-  ```
+- cjc 诊断：`error: invalid binary operator '+' on type 'Bool' and 'Bool'`
 
 ### `17_fizzbuzz`
 
@@ -151,7 +139,13 @@
 
 ### `18_sum_array`
 
-- cjc 诊断：`error: mismatched types`
+- 运行差异：
+  ```
+  want:
+  '15\n'
+   got:
+  ''
+  ```
 
 ### `19_switch`
 
@@ -159,7 +153,7 @@
 
 ### `20_struct_basic`
 
-- cjc 诊断：`error: mismatched types`
+- cjc 诊断：`error: undeclared identifier 'X'`
 
 ### `21_struct_methods`
 
@@ -196,7 +190,7 @@
   want:
   '60\n'
    got:
-  '30\n'
+  ''
   ```
 
 ### `26_float_math`
@@ -243,17 +237,11 @@
 
 ### `32_string_basics`
 
-- 运行差异：
-  ```
-  want:
-  '5\nhello world\n'
-   got:
-  'hello\nhello\n'
-  ```
+- cjc 诊断：`error: redefinition of declaration 's'`
 
 ### `34_polymorphism`
 
-- cjc 诊断：`error: undeclared identifier 'name'`
+- cjc 诊断：`error: undeclared identifier 'a'`
 
 ### `36_gcd`
 
@@ -261,13 +249,7 @@
 
 ### `37_primes`
 
-- 运行差异：
-  ```
-  want:
-  '2\n3\n5\n7\n11\n13\n17\n19\n'
-   got:
-  '2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n'
-  ```
+- cjc 诊断：`error: invalid binary operator '-' on type '(Int64) -> Int64' and 'Int64'`
 
 ### `38_reverse_slice`
 
@@ -283,7 +265,7 @@
 
 ### `41_range_index`
 
-- cjc 诊断：`error: 'values' is not a member of class 'ArrayList<Int64>'`
+- cjc 诊断：`error: no matching function for operator '()' function call`
 
 ### `43_clamp`
 
@@ -291,7 +273,7 @@
 
 ### `44_pair_struct`
 
-- cjc 诊断：`error: mismatched types`
+- cjc 诊断：`error: undeclared identifier 'A'`
 
 ### `45_even_odd`
 
