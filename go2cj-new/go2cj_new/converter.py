@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from .lexer import Token, tokenize
 
@@ -268,39 +268,240 @@ def _is_func_main(chunk: List[Token]) -> bool:
             and chunk[-1].value == "}")
 
 
-def _unfold_main(chunks: List[List[Token]]) -> Tuple[List[List[Token]], List[bool]]:
-    """Replace any ``func main(){body}`` chunk with the body's per-stmt
-    chunks, and return a parallel ``from_main`` flag list.
+def _func_split(chunk: List[Token]) -> Optional[Tuple[str, List[Token], List[Token]]]:
+    """If ``chunk`` is a ``func NAME(...) <ret>? { body }`` declaration,
+    return ``(name, header_tokens_incl_open_brace, body_tokens)``.
 
-    Motivation: the CHIME associative memory retrieves on a per-chunk
-    basis.  Keeping the entire ``main`` body as a single huge chunk is
-    severely OOD on a small curated trainset (this is the well-known
-    OOD pitfall that hurts go2cj v1's end-to-end pass rate).  By
-    unfolding the body into individual statements, we get many more
-    accurate hits.  The lifted-and-assembled output re-wraps the body
-    in ``main() { ... return 0 }`` automatically.
+    The header includes everything up to and including the opening
+    ``{``; the body excludes both the opening ``{`` and the closing
+    ``}``.  Returns ``None`` for non-function chunks (top-level
+    ``type`` / ``var`` / ``const`` decls etc.).
+    """
+    if (len(chunk) < 6
+            or chunk[0].kind != "KEYWORD" or chunk[0].value != "func"
+            or chunk[1].kind != "IDENT"
+            or chunk[-1].value != "}"):
+        return None
+    name = chunk[1].value
+    # Walk forward to the *first* ``{`` at brace-depth 0 *that opens
+    # the function body* — skip generic ``<...>`` and parameter ``(...)``
+    # without descending into them.  We track paren / bracket depth so
+    # composite-literal-looking ``{`` inside parameter defaults can't
+    # confuse us.
+    paren_depth = bracket_depth = 0
+    body_brace_index = -1
+    for i, tok in enumerate(chunk):
+        if tok.value == "(":
+            paren_depth += 1
+        elif tok.value == ")":
+            paren_depth = max(paren_depth - 1, 0)
+        elif tok.value == "[":
+            bracket_depth += 1
+        elif tok.value == "]":
+            bracket_depth = max(bracket_depth - 1, 0)
+        elif (tok.value == "{" and paren_depth == 0
+              and bracket_depth == 0 and i > 1):
+            body_brace_index = i
+            break
+    if body_brace_index < 0:
+        return None
+    header = chunk[:body_brace_index + 1]
+    body = chunk[body_brace_index + 1:-1]
+    return name, header, body
 
-    The ``from_main`` flag is needed because once the body is unfolded
-    the statements look like top-level decls (e.g. ``var y = 10``)
-    which the assembler would otherwise hoist to module scope.  The
-    flag forces them back into the synthesised main body.
+
+def _block_split(chunk: List[Token]) -> Optional[Tuple[List[Token], List[Token]]]:
+    """If ``chunk`` has shape ``<header> { <body> }`` — that is, a single
+    outermost block whose opening ``{`` matches the chunk's terminal
+    ``}`` and whose body contains at least one top-level ``;`` —
+    return ``(header_incl_open_brace, body_tokens)``.  Otherwise return
+    ``None``.
+
+    Used by :func:`_expand_block` to recursively decompose nested
+    ``for {…}`` / ``if {…}`` / ``while {…}`` etc. into per-statement
+    chunks.  The semicolon-presence check distinguishes a real
+    statement block from a composite literal like ``[]int{1,2,3}``.
+
+    ``if … {…} else {…}`` is left intact (its terminal ``}`` does
+    *not* match its first ``{``).  The else-branch handling is the
+    converter's responsibility through CHIME templates.
+    """
+    paren = bracket = 0
+    i = 0
+    while i < len(chunk):
+        v = chunk[i].value
+        if v == "(":
+            paren += 1
+        elif v == ")":
+            paren = max(paren - 1, 0)
+        elif v == "[":
+            bracket += 1
+        elif v == "]":
+            bracket = max(bracket - 1, 0)
+        elif v == "{" and paren == 0 and bracket == 0:
+            break
+        i += 1
+    if i >= len(chunk) or chunk[i].value != "{":
+        return None
+    if not chunk or chunk[-1].value != "}":
+        return None
+    if i == 0:
+        return None  # bare ``{ body }`` — no header
+    # Walk forward to the matching ``}`` for ``chunk[i]``; if it isn't
+    # the very last token, this is a multi-brace chunk (if/else, switch
+    # with cases) and we shouldn't naively split it.
+    depth = 1
+    j = i + 1
+    while j < len(chunk) and depth > 0:
+        v = chunk[j].value
+        if v == "{":
+            depth += 1
+        elif v == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        j += 1
+    if j != len(chunk) - 1:
+        return None
+    body = chunk[i + 1:j]
+    # Body must contain at least one top-level ``;`` to count as a
+    # statement block (rules out ``{1,2,3}`` composite literals).
+    body_depth = 0
+    has_semi = False
+    for t in body:
+        v = t.value
+        if v in ("{", "(", "["):
+            body_depth += 1
+        elif v in ("}", ")", "]"):
+            body_depth = max(body_depth - 1, 0)
+        elif v == ";" and body_depth == 0:
+            has_semi = True
+            break
+    if not has_semi:
+        return None
+    header = chunk[:i + 1]
+    return header, body
+
+
+def _expand_block(chunk: List[Token], tag: Optional[str],
+                  out: List[List[Token]],
+                  tags: List[Optional[str]]) -> None:
+    """Recursively expand any nested ``<header>{body}`` blocks within
+    a statement chunk, appending the expanded sub-chunks (and a
+    parallel ``tag`` for each) to ``out`` / ``tags``.
+
+    Blocks whose body has ``;`` separated statements are split into
+    header / per-statement body / footer.  Composite literals,
+    statement chunks without inner blocks, and if-else chunks are
+    appended unchanged.  All sub-chunks inherit the parent ``tag`` so
+    the splicer keeps them inside the enclosing function body.
+    """
+    bs = _block_split(chunk)
+    if bs is None:
+        out.append(chunk)
+        tags.append(tag)
+        return
+    header, body = bs
+    out.append(header)
+    tags.append(tag)
+    for sub in _segment_chunks(body):
+        _expand_block(sub, tag, out, tags)
+    out.append([Token("PUNCT", "}", 0, 0)])
+    tags.append(tag)
+
+
+def _unfold_functions(
+    chunks: List[List[Token]],
+) -> Tuple[List[List[Token]], List[Optional[str]]]:
+    """Replace every ``func NAME(...) {body}`` chunk with a flat
+    sequence ``[header, *per_stmt_body_chunks, footer]`` and return a
+    parallel ``from_func`` tag list.
+
+    Recursive Block Unfolding (RBU): the same decomposition that
+    ``_unfold_main`` does for ``main()`` is applied uniformly to every
+    user-defined function as well.  Without this, any non-trivial
+    function (e.g. a 30-line knapsack DP, a 50-line quicksort) enters
+    CHIME as a single 100+-token chunk that has no chance of matching
+    the statement-level templates the engine was trained on.  With RBU,
+    every statement inside every function is independently translated,
+    and the function's structure is reconstructed at assembly time.
+
+    Tag semantics (``from_func[i]``):
+
+    * ``None``  — top-level decl (``type``, ``var``, ``const``,
+      ``interface``, free-standing ``func`` header / footer, etc.).
+    * ``"main"`` — body statement inside ``func main`` (re-wrapped by
+      the synthesised ``main() { … return 0 }`` block).
+    * ``"<name>"`` — body statement inside ``func <name>`` (re-wrapped
+      between the translated header / closing brace of that function).
     """
     out: List[List[Token]] = []
-    from_main: List[bool] = []
+    tags: List[Optional[str]] = []
     for ch in chunks:
         if _is_func_main(ch):
-            # Drop the leading ``func main () {`` and trailing ``}``.
+            # main: body statements are *not* recursively block-
+            # expanded (see :func:`go2cj_new.critical.train._unfold_main_body`
+            # for the rationale — trainset main bodies typically use
+            # literal loop bounds, whereas inside a user function the
+            # bound is a parameter identifier, so the placeholder
+            # signatures of bare ``for {`` headers diverge).
             body = ch[5:-1]
-            # Re-run the same segmenter on the body — bracketed
-            # control-flow blocks therein stay as single chunks while
-            # top-level statements split.
             for sub in _segment_chunks(body):
                 out.append(sub)
-                from_main.append(True)
-        else:
+                tags.append("main")
+            continue
+        split = _func_split(ch)
+        if split is None:
             out.append(ch)
-            from_main.append(False)
-    return out, from_main
+            tags.append(None)
+            continue
+        name, header, body = split
+        # Emit the function header (the part *up to and including* the
+        # opening ``{``) as its own top-level chunk so CHIME / fallback
+        # can translate the signature.  Body statements get
+        # *recursively* unfolded and tagged ``from_func=name`` — nested
+        # ``for {…}`` / ``if {…}`` blocks split into header chunk,
+        # per-statement body chunks (which can themselves contain
+        # inner blocks), and a footer ``}`` chunk, all routed through
+        # CHIME at statement granularity.  Placeholder-kind mismatches
+        # between literal-bounded (``i < 5``) and identifier-bounded
+        # (``i < n``) loops are resolved by the positional alignment
+        # in :func:`go2cj_new.critical.engine._align_placeholders`.
+        out.append(header)
+        tags.append(None)
+        for sub in _segment_chunks(body):
+            _expand_block(sub, name, out, tags)
+        out.append([Token("PUNCT", "}", 0, 0)])
+        tags.append(None)
+    return out, tags
+
+
+# Keep the old name as an alias so any external callers don't break.
+_unfold_main = _unfold_functions
+
+
+def _is_header_only_chunk(chunk: List[Token]) -> bool:
+    """A chunk produced by RBU that is just a function signature
+    ending in ``{`` (no body, no closing ``}``).  These should always
+    take the deterministic ``_rewrite_func_signature`` path to avoid
+    being matched against whole-function neurons in CHIME.
+    """
+    meaningful = [t for t in chunk if t.kind != "NEWLINE"]
+    if len(meaningful) < 4:
+        return False
+    if meaningful[0].kind != "KEYWORD" or meaningful[0].value != "func":
+        return False
+    if meaningful[-1].value != "{":
+        return False
+    # Reject if a closing ``}`` is also present (full function chunk
+    # that happens to end with another ``{``, shouldn't really happen).
+    return not any(t.value == "}" for t in meaningful)
+
+
+def _is_close_brace_chunk(chunk: List[Token]) -> bool:
+    """A chunk consisting of a single ``}`` (RBU function footer)."""
+    meaningful = [t for t in chunk if t.kind != "NEWLINE"]
+    return len(meaningful) == 1 and meaningful[0].value == "}"
 
 
 def _render_chunk(chunk: List[Token]) -> str:
@@ -348,10 +549,11 @@ _NEEDS_COLLECTION = re.compile(r"\b(?:ArrayList|HashMap|HashSet)\b")
 # translator, only to keep the fallback path useful.
 
 _FALLBACK_RULES = [
-    # fmt.Println(x)  →  println(x)   (also Print/Printf as best-effort)
-    (re.compile(r"\bfmt\s*\.\s*Println\s*\("), "println("),
-    (re.compile(r"\bfmt\s*\.\s*Print\s*\("),   "print("),
-    (re.compile(r"\bfmt\s*\.\s*Printf\s*\("),  "print("),
+    # ``fmt.Println`` / ``fmt.Print`` / ``fmt.Printf`` are handled by
+    # the balanced-paren multi-arg rewriter inside
+    # :func:`_rewrite_go_idioms`, so we don't list them here.  This
+    # leaves only the cheap, context-free token-level rewrites for
+    # primitive type renames and a chunk-start ``x := …`` short-var.
     # Function decls:  func name(a int, b int) int {  →
     #                   func name(a: Int64, b: Int64): Int64 {
     # Conservative: only rewrites when the entire chunk *starts* with
@@ -364,25 +566,179 @@ _FALLBACK_RULES = [
     (re.compile(r"\b(float64)\b"),         "Float64"),
     (re.compile(r"\bbool\b"),              "Bool"),
     (re.compile(r"\bstring\b"),            "String"),
-    # Go short var:  x := expr  →  var x = expr   (only when at chunk start
-    # so we don't break `for i := 0;` headers etc.).
-    (re.compile(r"^\s*([A-Za-z_]\w*)\s*:=\s*"), r"var \1 = "),
+    # Go short var:  x := expr  →  var x = expr.  Match anywhere in
+    # the chunk (not just at the start) so range loops merged on a
+    # single line still get rewritten — e.g.
+    # ``for (row in m) { sum := 0 ; for (v in row) ...``.  The lookbehind
+    # rejects ``:= 0`` produced by an already-translated Cangjie
+    # range form (which wouldn't contain ``:=`` anyway) and the leading
+    # ``\b`` keeps it from matching inside identifiers.
+    (re.compile(r"(^|[;{\s])([A-Za-z_]\w*)\s*:=\s*"), r"\1var \2 = "),
+    # ``len(x)``  →  ``x.size``   — applied last so any preceding
+    # rewrites still see the parentheses-form when relevant.
+    (re.compile(r"\blen\s*\(\s*([A-Za-z_]\w*(?:\s*\.\s*[A-Za-z_]\w*)*)\s*\)"),
+     r"\1.size"),
 ]
 
+
+# --------------------------------------------------------------------------- #
+#  Control-flow header rewrites.                                               #
+#                                                                              #
+#  Cangjie requires ``if (cond) {``, ``while (cond) {`` and ``for (var in     #
+#  iter) {`` — parenthesised conditions and an ``in``-style for.  These are   #
+#  pure-syntax transforms (no semantic translation needed) that ride on the   #
+#  fallback path when CHIME has no matching template.                          #
+#                                                                              #
+#  Each rule is shape-restricted (anchored, balanced-brace-aware) so it does  #
+#  not corrupt unrelated chunks like ``var x = if(cond) {…}`` (Cangjie's      #
+#  if-expression form, which already has parens).                              #
+# --------------------------------------------------------------------------- #
+
+
+def _parenthesise_condition(text: str, keyword: str,
+                            replacement_keyword: Optional[str] = None) -> str:
+    """Add Cangjie-style parentheses around the *condition* of a Go
+    control-flow header.
+
+    Handles ``if cond { … }``, ``else if cond { … }``, and ``for cond { … }``
+    (Go's ``for`` with no init/step is Cangjie's ``while``).  The
+    condition is taken as everything between the keyword and the matching
+    ``{`` that opens the body, with brace / bracket balance respected so
+    embedded composite literals don't trip the parser.  Returns ``text``
+    unchanged when the shape doesn't match.
+    """
+    out = replacement_keyword if replacement_keyword is not None else keyword
+    pattern = re.compile(
+        rf"(^|[^A-Za-z0-9_])\b{re.escape(keyword)}\b(?!\s*[(])"
+    )
+    result: List[str] = []
+    last = 0
+    for m in pattern.finditer(text):
+        start = m.end()
+        # Walk forward to the matching ``{`` (depth 0 in (), []).
+        paren = bracket = brace = 0
+        i = start
+        n = len(text)
+        in_str = False
+        str_ch = ""
+        while i < n:
+            c = text[i]
+            if in_str:
+                if c == "\\" and i + 1 < n:
+                    i += 2
+                    continue
+                if c == str_ch:
+                    in_str = False
+                i += 1
+                continue
+            if c in '"\'`':
+                in_str = True
+                str_ch = c
+                i += 1
+                continue
+            if c == "(":
+                paren += 1
+            elif c == ")":
+                paren = max(paren - 1, 0)
+            elif c == "[":
+                bracket += 1
+            elif c == "]":
+                bracket = max(bracket - 1, 0)
+            elif c == "{" and paren == 0 and bracket == 0:
+                brace = 1
+                break
+            i += 1
+        if brace != 1:
+            continue
+        cond = text[start:i].strip()
+        if not cond:
+            continue
+        # Already parenthesised — leave alone (would otherwise produce
+        # ``if ((cond)) {``).
+        if cond.startswith("(") and cond.endswith(")"):
+            # Only skip when the outer parens enclose the *whole* cond.
+            depth = 0
+            ok = True
+            for k, ch in enumerate(cond):
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+                    if depth == 0 and k != len(cond) - 1:
+                        ok = False
+                        break
+            if ok:
+                # Still rewrite the keyword (e.g. ``for`` → ``while``)
+                # without altering the parenthesised condition.
+                result.append(text[last:m.start()])
+                result.append(m.group(1))
+                result.append(out)
+                result.append(text[m.end():i])
+                result.append("{")
+                last = i + 1
+                continue
+        result.append(text[last:m.start()])
+        result.append(m.group(1))
+        result.append(out)
+        result.append(" (")
+        result.append(cond)
+        result.append(") {")
+        last = i + 1
+    if last == 0:
+        return text
+    result.append(text[last:])
+    return "".join(result)
+
 _FUNC_SIG_RE = re.compile(
-    r"^func\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*([A-Za-z_]\w*)?\s*\{",
+    r"^func\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*"
+    r"(\[\s*\]\s*[A-Za-z_]\w*"        # ``[]int`` slice return
+    r"|\([^)]*\)"                      # ``(int, int)`` tuple return
+    r"|[A-Za-z_]\w*"                  # plain identifier return
+    r")?\s*\{",
     flags=re.S,
 )
+
+
+def _translate_go_type(go_type: str) -> str:
+    """Translate a single Go type fragment to its Cangjie equivalent.
+
+    Supports the common shapes that appear in trainset / test cases:
+    primitive renames (``int`` → ``Int64`` etc.), single-dimensional
+    slice ``[]T`` → ``ArrayList<T>``, and two-dimensional slice
+    ``[][]T`` → ``ArrayList<ArrayList<T>>``.  Unknown shapes pass
+    through unchanged.
+    """
+    t = go_type.strip()
+    # Match ``[][]T`` first to avoid the outer ``[]`` clobbering the
+    # inner pattern.
+    m2 = re.match(r"^\[\s*\]\s*\[\s*\]\s*(.+)$", t)
+    if m2:
+        return f"ArrayList<ArrayList<{_translate_go_type(m2.group(1))}>>"
+    m1 = re.match(r"^\[\s*\]\s*(.+)$", t)
+    if m1:
+        return f"ArrayList<{_translate_go_type(m1.group(1))}>"
+    return {
+        "int": "Int64", "int64": "Int64", "int32": "Int32",
+        "int16": "Int16", "int8": "Int8",
+        "uint": "UInt64", "uint64": "UInt64", "uint32": "UInt32",
+        "uint16": "UInt16", "uint8": "UInt8", "byte": "UInt8",
+        "float32": "Float32", "float64": "Float64",
+        "bool": "Bool", "string": "String", "rune": "Rune",
+    }.get(t, t)
 
 
 def _rewrite_func_signature(text: str) -> str:
     """Rewrite a leading Go ``func`` signature into Cangjie shape.
 
-    Only rewrites when the chunk starts with ``func name(params) ret {``
-    and the params look like ``a int, b int`` (Go-style ``name type``).
-    Cangjie wants ``a: Int64, b: Int64`` and ``: Int64`` after the param
-    list.  ``func main()`` is untouched (Cangjie infers the return type
-    from ``return 0``).
+    Handles four common parameter / return-type shapes:
+
+    * single typed param ``a int``;
+    * shared-type group ``a, b int`` → ``a: Int64, b: Int64``;
+    * slice param ``xs []int`` → ``xs: ArrayList<Int64>``;
+    * tuple return ``(int, int)`` → ``: (Int64, Int64)``.
+
+    Cangjie's ``func main`` is left untouched (no return type
+    needed — Cangjie infers from ``return 0``).
     """
     m = _FUNC_SIG_RE.match(text.lstrip())
     if not m:
@@ -391,20 +747,688 @@ def _rewrite_func_signature(text: str) -> str:
     if name == "main":
         return text
     new_params: List[str] = []
-    for raw in params.split(","):
-        p = raw.strip()
-        if not p:
-            continue
-        bits = p.split()
-        if len(bits) == 2:
-            new_params.append(f"{bits[0]}: {bits[1]}")
+    # First pass: split on commas, then merge ``a , b , c int`` shared-
+    # type groups by walking left-to-right and back-filling missing
+    # types from the next-named-type group.
+    raw_parts = [p.strip() for p in params.split(",") if p.strip()]
+    pending_names: List[str] = []
+    for part in raw_parts:
+        bits = part.split()
+        if len(bits) == 1:
+            # name only, type will come from a later group
+            pending_names.append(bits[0])
+        elif len(bits) >= 2:
+            type_str = " ".join(bits[1:])
+            cj_type = _translate_go_type(type_str)
+            for nm in pending_names:
+                new_params.append(f"{nm}: {cj_type}")
+            pending_names = []
+            new_params.append(f"{bits[0]}: {cj_type}")
         else:
-            new_params.append(p)
+            new_params.append(part)
+    # Unfinished pending names — keep as-is so cjc raises a clear error.
+    for nm in pending_names:
+        new_params.append(nm)
     rewritten_head = f"func {name}({', '.join(new_params)})"
     if ret:
-        rewritten_head += f": {ret}"
+        ret = ret.strip()
+        if ret.startswith("(") and ret.endswith(")"):
+            # tuple return — translate each component
+            inner = ret[1:-1]
+            comps = [_translate_go_type(c) for c in inner.split(",") if c.strip()]
+            rewritten_head += f": ({', '.join(comps)})"
+        else:
+            rewritten_head += f": {_translate_go_type(ret)}"
+    else:
+        # Cangjie needs an explicit ``: Unit`` for void functions
+        # that are *recursive* — without it, type inference fails
+        # at the recursive call site.  Emitting it unconditionally
+        # is also safe for non-recursive void functions.
+        rewritten_head += ": Unit"
     rewritten_head += " {"
     return _FUNC_SIG_RE.sub(lambda _: rewritten_head, text.lstrip(), count=1)
+
+
+def _resolve_cstyle_steps(text: str) -> str:
+    """Resolve ``__cstyle_step__`` markers planted by the c-style
+    ``for`` rewriter.  Each marker sits immediately after the
+    ``{`` of a ``while`` block; this scan walks forward through the
+    text, tracking brace depth, and injects the step statement
+    just before the matching ``}``.  The marker comment is then
+    removed.  Markers can be nested (one per ``for`` scope).
+    """
+    marker = "/*__cstyle_step__:"
+    while marker in text:
+        idx = text.index(marker)
+        end_marker = text.index("*/", idx)
+        step = text[idx + len(marker):end_marker].strip()
+        depth = 1
+        j = end_marker + 2
+        while j < len(text) and depth > 0:
+            c = text[j]
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        if depth != 0:
+            # Couldn't find the closing ``}`` — drop the marker so
+            # the source at least parses.
+            text = text[:idx] + text[end_marker + 2:]
+            continue
+        # Insert ``step;\n`` before position ``j`` and strip the
+        # marker comment.
+        text = (
+            text[:idx].rstrip()
+            + text[end_marker + 2:j]
+            + f"\n        {step}\n    "
+            + text[j:]
+        )
+    return text
+
+
+def _dedup_var_in_block(text: str) -> str:
+    """Rename successive ``var X`` declarations in the same brace
+    scope to avoid the ``redefinition of declaration 'X'`` error
+    that Cangjie raises when two c-style ``for`` loops in the
+    same enclosing block both translate into ``var i = ...; while
+    (...) { … }`` with the same loop variable ``i``.
+
+    Cangjie's lexical scope rule means even though the second
+    ``i`` was originally scoped to its loop, our flattened
+    ``var i`` lives at the enclosing scope.  We post-process by
+    appending a numeric suffix to repeat ``var IDENT`` decls
+    within the same brace block (tracking depth so an inner
+    ``{ var i ... }`` shadow is allowed).  The corresponding
+    references inside the same loop are also renamed.
+    """
+    # Pass 1: walk the source, track brace depth, collect ``var X``
+    # occurrences per (depth, name) and rename second+ occurrences.
+    out: List[str] = []
+    i = 0
+    n = len(text)
+    # Per-depth: set of names already declared at that depth.
+    seen: Dict[int, Dict[str, int]] = {0: {}}
+    depth = 0
+    rename_stack: List[Dict[str, str]] = [{}]
+    in_str = False
+    str_ch = ""
+
+    def _flush_word(buf: List[str], word: str) -> str:
+        # If word is being renamed at any visible scope, substitute.
+        for scope in reversed(rename_stack):
+            if word in scope:
+                return scope[word]
+        return word
+
+    while i < n:
+        c = text[i]
+        if in_str:
+            out.append(c)
+            if c == "\\" and i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if c == str_ch:
+                in_str = False
+            i += 1
+            continue
+        if c in '"\'`':
+            in_str = True
+            str_ch = c
+            out.append(c)
+            i += 1
+            continue
+        if c == "{":
+            depth += 1
+            seen.setdefault(depth, {})
+            rename_stack.append({})
+            out.append(c)
+            i += 1
+            continue
+        if c == "}":
+            seen.pop(depth, None)
+            if len(rename_stack) > 1:
+                rename_stack.pop()
+            depth = max(depth - 1, 0)
+            out.append(c)
+            i += 1
+            continue
+        # Match ``var IDENT`` at word boundary.
+        m_var = re.match(r"\b(var|let)\s+([A-Za-z_]\w*)\b", text[i:])
+        if m_var:
+            kw, name = m_var.group(1), m_var.group(2)
+            scope = seen.setdefault(depth, {})
+            if name in scope:
+                scope[name] += 1
+                new_name = f"{name}_{scope[name]}"
+                rename_stack[-1][name] = new_name
+                out.append(f"{kw} {new_name}")
+            else:
+                scope[name] = 1
+                # Clear any prior rename for this name in our scope
+                rename_stack[-1].pop(name, None)
+                out.append(m_var.group(0))
+            i += m_var.end()
+            continue
+        # Match identifier (word) — substitute if renamed.
+        m_id = re.match(r"\b([A-Za-z_]\w*)\b", text[i:])
+        if m_id:
+            word = m_id.group(1)
+            out.append(_flush_word(out, word))
+            i += m_id.end()
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _rewrite_go_idioms(text: str) -> str:
+    """Apply shape-restricted rewrites for Go idioms that have a
+    deterministic Cangjie equivalent.
+
+    These rules are the *deterministic* spine of the fallback path —
+    they fire only when their pattern matches unambiguously, so the
+    transform is always correct (no half-translated leftovers).  The
+    set of rules deliberately targets the high-frequency idioms seen
+    in real-world algorithm code (DP, sort, search) that the
+    CHIME associative memory cannot reliably retrieve from a small
+    curated trainset:
+
+    * Range loops — ``for _, v := range xs {`` /
+      ``for i := range xs {`` / ``for i, v := range xs {``.
+    * C-style for header — ``for i := 0; i < n; i++ {`` /
+      ``for i := lo; i <= hi; i++ {``.
+    * Tuple swap — ``a, b = b, a`` (and indexed forms
+      ``xs[i], xs[j] = xs[j], xs[i]``).
+    * Slice literal — ``[]int{a, b, c}`` → ``Array<Int64>([a, b, c])``.
+    * 2-D ``make`` — ``make([][]int, n)`` →
+      ``Array<Array<Int64>>(n, {_ => Array<Int64>(0, {_ => 0})})``.
+    * 1-D ``make`` — ``make([]int, n)`` →
+      ``Array<Int64>(n, {_ => 0})``.
+    * ``len(x)``  →  ``x.size``.
+    * Float-typed integer literal coercion —
+      ``var x: Float64 = 10`` → ``var x: Float64 = 10.0``.
+    """
+    # --- 2-D and 1-D ``make`` ------------------------------------- #
+    # ``make([][]T, n)``  (matches before the 1-D form so the outer
+    # brackets aren't shadowed by it).  Emit
+    # ``ArrayList<ArrayList<T>>`` for consistency with the 1-D form
+    # (also ``ArrayList<T>``) so that later
+    # ``dp[i] = make([]T, m+1)`` row assignments have matching
+    # element types.
+    def _make_2d(m: re.Match) -> str:
+        inner = _translate_go_type(m.group(1))
+        size = m.group(2).strip()
+        return (f"ArrayList<ArrayList<{inner}>>({size}, "
+                f"{{_ => ArrayList<{inner}>()}})")
+    text = re.sub(
+        r"\bmake\s*\(\s*\[\s*\]\s*\[\s*\]\s*([A-Za-z_]\w*)\s*,\s*([^)]+?)\s*\)",
+        _make_2d, text,
+    )
+    # ``make([]T, n)``.  Cangjie's ``ArrayList<T>(size: Int64,
+    # initElement: (Int64) -> T)`` matches Go's ``make`` shape
+    # exactly and keeps the result type consistent with slice
+    # signatures (``[]T`` → ``ArrayList<T>``), so an
+    # ``out := make([]int, n); return out`` from a function with
+    # return type ``[]int`` round-trips cleanly.  Default element
+    # is ``0`` for numeric types, ``""`` for ``string``, ``false``
+    # for ``bool``.
+    def _make_1d(m: re.Match) -> str:
+        inner = _translate_go_type(m.group(1))
+        size = m.group(2).strip()
+        default = '""' if inner == "String" else ("false" if inner == "Bool" else "0")
+        return f"ArrayList<{inner}>({size}, {{_ => {default}}})"
+    text = re.sub(
+        r"\bmake\s*\(\s*\[\s*\]\s*([A-Za-z_]\w*)\s*,\s*([^)]+?)\s*\)",
+        _make_1d, text,
+    )
+
+    # --- 2-D slice literal ``[][]T{{a,b},{c,d}}`` ----------------- #
+    # Emitted as a nested ``ArrayList<ArrayList<T>>([...])``.  Match
+    # the *outer* literal greedy-but-bracket-balanced; trailing
+    # commas inside both inner and outer braces are stripped.
+    def _slice_lit_2d(m: re.Match) -> str:
+        inner = _translate_go_type(m.group(1))
+        rows_raw = m.group(2)
+        # Find each ``{...}`` row literal and rewrap as ArrayList.
+        rows: List[str] = []
+        depth = 0
+        cur: List[str] = []
+        i = 0
+        n = len(rows_raw)
+        in_row = False
+        while i < n:
+            c = rows_raw[i]
+            if c == "{":
+                if depth == 0:
+                    in_row = True
+                    cur = []
+                else:
+                    cur.append(c)
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0 and in_row:
+                    elems = "".join(cur).strip().rstrip(",").strip()
+                    rows.append(f"ArrayList<{inner}>([{elems}])")
+                    in_row = False
+                else:
+                    cur.append(c)
+            else:
+                if in_row:
+                    cur.append(c)
+            i += 1
+        if not rows:
+            return m.group(0)
+        return f"ArrayList<ArrayList<{inner}>>([{', '.join(rows)}])"
+    text = re.sub(
+        r"\[\s*\]\s*\[\s*\]\s*([A-Za-z_]\w*)\s*\{((?:[^{}]*\{[^{}]*\}[^{}]*)+)\}",
+        _slice_lit_2d, text,
+    )
+
+    # --- Slice literal ``[]T{a, b, c}`` --------------------------- #
+    # Emit ``ArrayList`` rather than ``Array`` because Go slices are
+    # dynamically-sized (``append``-friendly), and the Cangjie
+    # standard ``ArrayList<T>([…])`` constructor matches the
+    # element-list literal exactly.  ``Array<T>`` has only an
+    # ``(size, init: (Int64)->T)`` constructor and would reject a
+    # bare array literal.  Nested literals like ``[][]int{{1,2},…}``
+    # are handled by the 2-D ``make`` rule plus separate
+    # row-assignment statements; we don't synthesise a nested
+    # literal here because the converter would need access to the
+    # whole expression's surrounding type context.
+    def _slice_lit(m: re.Match) -> str:
+        inner = _translate_go_type(m.group(1))
+        elems = m.group(2).strip()
+        # Drop a trailing comma — Go allows it, Cangjie's literal
+        # forms don't.
+        elems = re.sub(r",\s*$", "", elems)
+        return f"ArrayList<{inner}>([{elems}])"
+    text = re.sub(
+        r"\[\s*\]\s*([A-Za-z_]\w*)\s*\{\s*([^{}]*?)\s*\}",
+        _slice_lit, text,
+    )
+
+    # --- Range loops --------------------------------------------- #
+    # ``for _, v := range expr {``  →  ``for (v in expr) {``
+    text = re.sub(
+        r"\bfor\s+_\s*,\s*([A-Za-z_]\w*)\s*:=\s*range\s+(.+?)\s*\{",
+        r"for (\1 in \2) {",
+        text,
+    )
+    # ``for i, v := range expr {``  →  index-driven loop with
+    # destructure-on-step.  Cangjie has no ``enumerate`` global, so
+    # we use the explicit index form ``for (i in 0..(expr).size)``
+    # and bind ``v`` to ``(expr)[i]`` inside.  This is emitted as a
+    # *single* line so the brace structure stays intact — the body
+    # will follow on subsequent lines.
+    text = re.sub(
+        r"\bfor\s+([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*)\s*:=\s*range\s+(.+?)\s*\{",
+        r"for (\1 in 0..(\3).size) { let \2 = (\3)[\1];",
+        text,
+    )
+    # ``for i := range expr {``  →  ``for (i in 0..(expr).size) {``
+    text = re.sub(
+        r"\bfor\s+([A-Za-z_]\w*)\s*:=\s*range\s+(.+?)\s*\{",
+        r"for (\1 in 0..(\2).size) {",
+        text,
+    )
+    # ``for _ = range expr {``  →  ``for (_ in expr) {``
+    text = re.sub(
+        r"\bfor\s+_\s*:=\s*range\s+(.+?)\s*\{",
+        r"for (_ in \1) {",
+        text,
+    )
+
+    # --- C-style ``for init; cond; step {`` ---------------------- #
+    # Recognise the canonical algorithm-loop shape ``for VAR :=
+    # START ; COND ; STEP {``.  Map onto a Cangjie range form when
+    # COND is the simple ``VAR OP END`` shape (where OP is ``<`` /
+    # ``<=`` / ``>`` / ``>=``) AND the step is a unit ``VAR++`` /
+    # ``VAR--`` — that gives the cleanest output and dovetails with
+    # the explicit ``for (i in 0..n)`` form CHIME already knows.
+    # Anything else (compound conditions like ``i*i <= n`` or
+    # multi-step ``VAR += k``) falls back to an expanded
+    # ``var VAR = START ; while (COND) { … VAR STEP }`` form — the
+    # step is emitted at the *end* of the loop body, which the
+    # closing-``}`` assembly step handles by appending the step
+    # before the final brace.
+    def _cstyle_for(m: re.Match) -> str:
+        var, start, cond, step = m.groups()
+        cond = cond.strip()
+        step = step.strip()
+        step_packed = re.sub(r"\s+", "", step)
+        # Try the clean range form first.
+        m_simple = re.fullmatch(
+            rf"\s*{re.escape(var)}\s*(<=|<|>=|>)\s*(.+)", cond,
+        )
+        m_step_plus_plus = step_packed in (f"{var}++", f"{var}--")
+        if m_simple and m_step_plus_plus:
+            op, end = m_simple.group(1), m_simple.group(2).strip()
+            if op == "<" and step_packed.endswith("++"):
+                return f"for ({var} in {start}..{end}) {{"
+            if op == "<=" and step_packed.endswith("++"):
+                return f"for ({var} in {start}..={end}) {{"
+        # Generic fallback: expand into ``var VAR = START; while
+        # (COND) { … }`` with the step appended at the loop body's
+        # end via the ``__cstyle_step__`` marker.  The marker is
+        # picked up by ``_inject_cstyle_step`` below to insert
+        # before the loop's closing ``}``.
+        return (
+            f"var {var} = {start}; "
+            f"while ({cond}) {{ /*__cstyle_step__:{step}*/"
+        )
+    text = re.sub(
+        r"\bfor\s+([A-Za-z_]\w*)\s*:=\s*([^;]+?)\s*;\s*"
+        r"([^;{]+?)\s*;\s*"
+        r"([^{]+?)\s*\{",
+        _cstyle_for, text,
+    )
+    # ``__cstyle_step__`` markers are resolved *after* RBU assembly
+    # (in :func:`_resolve_cstyle_steps`) — at that point the matching
+    # closing ``}`` of the loop body is reachable in the same string.
+
+    # --- Tuple swap: ``a, b = b, a``  (incl. indexed) ------------ #
+    # Conservative: only matches the canonical swap (LHS-rev == RHS).
+    def _tuple_swap(m: re.Match) -> str:
+        lhs1, lhs2, rhs1, rhs2 = (g.strip() for g in m.groups())
+        if lhs1 == rhs2 and lhs2 == rhs1:
+            return f"let __tmp_swap = {lhs1}; {lhs1} = {lhs2}; {lhs2} = __tmp_swap"
+        return m.group(0)
+    text = re.sub(
+        r"([A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?)\s*,\s*"
+        r"([A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?)\s*=\s*"
+        r"([A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?)\s*,\s*"
+        r"([A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?)",
+        _tuple_swap, text,
+    )
+
+    # --- Float-typed integer literal coercion --------------------- #
+    # ``var x: Float64 = 10``  →  ``var x: Float64 = 10.0``.  Cangjie
+    # refuses to implicitly widen an int literal into a Float64 binding.
+    text = re.sub(
+        r"(\b(?:var|let)\s+[A-Za-z_]\w*\s*:\s*Float(?:32|64)\s*=\s*)"
+        r"(-?\d+)(\s*(?:;|$|\n))",
+        lambda m: m.group(1) + m.group(2) + ".0" + m.group(3),
+        text,
+    )
+
+    # --- Multi-argument ``fmt.Println`` / ``fmt.Print`` ---------- #
+    # Cangjie's ``println(x)`` takes a single argument; Go's
+    # ``fmt.Println(a, b, c)`` prints space-separated.  Translate by
+    # interpolating: ``println("${a} ${b} ${c}")``.  Argument
+    # splitting is paren / bracket / brace aware so calls like
+    # ``fmt.Println(foo(x, y), z)`` parse correctly.
+    def _split_args(arg_text: str) -> List[str]:
+        parts: List[str] = []
+        cur: List[str] = []
+        depth = 0
+        in_str = False
+        str_ch = ""
+        i = 0
+        n = len(arg_text)
+        while i < n:
+            c = arg_text[i]
+            if in_str:
+                cur.append(c)
+                if c == "\\" and i + 1 < n:
+                    cur.append(arg_text[i + 1])
+                    i += 2
+                    continue
+                if c == str_ch:
+                    in_str = False
+                i += 1
+                continue
+            if c in '"\'`':
+                in_str = True
+                str_ch = c
+                cur.append(c)
+                i += 1
+                continue
+            if c in "([{":
+                depth += 1
+            elif c in ")]}":
+                depth = max(depth - 1, 0)
+            if c == "," and depth == 0:
+                parts.append("".join(cur).strip())
+                cur = []
+            else:
+                cur.append(c)
+            i += 1
+        tail = "".join(cur).strip()
+        if tail:
+            parts.append(tail)
+        return parts
+
+    def _fmt_println(m: re.Match, newline: bool) -> str:
+        # ``m`` spans ``fmt.Println(`` through the matching ``)``;
+        # group 1 holds the argument text.
+        args = _split_args(m.group(1))
+        if len(args) <= 1:
+            inner = args[0] if args else ""
+            return ("println(" if newline else "print(") + inner + ")"
+        parts: List[str] = []
+        for arg in args:
+            if (len(arg) >= 2 and arg[0] == '"' and arg[-1] == '"'
+                    and "${" not in arg):
+                # Bare string literal — embed its body verbatim.
+                parts.append(arg[1:-1])
+            else:
+                parts.append("${" + arg + "}")
+        joined = " ".join(parts)
+        return ("println(\"" if newline else "print(\"") + joined + "\")"
+
+    def _balanced_call_rewrite(text_in: str, prefix_re: re.Pattern,
+                               make: Callable[[re.Match], str]) -> str:
+        """Repeatedly find ``prefix_re`` (which must end at the call's
+        opening ``(``) and rewrite up to the *balanced* closing
+        ``)``.  ``make`` receives a ``re.Match`` whose ``.group(1)``
+        is set to the argument text between the parens.
+        """
+        out: List[str] = []
+        last = 0
+        for m in prefix_re.finditer(text_in):
+            start = m.end()
+            depth = 1
+            j = start
+            in_s = False
+            sc = ""
+            while j < len(text_in) and depth > 0:
+                ch = text_in[j]
+                if in_s:
+                    if ch == "\\" and j + 1 < len(text_in):
+                        j += 2
+                        continue
+                    if ch == sc:
+                        in_s = False
+                    j += 1
+                    continue
+                if ch in '"\'`':
+                    in_s = True
+                    sc = ch
+                    j += 1
+                    continue
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            if depth != 0:
+                continue
+            args_text = text_in[start:j]
+
+            class _Synth:
+                """Minimal ``re.Match``-shaped shim.
+
+                The ``make`` callbacks (``_fmt_println`` /
+                ``_fmt_printf``) only read ``group(1)`` — the
+                argument text between the call's parentheses.  We
+                synthesize that view here because Python's
+                ``re.Match`` can't be constructed manually and we
+                need a balanced-paren scan (not a regex) to find
+                the argument span.  ``i`` is intentionally ignored
+                because every consumer asks for the same single
+                captured group.
+                """
+
+                def __init__(self, t: str) -> None:
+                    self._t = t
+
+                def group(self, i: int) -> str:  # noqa: ARG002 - mirror re.Match
+                    return self._t
+
+            out.append(text_in[last:m.start()])
+            out.append(make(_Synth(args_text)))
+            last = j + 1
+        out.append(text_in[last:])
+        return "".join(out)
+
+    def _fmt_printf(m: re.Match) -> str:
+        """Translate ``fmt.Printf(fmt_str, a, b, …)`` to Cangjie's
+        ``print("…${a}…${b}…")`` by parsing the format string for
+        ``%s`` / ``%d`` / ``%f`` / ``%v`` / ``%t`` placeholders and
+        substituting each successive argument into a ``${…}``
+        interpolation.  Width / precision specifiers are stripped
+        (best-effort — algorithmic test cases rarely use them).
+        The trailing ``\n`` in the format string is honoured by
+        switching to ``println``.
+        """
+        args = _split_args(m.group(1))
+        if not args:
+            return "print(\"\")"
+        fmt_arg = args[0]
+        rest = args[1:]
+        if not (len(fmt_arg) >= 2 and fmt_arg[0] == '"' and fmt_arg[-1] == '"'):
+            # Non-literal format string — emit a best-effort
+            # interpolation that prints all positional arguments.
+            joined = " ".join("${" + a + "}" for a in rest)
+            return f"println({fmt_arg} + \"{joined}\")"
+        body = fmt_arg[1:-1]
+        ends_nl = body.endswith("\\n")
+        if ends_nl:
+            body = body[:-2]
+        out_parts: List[str] = []
+        i = 0
+        arg_idx = 0
+        spec_re = re.compile(r"%[-+ 0#]?\d*(?:\.\d+)?[sdvtfqobxXc]")
+        while i < len(body):
+            m2 = spec_re.match(body, i)
+            if m2:
+                if arg_idx < len(rest):
+                    out_parts.append("${" + rest[arg_idx] + "}")
+                    arg_idx += 1
+                i = m2.end()
+            else:
+                out_parts.append(body[i])
+                i += 1
+        printer = "println" if ends_nl else "print"
+        return printer + "(\"" + "".join(out_parts) + "\")"
+
+    text = _balanced_call_rewrite(
+        text, re.compile(r"\bfmt\s*\.\s*Printf\s*\("), _fmt_printf,
+    )
+    text = _balanced_call_rewrite(
+        text, re.compile(r"\bfmt\s*\.\s*Println\s*\("),
+        lambda m: _fmt_println(m, newline=True),
+    )
+    text = _balanced_call_rewrite(
+        text, re.compile(r"\bfmt\s*\.\s*Print\s*\("),
+        lambda m: _fmt_println(m, newline=False),
+    )
+
+    return text
+
+
+# A small set of regex probes used to *prefer* the deterministic
+# fallback over a confident CHIME retrieval for chunks the
+# associative memory routinely mangles.  See
+# :func:`_has_fragile_idiom` for the rationale.
+_FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
+    # ``a, b = b, a`` tuple swap (incl. indexed forms).
+    re.compile(r"[A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?\s*,\s*"
+               r"[A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?\s*=\s*"
+               r"[A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?\s*,\s*"
+               r"[A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?"),
+    # ``for _, v := range expr`` and friends.
+    re.compile(r"\bfor\s+(?:_|[A-Za-z_]\w*)\s*(?:,\s*[A-Za-z_]\w*\s*)?"
+               r":=\s*range\b"),
+    # ``make([]T, …)`` or ``make([][]T, …)``.
+    re.compile(r"\bmake\s*\(\s*\[\s*\]"),
+    # Slice literal ``[]T{...}`` (incl. ``[][]T{...}``).
+    re.compile(r"\[\s*\]\s*(?:\[\s*\]\s*)?[A-Za-z_]\w*\s*\{"),
+    # ``a[i] = max(a[i], ...)``-style indexed compound update.  This
+    # is the canonical DP update that CHIME's positional alignment
+    # tends to mangle (swapping array / index roles).  The probe
+    # fires for any ``IDENT [ … ] = IDENT ( IDENT [ … ]`` pattern.
+    re.compile(r"[A-Za-z_]\w*\s*\[[^\[\]]+\]\s*=\s*"
+               r"[A-Za-z_]\w*\s*\(\s*[A-Za-z_]\w*\s*\["),
+    # Two-dimensional indexing (``dp[i][j]``).  CHIME templates with
+    # one-level indexing routinely drop the second subscript when
+    # retrieved.  Forcing fallback preserves the original 2-D form,
+    # which is valid Cangjie when ``dp`` is ``Array<Array<T>>`` or
+    # ``ArrayList<ArrayList<T>>``.
+    re.compile(r"[A-Za-z_]\w*\s*\[[^\[\]]+\]\s*\[[^\[\]]+\]"),
+    # ``var IDENT = INT_LITERAL`` (untyped) — CHIME has a tendency
+    # to retrieve a typed-annotation template (``var x: Float64 =
+    # NUM``) for chunks of this shape, then emit an int literal in
+    # the slot.  The verbatim Go form compiles directly in Cangjie.
+    re.compile(r"^\s*var\s+[A-Za-z_]\w*\s*=\s*-?\d+(?:\.\d+)?\s*$"),
+    # C-style ``for init; cond; step`` headers — the deterministic
+    # rewriter has explicit handling and CHIME often retrieves a
+    # range-form template that loses the init / step state.  The
+    # cond is matched generously (``[^;]+``) so non-trivial bounds
+    # like ``i*i <= n`` or ``i+1 < len(xs)`` still trigger.
+    re.compile(r"\bfor\s+[A-Za-z_]\w*\s*:=\s*[^;]+;\s*[^;{]+;\s*"
+               r"[^{]*?(?:\+\+|--|\+=|-=)"),
+    # ``if … { … } else { … }`` blocks where both branches sit in
+    # the same chunk — CHIME has a habit of retrieving an
+    # ``if`` template and dropping the ``else`` arm entirely
+    # (turning a binary search ``hi = mid - 1`` into a missing
+    # update and thus an infinite loop).  Fallback's deterministic
+    # parenthesisation preserves both branches verbatim.
+    re.compile(r"}\s*else\s*\{"),
+    # Indexed assignment ``arr[idx] = value`` (not ``==``).  This
+    # catches simple writes that CHIME otherwise rewrites as
+    # ``arr.add(value)`` by retrieving an ``append`` template
+    # whose Go side has the same structural shape.
+    re.compile(r"[A-Za-z_]\w*\s*\[[^\[\]]+\]\s*=(?!=)"),
+    # Multi-argument ``fmt.Println(a, b, …)`` or any ``fmt.Printf``
+    # / ``fmt.Print`` call — Cangjie's ``println`` is single-arg, so
+    # we need the balanced-paren rewriter to interpolate / parse
+    # printf placeholders.  The probe fires when there's at least
+    # one top-level comma inside the call's argument list, OR for
+    # any ``Printf`` call regardless (since the format string
+    # always needs translation).
+    re.compile(r"\bfmt\s*\.\s*Print(?:ln|f)?\s*\(\s*[^,)]+,"),
+    re.compile(r"\bfmt\s*\.\s*Printf\s*\("),
+    # Function call with 3+ arguments — these are highly
+    # susceptible to CHIME mis-retrieval (a knapsack
+    # ``f(a, b, c)`` retrieving a template whose Cj output uses
+    # ``.add(x); .add(y); …``).  The Go ``f(a, b, c)`` syntax is
+    # already valid Cangjie, so the fallback's identity-rewrite is
+    # always safe here.
+    re.compile(r"\b[A-Za-z_]\w*\s*\(\s*[^,()]+\s*,\s*[^,()]+\s*,\s*[^,()]+"),
+]
+
+
+def _has_fragile_idiom(go_text: str) -> bool:
+    """Return ``True`` when ``go_text`` contains a Go idiom that the
+    deterministic fallback rewrites correctly but CHIME's small
+    associative memory frequently misroutes.
+
+    The probes are deliberately narrow — anything not matched here
+    still benefits from the CHIME engine's similarity-based template
+    retrieval.  See :data:`_FRAGILE_IDIOM_PROBES` for the list.
+    """
+    for probe in _FRAGILE_IDIOM_PROBES:
+        if probe.search(go_text):
+            return True
+    return False
 
 
 def _fallback_rewrite(go_text: str) -> str:
@@ -416,8 +1440,39 @@ def _fallback_rewrite(go_text: str) -> str:
     responsibility of the CHIME engine.
     """
     text = _rewrite_func_signature(go_text)
+    # Idiom-aware rewrites first — these are the deterministic spine
+    # for Go patterns that CHIME's small associative memory cannot
+    # reliably handle (range loops, swaps, slice literals, etc.).
+    # Applied *before* the plain primitive-type renames so we don't
+    # have to worry about whether ``int`` has already been replaced
+    # by ``Int64`` inside a ``make([]int, n)`` etc.
+    text = _rewrite_go_idioms(text)
     for pat, sub in _FALLBACK_RULES:
         text = pat.sub(sub, text)
+    # Add Cangjie ``(`` / ``)`` around the condition of bare Go
+    # ``if`` / ``else if`` / ``for cond`` block openers.  These are
+    # cheap, shape-restricted transforms that turn a CHIME miss
+    # (which would otherwise leak raw Go syntax into the output) into
+    # a syntactically-correct Cangjie chunk.  ``for`` becomes
+    # ``while`` only when its condition is *not* a Go C-style header
+    # (``for init; cond; step``) — those have their own template
+    # neurons in CHIME and shouldn't be touched here.
+    # ``for cond`` becomes ``while (cond)`` *only* when the condition
+    # is genuinely a simple Go boolean (no ``;`` for the C-style
+    # ``init; cond; step`` header, no ``,`` or ``range``/``:=`` for
+    # range loops).  Those compound shapes have their own CHIME
+    # templates and shouldn't be mangled by the fallback.
+    m_for = re.search(r"\bfor\b\s+([^{;]+)\{", text)
+    if m_for:
+        cond = m_for.group(1)
+        is_range_or_cstyle = (
+            "," in cond
+            or re.search(r"\brange\b", cond) is not None
+            or ":=" in cond
+        )
+        if not is_range_or_cstyle:
+            text = _parenthesise_condition(text, "for", "while")
+    text = _parenthesise_condition(text, "if")
     return text
 
 
@@ -433,6 +1488,64 @@ def _cosmetic(text: str) -> str:
     # Strip trailing spaces.
     text = re.sub(r"[ \t]+\n", "\n", text)
     return text
+
+
+# --------------------------------------------------------------------------- #
+#  RBU assembly: splice per-function body statements between header / footer  #
+# --------------------------------------------------------------------------- #
+
+
+_FUNC_HEADER_RE = re.compile(
+    r"^\s*func\s+([A-Za-z_]\w*)\s*[<(]",
+)
+
+
+def _splice_func_bodies(top_stream: List[str],
+                        func_bodies: Dict[str, List[str]]) -> List[str]:
+    """Walk the linear stream of top-level decl chunks; whenever we hit
+    a ``func F(...) … {`` header chunk, splice ``func_bodies[F]``
+    between the header and the *next* footer ``}`` chunk, collapsing
+    the three into a single multi-line function declaration.
+
+    Body statements are indented four spaces.  If no header is found
+    for a tagged body, the leftover statements are appended at the end
+    of the stream (a defensive fallback — should never happen in
+    practice once RBU is consistent).
+    """
+    out: List[str] = []
+    i = 0
+    n = len(top_stream)
+    used: set = set()
+    while i < n:
+        decl = top_stream[i].rstrip()
+        match = _FUNC_HEADER_RE.match(decl)
+        if match and decl.rstrip().endswith("{"):
+            fn = match.group(1)
+            # Find the matching ``}`` footer chunk (first subsequent
+            # chunk whose stripped text is just ``}``).
+            j = i + 1
+            while j < n and top_stream[j].strip() != "}":
+                j += 1
+            body_stmts = func_bodies.get(fn, [])
+            used.add(fn)
+            indented = "\n".join(
+                "    " + ln for ln in "\n".join(body_stmts).split("\n")
+                if ln.strip()
+            )
+            block = decl + ("\n" + indented if indented else "") + "\n}"
+            out.append(block)
+            i = j + 1 if j < n else n
+            continue
+        out.append(top_stream[i])
+        i += 1
+    # Any function body whose header didn't appear (e.g. CHIME emitted
+    # something unparseable) — emit verbatim so debugging stays
+    # tractable.
+    for fn, stmts in func_bodies.items():
+        if fn in used or not stmts:
+            continue
+        out.append("// orphan body for " + fn + ":\n" + "\n".join(stmts))
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -456,21 +1569,24 @@ def convert_source(go_source: str, wrap_main: bool = True) -> ConversionResult:
     tokens = _inject_semis(tokens)
     chunks = _segment_chunks(tokens)
 
-    # 1b. Unfold ``func main() { body }`` into per-statement chunks.
-    # The CHIME associative memory retrieves much more accurately on
-    # short, statement-shaped chunks than on a 200-token main body.
-    # NB: after unfolding there is no ``func main`` chunk left, so we
-    # want the converter to *synthesise* one around the freed body
-    # statements at assembly time.  ``from_main`` is a parallel flag
-    # list that records which output chunks came from inside ``main``
-    # so we don't accidentally hoist them to module scope.
-    chunks, from_main = _unfold_main(chunks)
+    # 1b. Recursive Block Unfolding (RBU).  Replace every ``func F(){…}``
+    # chunk with its header, per-statement body chunks, and footer ``}``.
+    # ``main`` body statements get a special ``"main"`` tag because the
+    # synthesised ``main() { … return 0 }`` wrapper differs from a user
+    # function (no header chunk; trailing ``return 0`` is added).
+    # Other user functions get tagged with their name so the assembler
+    # can group their body statements back under their translated
+    # header.  Without RBU, any non-trivial user function (e.g. a
+    # 30-line knapsack DP) enters CHIME as one giant chunk that has no
+    # chance of matching the statement-level templates the engine was
+    # trained on.
+    chunks, chunk_func = _unfold_functions(chunks)
 
     # 2. Skim ``package`` / ``import`` and identify ``func main``.
     translatable: List[List[Token]] = []
-    translatable_from_main: List[bool] = []
+    translatable_func: List[Optional[str]] = []
     has_user_main = False  # set True only if a non-unfolded main remains
-    for ch, fm in zip(chunks, from_main):
+    for ch, fn in zip(chunks, chunk_func):
         if not ch:
             continue
         if ch[0].kind == "KEYWORD" and ch[0].value in ("package", "import"):
@@ -479,7 +1595,7 @@ def convert_source(go_source: str, wrap_main: bool = True) -> ConversionResult:
                 and ch[1].value == "main" and ch[2].value == "("):
             has_user_main = True
         translatable.append(ch)
-        translatable_from_main.append(fm)
+        translatable_func.append(fn)
 
     result = ConversionResult(source="", notes=notes, chunks=len(translatable))
 
@@ -495,6 +1611,25 @@ def convert_source(go_source: str, wrap_main: bool = True) -> ConversionResult:
     rendered: List[str] = []
     for ch, cj in zip(translatable, cj_texts):
         cj = cj.strip()
+        # Detect RBU-emitted function header / footer chunks and force
+        # them through the deterministic fallback rewriter.  Reason: a
+        # header chunk like ``func F ( a int ) int {`` has high HD
+        # similarity to *whole-function* neurons (``func F(a int) int
+        # { return ... }``) stored from the pairs.jsonl curated set,
+        # and the CHIME retrieval will happily return the longer
+        # template — which then duplicates the body that the per-stmt
+        # body chunks are *also* about to translate, breaking the
+        # splicer.  Lexical signature rewriting is unambiguous so it
+        # gives a clean header every time.
+        if _is_header_only_chunk(ch):
+            result.fallback_chunks += 1
+            rendered.append(_fallback_rewrite(_render_chunk(ch)))
+            continue
+        if _is_close_brace_chunk(ch):
+            # A solitary ``}`` is identical in both languages.
+            result.confident_chunks += 1
+            rendered.append("}")
+            continue
         if not cj:
             # Fallback: emit the chunk's Go text verbatim, then run a
             # tiny set of textual rewrites bridging the most common
@@ -506,28 +1641,67 @@ def convert_source(go_source: str, wrap_main: bool = True) -> ConversionResult:
             result.fallback_chunks += 1
             rendered.append(_fallback_rewrite(_render_chunk(ch)))
         else:
-            result.confident_chunks += 1
-            rendered.append(cj)
+            go_text = _render_chunk(ch)
+            # Prefer the deterministic fallback for chunks containing
+            # *fragile Go idioms* that the deterministic rewriter
+            # handles correctly but CHIME's small associative memory
+            # routinely mangles by retrieving a structurally-similar
+            # template from an unrelated program (e.g. a knapsack
+            # ``dp[w] = max(dp[w], dp[w-weights[i]]+values[i])``
+            # retrieving a 2-index pattern with the wrong variable
+            # binding).  The idiom list below is the smallest set
+            # that covers the failures seen in real-world algorithm
+            # code; anything else still goes through CHIME.
+            if _has_fragile_idiom(go_text):
+                result.fallback_chunks += 1
+                rendered.append(_fallback_rewrite(go_text))
+            else:
+                result.confident_chunks += 1
+                rendered.append(cj)
 
-    # 4. Classify into top-level decls vs main-body free statements.
-    # Chunks unfolded out of ``func main(){…}`` *always* belong in the
-    # main body, regardless of how their leading token looks (a stray
-    # ``var y = 10`` from inside main must not be hoisted to module
-    # scope).
-    top_decls: List[str] = []
+    # 4. Classify each rendered chunk into one of three buckets:
+    #
+    # * top-level decls — emitted before ``main()`` (``type``, ``var``
+    #   / ``const`` block, ``interface``, the *header* chunk of a user
+    #   function, the closing ``}`` footer of a user function, etc.).
+    #   These need to stay in their original linear order so a function
+    #   body assembled in between makes sense.
+    # * ``main`` body statements — wrapped in the synthesised
+    #   ``main() { … return 0 }``.
+    # * user-function body statements — gathered in the order they
+    #   appeared and spliced between the function's header and footer.
+    #
+    # We assemble the top-level stream in one linear pass; when we hit
+    # a chunk tagged ``from_func == fn`` we keep accumulating until the
+    # next chunk's ``from_func`` differs, then we splice the accumulated
+    # body statements right after the corresponding header chunk we
+    # already emitted.  The header chunk's identity is the very last
+    # output line that begins with ``func <fn>`` and ends with ``{``.
+    top_stream: List[str] = []
     main_body: List[str] = []
-    for ch, cj, fm in zip(translatable, rendered, translatable_from_main):
-        first = ch[0].value if ch else ""
-        if (not fm) and first in ("func", "type", "var", "const",
-                                  "interface", "class"):
-            top_decls.append(cj)
-        else:
+    # Indexed by function name → list of rendered body statements (in
+    # source order).  Spliced into the top stream at assembly time.
+    func_bodies: Dict[str, List[str]] = {}
+    for ch, cj, fn in zip(translatable, rendered, translatable_func):
+        if fn == "main":
             main_body.append(cj)
+        elif fn is not None:
+            func_bodies.setdefault(fn, []).append(cj)
+        else:
+            top_stream.append(cj)
 
     # 5. Cross-chunk structural lifting (struct init, methods, interfaces).
-    top_decls = synthesize_class_inits(top_decls)
-    top_decls = promote_methods(top_decls)
-    top_decls = attach_interface_impls(top_decls)
+    # Lifting only inspects top-level decls, so apply it on the linear
+    # stream of decl-like chunks.
+    top_stream = synthesize_class_inits(top_stream)
+    top_stream = promote_methods(top_stream)
+    top_stream = attach_interface_impls(top_stream)
+
+    # 5b. Splice each function's body statements between its translated
+    # header and its closing ``}`` footer.  We walk the top stream and
+    # collect every contiguous block ``func F(...) { → … → }`` into a
+    # single composite declaration.
+    top_decls = _splice_func_bodies(top_stream, func_bodies)
 
     # 6. Assemble.
     parts: List[str] = []
@@ -541,6 +1715,14 @@ def convert_source(go_source: str, wrap_main: bool = True) -> ConversionResult:
         parts.extend(main_body)
 
     body_text = "\n\n".join(p for p in parts if p)
+    # Resolve any ``__cstyle_step__`` markers planted by the c-style
+    # ``for`` rewriter: at this point the matching closing ``}`` of
+    # each loop body is reachable in the same string (chunks have
+    # been spliced back into their functions).
+    body_text = _resolve_cstyle_steps(body_text)
+    # Avoid Cangjie ``redefinition`` errors when two sequential
+    # c-style loops in the same scope both expand to ``var i = …``.
+    body_text = _dedup_var_in_block(body_text)
     body_text = _cosmetic(body_text)
 
     header = ""

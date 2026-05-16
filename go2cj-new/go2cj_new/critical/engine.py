@@ -60,6 +60,55 @@ def _remap_template(template: str, mapping: Dict[Tuple[str, int], Tuple[str, int
     return _PLACEHOLDER_RE.sub(sub, template)
 
 
+def _ordered_placeholders(template: str) -> List[Tuple[str, int]]:
+    """Distinct placeholders in *first-appearance* order.
+
+    Used by :func:`_align_placeholders` to align two templates'
+    placeholder slots positionally even when their kinds differ
+    (e.g. a candidate has ``ID1`` where the query has ``NUM0`` — both
+    refer to the same structural position in the chunk).
+    """
+    seen: set = set()
+    out: List[Tuple[str, int]] = []
+    for kind, idx in _placeholders_of(template):
+        key = (kind, idx)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
+def _align_placeholders(
+    cand_in: str,
+    query_in: str,
+) -> Optional[Dict[Tuple[str, int], Tuple[str, int]]]:
+    """Return a positional substitution that rewrites placeholders in
+    a candidate template to use the query's placeholder names, or
+    ``None`` when the two structurally differ.
+
+    Both templates contribute a list of distinct placeholders in
+    first-appearance order; the substitution maps the *k*-th candidate
+    placeholder to the *k*-th query placeholder.  The substitution is
+    valid only when the *anonymised* chunks become identical after
+    rewriting (otherwise the candidate is not a structural match).
+
+    This is the bridge that lets a chunk ``for ID0 := 0 ; ID0 < ID1 ;
+    ID0 ++ {`` retrieve as an exact structural match for a query
+    ``for ID0 := 0 ; ID0 < NUM0 ; ID0 ++ {`` — they differ only in
+    placeholder kinds (``ID1`` vs ``NUM0``) but encode the same
+    program structure.
+    """
+    cand_ph = _ordered_placeholders(cand_in)
+    query_ph = _ordered_placeholders(query_in)
+    if len(cand_ph) != len(query_ph):
+        return None
+    mapping: Dict[Tuple[str, int], Tuple[str, int]] = dict(zip(cand_ph, query_ph))
+    if _remap_template(cand_in, mapping) != query_in:
+        return None
+    return mapping
+
+
 # --------------------------------------------------------------------------- #
 #  Engine                                                                     #
 # --------------------------------------------------------------------------- #
@@ -120,6 +169,16 @@ class CHIME:
 
     # ------------------------------------------------------------ translate #
 
+    # Minimum HD-similarity for a retrieved template to be trusted.  Below
+    # this threshold the engine declines the match and returns "" so the
+    # caller (converter) routes the chunk to the structural fallback /
+    # recursive sub-statement path.  This implements the
+    # "SOC-as-output-gate" idea from comment.md §15: the threshold floor
+    # is co-driven by the criticality controller's homeostatic theta —
+    # the more the network deviates from σ ≈ 1, the more conservative
+    # we are about emitting a stored template.
+    MIN_CONFIDENCE: float = 0.45
+
     def translate(self, anon_go: str, topk: int = 8) -> Tuple[str, float]:
         """Translate one anonymized Go chunk to anonymized Cangjie.
 
@@ -132,7 +191,10 @@ class CHIME:
         placeholder set.  This guarantees the deanonymized output
         contains no dangling placeholders — emitting ``ID3`` in a
         chunk that only defined ``ID0`` is a guaranteed compile
-        failure.
+        failure.  Candidates whose similarity is below
+        :attr:`MIN_CONFIDENCE` are also rejected to avoid hallucinated
+        templates on OOD chunks (exact-template hits short-circuit
+        this gate since they're unambiguous).
         """
         toks_in = anon_go.split()
         if not toks_in:
@@ -183,6 +245,28 @@ class CHIME:
         seen: set = set()
         best_template = ""
         best_conf = 0.0
+        # SOC-gated minimum: refuse a stored template when its HD
+        # similarity falls below the floor.  This is the difference
+        # between "I know this code" and "I'm guessing".  The gate
+        # uses ``max(MIN_CONFIDENCE, criticality.threshold * 0.5)`` so
+        # the homeostatic theta gradually pulls the floor up when the
+        # network drifts super-critical.
+        gate = max(self.MIN_CONFIDENCE,
+                   0.5 * float(self.criticality.threshold))
+        q_len = len(toks_in)
+        # Shape constraint: a chunk ending in ``{`` (block header,
+        # produced by recursive RBU) must only match a template *also*
+        # ending in ``{``.  Without this guard, ``for i := 0; i < n;
+        # i++ {`` retrieves the whole one-statement for-template
+        # ``for i := 0; i < n; i++ { count += i }``, duplicating the
+        # body the splicer is *also* about to emit from the per-
+        # statement body chunk.  Same for chunks ending in ``}`` —
+        # they should map to templates ending in ``}``.  Composite
+        # literal queries ending in ``}`` (e.g. ``[]int{1,2,3}``) are
+        # rare at this granularity and naturally satisfy the
+        # constraint.
+        q_last = toks_in[-1] if toks_in else ""
+        q_is_header = q_last == "{" and "}" not in toks_in
         for idx, sim in candidates:
             if idx in seen:
                 continue
@@ -190,11 +274,32 @@ class CHIME:
             n = self.soinn.neurons[idx]
             if not n.template_out:
                 continue
-            cand_set = set(_placeholders_of(n.template_out))
-            if not cand_set.issubset(in_set):
+            # Positional placeholder alignment — see
+            # :func:`_align_placeholders`.  Lets a candidate with
+            # ``ID1`` retrieve for a query with ``NUM0`` if the rest
+            # of the structure matches.  When alignment succeeds we
+            # use the *aligned* template_out for the rest of the
+            # match; when it fails we fall back to strict subset.
+            align = _align_placeholders(n.template_in, anon_go)
+            if align is not None:
+                cand_out = _remap_template(n.template_out, align)
+            else:
+                cand_out = n.template_out
+                cand_set = set(_placeholders_of(cand_out))
+                if not cand_set.issubset(in_set):
+                    continue
+            if sim < gate:
+                continue
+            cand_tokens = n.template_in.split()
+            cand_last = cand_tokens[-1] if cand_tokens else ""
+            cand_is_header = cand_last == "{" and "}" not in cand_tokens
+            if q_is_header != cand_is_header:
+                continue
+            cand_len = max(1, len(cand_tokens))
+            if cand_len > 2 * q_len + 4 or cand_len * 2 + 4 < q_len:
                 continue
             if sim > best_conf:
-                best_template = n.template_out
+                best_template = cand_out
                 best_conf = sim
 
         # Update predictive context with the *input* HV (sequence-level

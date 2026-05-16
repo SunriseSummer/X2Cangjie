@@ -34,17 +34,17 @@
 | 维度 | go2cj (v1) | go2cj-v2 | **go2cj-new (CHIME)** |
 |---|---|---|---|
 | 学习算法 | back-prop + AdamW | back-prop 微调 | **纯局部 Hebbian / STDP** |
-| 参数规模 | 静态 ~ 2 M | 静态 ~ 60 M (CodeT5-small) | **动态生长，~ 390 神经元** |
-| 训练时长 | 数分钟 / epoch × 多轮 | 数分钟 / epoch × 多轮 | **~ 4.6 s（单遍在线，CPU）** |
+| 参数规模 | 静态 ~ 2 M | 静态 ~ 60 M (CodeT5-small) | **动态生长，~ 449 神经元** |
+| 训练时长 | 数分钟 / epoch × 多轮 | 数分钟 / epoch × 多轮 | **~ 6.6 s（单遍在线，CPU）** |
 | 是否需要 GPU | 否（很慢） | 否（极慢） | **完全不需要** |
 | 动态拓扑 | ❌ | ❌ | ✅ |
 | 自组织临界态 | ❌ | ❌ | ✅ |
-| cjc 编译通过率（45 用例） | 2 – 3 / 45 | 16 / 45 | **45 / 45 (100%)** |
-| 运行输出匹配率（45 用例） | 0 / 45 | — | **44 / 45 (97.78%)** |
+| cjc 编译通过率（50 用例） | 2 – 3 / 45 | 16 / 45 | **50 / 50 (100%)** |
+| 运行输出匹配率（50 用例） | 0 / 45 | — | **49 / 50 (98.00%)** |
 
-> 同一台机器、同一份 `tests/cases/*.go`。`go2cj-v2` 的基线本身已经是一
-> 个 60 M 参数的预训练大模型；CHIME 仅用 ~ 390 个神经元、训练约 4.6 秒
-> 便达到 45/45 cjc 编译通过、综合质量分 99.56%。
+> 同一台机器、同一类 `tests/cases/*.go` 端到端测试。`go2cj-v2` 的基线本身已经是一
+> 个 60 M 参数的预训练大模型；CHIME + 确定性习语兜底仅用 ~ 449 个神经元、训练约 6.6 秒
+> 便达到 50/50 cjc 编译通过，49/50 运行匹配。
 
 ---
 
@@ -95,8 +95,8 @@ HV 与对应的匿名化仓颉模板。**新颖的** chunk 模式会 *生长* �
 
 与 `ts2cj` / `swift2cj` 中的 Kohonen SOM 不同，SOINN 的神经元数量
 **不再是超参数** —— 网络规模会自发匹配数据的内在复杂度。在本仓库
-**488 对策展 chunk** 上单遍训练完毕后，引擎稳定在 **~ 390 个神经元、
-~ 335 条边**。
+**653 对策展 / 程序展开 chunk** 上单遍训练完毕后，引擎稳定在 **~ 449 个神经元、
+~ 376 条边**。
 
 ### 3. 自组织临界态控制器（[`critical/criticality.py`](go2cj_new/critical/criticality.py)）
 
@@ -108,8 +108,8 @@ Turrigiano 风格的稳态规则缓慢调节全局发火阈值：
 > θ_{t+1} = θ_t + η (σ_t − 1)
 
 这驱动整个系统在无监督的情况下趋向 σ → 1。经验上，单遍训练完成后，
-`branching_ema` 稳定在 **1.000**，雪崩规模分布的幂律指数
-**α̂ ≈ 2.37**，已经非常接近临界态特征（BTW 模型理论值 α ≈ 3/2；
+`branching_ema` 稳定在 **1.13** 左右，雪崩规模分布的幂律指数
+**α̂ ≈ 2.39**，仍处于有限网络的临界态邻域（BTW 模型理论值 α ≈ 3/2；
 小型有限网络通常落在 [2, 3] 区间）。
 
 ### 4. 预测编码上下文（[`critical/predictive.py`](go2cj_new/critical/predictive.py)）
@@ -161,9 +161,9 @@ go2cj-new/
 │       └── translator.py      推理单例
 ├── trainset/
 │   ├── pairs.jsonl            策展 chunk 对（共 470 行；含验证保留集）
-│   └── programs/              28 个 (Go, 仓颉) 完整程序对
+│   └── programs/              33 个 (Go, 仓颉) 完整程序对
 ├── tests/
-│   ├── cases/                 45 个端到端 Go 程序 + .expected
+│   ├── cases/                 50 个端到端 Go 程序 + .expected
 │   └── run_tests.py           测试驱动，输出 log.md
 ├── readme.md                  本文件
 ├── history.md                 版本变更日志
@@ -183,7 +183,7 @@ source /tmp/cangjie/envsetup.sh
 # 2. 安装 Python 依赖（仅 numpy）
 pip install -r requirements.txt
 
-# 3. 训练 CHIME 引擎（单遍在线，约 4.6 秒）
+# 3. 训练 CHIME 引擎（单遍在线，约 6.6 秒）
 PYTHONPATH=. python -m go2cj_new.critical.train
 
 # 4. 翻译单个文件
@@ -200,16 +200,16 @@ PYTHONPATH=. python3 tests/run_tests.py
 
 ```json
 {
-  "n_train_pairs": 488,
-  "n_val_pairs": 54,
-  "val_template_acc": 0.3333,
-  "train_time_s": 4.58,
+  "n_train_pairs": 653,
+  "n_val_pairs": 72,
+  "val_template_acc": 0.5139,
+  "train_time_s": 6.66,
   "stats": {
-    "neurons":          392,
-    "edges":            335,
+    "neurons":          449,
+    "edges":            376,
     "fire_threshold":   0.800,
-    "branching_ema":    1.000,
-    "alpha_hat":        2.366
+    "branching_ema":    1.134,
+    "alpha_hat":        2.392
   }
 }
 ```
@@ -221,17 +221,34 @@ held-out 集中包含若干故意构造的歧义对，线上推理时这些模�
 
 ---
 
+## v0.3.8：确定性 Go 习语兜底
+
+CHIME 的强项是“小数据下的结构模板记忆”，但真实算法程序里会出现训练集中没有的长程组合形状。v0.3.8 因此在 `converter.py` 中加入一层确定性兜底：当 chunk 包含语法形状稳定、可无歧义转写的 Go 习语时，不再让 CHIME 按近邻模板猜测，而是直接走规则化改写。
+
+重点覆盖：
+
+- `make([]T, n)` / `make([][]T, n)` → `ArrayList<T>` / `ArrayList<ArrayList<T>>`；
+- `[]T{...}` / `[][]T{{...}}` → `ArrayList` 字面量；
+- `for _, v := range xs`、`for i, v := range xs`、C-style `for i := 0; i < n; i++`；
+- `arr[i], arr[j] = arr[j], arr[i]` 元组交换；
+- 多参数 `fmt.Println(a, b)` 与 `fmt.Printf("...%s...%d\n", a, b)`；
+- 双下标 DP（`dp[i][j]`）、单下标赋值、`} else {`、三参数以上函数调用等 CHIME 容易误路由的“易脆形状”。
+
+这层兜底不是替代 CHIME，而是把**确定性语法桥接**从关联记忆中剥离出来：CHIME 负责已学过 / 相近的结构模板，规则层负责 Go 与仓颉之间稳定的一阶语法差异。新增 5 个真实算法用例后，基线从 44/50 `cjc` 编译提升到 50/50，运行匹配达到 49/50。
+
+---
+
 ## 性能基线
 
-`tests/cases/*.go`（45 个端到端 Go 程序）在 `cjc 1.0.5` 下的最新结果：
+`tests/cases/*.go`（50 个端到端 Go 程序）在 `cjc 1.0.5` 下的最新结果：
 
 | 指标 | 通过 / 总数 | 比例 |
 |---|---:|---:|
-| 模式覆盖率（confident / chunks） | 164 / 164 | **100.00%** |
-| Go 源码编译（`go vet`） | 45 / 45 | **100.00%** |
-| Cangjie 编译通过（`cjc`） | 45 / 45 | **100.00%** |
-| 运行输出匹配 | 44 / 45 | **97.78%** |
-| **综合质量分** | — | **99.56%** |
+| 模式覆盖率（confident / chunks） | 250 / 368 | **67.93%** |
+| Go 源码编译（`go vet`） | 50 / 50 | **100.00%** |
+| Cangjie 编译通过（`cjc`） | 50 / 50 | **100.00%** |
+| 运行输出匹配 | 49 / 50 | **98.00%** |
+| **综合质量分** | — | **86.83%** |
 
 综合质量分 = `0.4 × 模式覆盖率 + 0.4 × 编译通过率 + 0.2 × 运行匹配率`。
 

@@ -86,7 +86,7 @@ Go 源码
   ├── lexer.tokenize：正则词法分析，保留 NEWLINE
   ├── _inject_semis：模拟 Go 自动分号插入
   ├── _segment_chunks：按括号 / 大括号 / 换行 / 分号切 chunk
-  ├── _unfold_main：把 func main(){...} 展开成语句级 chunk
+  ├── _unfold_functions：把 func main(){...} 和普通函数体展开成语句级 chunk，并保留 from_func 归属
   │
   ▼
 逐 chunk 调用 NeuralTranslator（实际是 CHIME 单例）
@@ -118,7 +118,7 @@ Cangjie 源码
 |---|---|
 | `__main__.py` | 命令行入口，读取 Go 文件、调用 `convert_source`、写出仓颉文件，并在 `--report` 下输出 chunk 覆盖统计。 |
 | `lexer.py` | 正则 Go lexer。它不是完整 parser，只产生 token / NEWLINE / comment 等词法单元，供 chunker 使用。 |
-| `converter.py` | 主编排器：预处理、分 chunk、main 展开、调用翻译器、fallback、结构提升、最终组装。 |
+| `converter.py` | 主编排器：预处理、分 chunk、函数体展开、调用翻译器、易脆形状判定、确定性习语兜底、结构提升、最终组装。 |
 | `tokenize.py` | 模板级 tokenizer / detokenizer。保证多字符运算符、字符串字面量、插值字符串等在模板中稳定往返。 |
 | `anonymize.py` | 标识符和字面量匿名化 / 反匿名化。它把开放词表问题压缩成有限模板匹配问题。 |
 | `lifting.py` | 跨 chunk 结构提升：struct→class 构造器、receiver method 入类、Go 隐式接口满足转为仓颉显式实现。 |
@@ -129,7 +129,7 @@ Cangjie 源码
 | `critical/engine.py` | CHIME 总控：连接 HDC、SOINN、SOC、PredictiveContext，提供 `learn` / `translate`。 |
 | `critical/translator.py` | 推理单例，保持与旧 `NeuralTranslator` 接口兼容，但内部调用 CHIME。 |
 | `critical/train.py` | 从 `trainset/` 加载数据、匿名化、训练 CHIME、保存模型和诊断指标。 |
-| `tests/run_tests.py` | 端到端测试驱动：转换 45 个 Go 用例，执行 `go vet`、`cjc` 编译和输出匹配。 |
+| `tests/run_tests.py` | 端到端测试驱动：转换 50 个 Go 用例，执行 `go vet`、`cjc` 编译和输出匹配。 |
 
 ---
 
@@ -285,9 +285,9 @@ state_t+1 = decay * state_t + (1 - decay) * chunk_hv
 
 ---
 
-## 10. main 展开：端到端提升的关键工程点
+## 10. 函数体展开：端到端提升的关键工程点
 
-[`converter.py`](go2cj_new/converter.py) 的 `_unfold_main()` 会把：
+[`converter.py`](go2cj_new/converter.py) 的 `_unfold_functions()` 会把：
 
 ```go
 func main() {
@@ -313,24 +313,29 @@ main() {
 }
 ```
 
-这样做的原因是：训练集里的模板多数是短 chunk；如果把整个 `func main(){...}` 当作一个 100～200 token 的长 chunk，检索会严重 OOD，近邻没有意义。把 main 体切到语句级后，推理样本的形状与训练样本一致，HDC + SOINN 才能可靠命中。
+这样做的原因是：训练集里的模板多数是短 chunk；如果把整个 `func main(){...}` 或普通用户函数当作一个 100～200 token 的长 chunk，检索会严重 OOD，近邻没有意义。把函数体切到语句级后，推理样本的形状与训练样本一致，HDC + SOINN 才能可靠命中。
 
-`from_main` 标志同样重要。展开后的 `var a = 1` 看起来像顶层声明，如果不记录它来自 main，组装时就可能被错误提升到模块顶层。`from_main` 强制这些 chunk 回到合成的 main 体内。
+`from_func` 归属标志同样重要。展开后的 `var a = 1` 看起来像顶层声明，如果不记录它来自 `main` 或某个用户函数，组装时就可能被错误提升到模块顶层。`main` 体 chunk 会回到合成的 `main() { ... }` 内，普通函数体 chunk 则由 `_splice_func_bodies()` 拼回对应函数头和尾之间。
 
 ---
 
 ## 11. fallback：承认无解，而不是硬输出错误模板
 
-当 `CHIME.translate()` 无法找到通过校验的模板时，`converter.py` 不会硬取一个相似但不安全的神经元，而是进入 `_fallback_rewrite()`。
+当 `CHIME.translate()` 无法找到通过校验的模板时，`converter.py` 不会硬取一个相似但不安全的神经元，而是进入 `_fallback_rewrite()`。v0.3.8 之后，即便 CHIME 返回了 confident 结果，`_has_fragile_idiom()` 也会先检查当前 Go chunk 是否属于“易脆形状”：这类形状在 HDC 空间里与训练集中其它模板很近，但变量槽位一旦按位置错配就会生成完全错误的仓颉。
 
-fallback 很克制，只做少量高确定性文本改写：
+当前强制走确定性 fallback 的典型形状包括：
 
-- `fmt.Println(` → `println(`；
-- Go 基础类型名 → 仓颉类型名；
-- 行首 `x := expr` → `var x = expr`；
-- 简单 Go 函数签名 → 仓颉函数签名。
+- `make([]T, n)` / `make([][]T, n)`；
+- `[]T{...}` / `[][]T{{...}}`；
+- `for _, v := range xs`、`for i, v := range xs`、C-style `for i := ...; cond; step`；
+- `dp[i][j]` 这类双下标 DP、`arr[i] = value` 这类单下标赋值；
+- `arr[i], arr[j] = arr[j], arr[i]` 元组交换；
+- `} else {` 同 chunk 分支、三参数以上函数调用；
+- 多参数 `fmt.Println(a, b)` 与 `fmt.Printf("...%s...%d\n", a, b)`。
 
-很多表达式级语法（算术、下标、调用、字符串字面量）在 Go 与仓颉中本来就近似同形，因此“原样输出 + 少量桥接”往往比错误检索更安全。
+`_rewrite_go_idioms()` 对这些形状做语法级确定性改写：Go slice / make 统一落到 `ArrayList`，range loop 与 C-style for 落到仓颉 `for` / `while`，Printf 占位符转成字符串插值，void 函数补 `: Unit` 以避免递归函数返回类型推断失败。
+
+这层 fallback 的角色不是替代 CHIME，而是把“可证明的一阶语法桥接”从关联记忆中剥离出来。CHIME 继续负责已学习模板和近邻检索；fallback 则兜住训练集外但语法形状稳定的 Go 习语。新增 5 个真实算法用例后，端到端结果提升到 50/50 `cjc` 编译、49/50 运行匹配。
 
 ---
 
@@ -373,13 +378,15 @@ score = 0.4 * pattern_coverage + 0.4 * cj_compiles + 0.2 * runs_and_matches_expe
 
 这比只看 `val_template_acc` 更接近真实目标。`val_template_acc` 衡量 held-out 模板是否完全匹配；端到端测试衡量生成的仓颉文件是否能编译、运行、输出正确。
 
+当前 v0.3.8 基线（`cjc 1.0.5`）：50 个用例全部通过 Go vet 与 Cangjie 编译，49 个用例运行输出逐字节匹配；唯一未匹配的 `26_float_math` 是实测输出差异：Go `fmt.Println(Float64)` 输出 `12.56`，Cangjie `println(Float64)` 输出 `12.560000`，源于两种标准库默认字符串化精度不同。
+
 ---
 
 ## 14. 一句话串起全系统
 
 `go2cj-new` 的本质可以概括为：
 
-> 用匿名化把开放代码压缩成有限模板，用 HDC 把模板变成可相似检索的高维指纹，用 SOINN 把模板对存成动态生长的概念图，用 Hebbian / SOC / PredictiveContext 维护图的局部连接、临界状态和程序上下文，最后用确定性 lifting 弥补 Go 与仓颉在跨 chunk 结构上的差异。
+> 用匿名化把开放代码压缩成有限模板，用 HDC 把模板变成可相似检索的高维指纹，用 SOINN 把模板对存成动态生长的概念图，用 Hebbian / SOC / PredictiveContext 维护图的局部连接、临界状态和程序上下文，最后用确定性 fallback / lifting 弥补 Go 与仓颉在一阶语法和跨 chunk 结构上的差异。
 
 这套设计的优势不是“比大模型更通用”，而是在 **小数据、强结构、确定性翻译** 场景下，把问题改写成了更合适的形式：模板记忆与安全检索，而非端到端概率生成。
 
@@ -392,4 +399,3 @@ score = 0.4 * pattern_coverage + 0.4 * cj_compiles + 0.2 * runs_and_matches_expe
 - SOC 当前主要调节和诊断网络状态，尚未深度参与输出门控。
 - PredictiveContext 是轻量上下文层，还不是完整的层级生成模型。
 - 输出仍基于文本模板；未来可以探索 Go HV ↔ Cangjie HV 的跨模态绑定和 cleanup memory，减少对文本模板库的依赖。
-
