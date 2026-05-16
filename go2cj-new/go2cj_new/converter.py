@@ -310,6 +310,106 @@ def _func_split(chunk: List[Token]) -> Optional[Tuple[str, List[Token], List[Tok
     return name, header, body
 
 
+def _block_split(chunk: List[Token]) -> Optional[Tuple[List[Token], List[Token]]]:
+    """If ``chunk`` has shape ``<header> { <body> }`` — that is, a single
+    outermost block whose opening ``{`` matches the chunk's terminal
+    ``}`` and whose body contains at least one top-level ``;`` —
+    return ``(header_incl_open_brace, body_tokens)``.  Otherwise return
+    ``None``.
+
+    Used by :func:`_expand_block` to recursively decompose nested
+    ``for {…}`` / ``if {…}`` / ``while {…}`` etc. into per-statement
+    chunks.  The semicolon-presence check distinguishes a real
+    statement block from a composite literal like ``[]int{1,2,3}``.
+
+    ``if … {…} else {…}`` is left intact (its terminal ``}`` does
+    *not* match its first ``{``).  The else-branch handling is the
+    converter's responsibility through CHIME templates.
+    """
+    paren = bracket = 0
+    i = 0
+    while i < len(chunk):
+        v = chunk[i].value
+        if v == "(":
+            paren += 1
+        elif v == ")":
+            paren = max(paren - 1, 0)
+        elif v == "[":
+            bracket += 1
+        elif v == "]":
+            bracket = max(bracket - 1, 0)
+        elif v == "{" and paren == 0 and bracket == 0:
+            break
+        i += 1
+    if i >= len(chunk) or chunk[i].value != "{":
+        return None
+    if not chunk or chunk[-1].value != "}":
+        return None
+    if i == 0:
+        return None  # bare ``{ body }`` — no header
+    # Walk forward to the matching ``}`` for ``chunk[i]``; if it isn't
+    # the very last token, this is a multi-brace chunk (if/else, switch
+    # with cases) and we shouldn't naively split it.
+    depth = 1
+    j = i + 1
+    while j < len(chunk) and depth > 0:
+        v = chunk[j].value
+        if v == "{":
+            depth += 1
+        elif v == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        j += 1
+    if j != len(chunk) - 1:
+        return None
+    body = chunk[i + 1:j]
+    # Body must contain at least one top-level ``;`` to count as a
+    # statement block (rules out ``{1,2,3}`` composite literals).
+    body_depth = 0
+    has_semi = False
+    for t in body:
+        v = t.value
+        if v in ("{", "(", "["):
+            body_depth += 1
+        elif v in ("}", ")", "]"):
+            body_depth = max(body_depth - 1, 0)
+        elif v == ";" and body_depth == 0:
+            has_semi = True
+            break
+    if not has_semi:
+        return None
+    header = chunk[:i + 1]
+    return header, body
+
+
+def _expand_block(chunk: List[Token], tag: Optional[str],
+                  out: List[List[Token]],
+                  tags: List[Optional[str]]) -> None:
+    """Recursively expand any nested ``<header>{body}`` blocks within
+    a statement chunk, appending the expanded sub-chunks (and a
+    parallel ``tag`` for each) to ``out`` / ``tags``.
+
+    Blocks whose body has ``;`` separated statements are split into
+    header / per-statement body / footer.  Composite literals,
+    statement chunks without inner blocks, and if-else chunks are
+    appended unchanged.  All sub-chunks inherit the parent ``tag`` so
+    the splicer keeps them inside the enclosing function body.
+    """
+    bs = _block_split(chunk)
+    if bs is None:
+        out.append(chunk)
+        tags.append(tag)
+        return
+    header, body = bs
+    out.append(header)
+    tags.append(tag)
+    for sub in _segment_chunks(body):
+        _expand_block(sub, tag, out, tags)
+    out.append([Token("PUNCT", "}", 0, 0)])
+    tags.append(tag)
+
+
 def _unfold_functions(
     chunks: List[List[Token]],
 ) -> Tuple[List[List[Token]], List[Optional[str]]]:
@@ -339,8 +439,12 @@ def _unfold_functions(
     tags: List[Optional[str]] = []
     for ch in chunks:
         if _is_func_main(ch):
-            # Existing main-unfold behaviour: emit body statements only;
-            # the converter synthesises the surrounding ``main(){…}``.
+            # main: body statements are *not* recursively block-
+            # expanded (see :func:`go2cj_new.critical.train._unfold_main_body`
+            # for the rationale — trainset main bodies typically use
+            # literal loop bounds, whereas inside a user function the
+            # bound is a parameter identifier, so the placeholder
+            # signatures of bare ``for {`` headers diverge).
             body = ch[5:-1]
             for sub in _segment_chunks(body):
                 out.append(sub)
@@ -354,13 +458,19 @@ def _unfold_functions(
         name, header, body = split
         # Emit the function header (the part *up to and including* the
         # opening ``{``) as its own top-level chunk so CHIME / fallback
-        # can translate the signature.  Body statements are tagged
-        # ``from_func=name``.  A bare ``}`` footer chunk closes it.
+        # can translate the signature.  Body statements get
+        # *recursively* unfolded and tagged ``from_func=name`` — nested
+        # ``for {…}`` / ``if {…}`` blocks split into header chunk,
+        # per-statement body chunks (which can themselves contain
+        # inner blocks), and a footer ``}`` chunk, all routed through
+        # CHIME at statement granularity.  Placeholder-kind mismatches
+        # between literal-bounded (``i < 5``) and identifier-bounded
+        # (``i < n``) loops are resolved by the positional alignment
+        # in :func:`go2cj_new.critical.engine._align_placeholders`.
         out.append(header)
         tags.append(None)
         for sub in _segment_chunks(body):
-            out.append(sub)
-            tags.append(name)
+            _expand_block(sub, name, out, tags)
         out.append([Token("PUNCT", "}", 0, 0)])
         tags.append(None)
     return out, tags
@@ -458,7 +568,120 @@ _FALLBACK_RULES = [
     # Go short var:  x := expr  →  var x = expr   (only when at chunk start
     # so we don't break `for i := 0;` headers etc.).
     (re.compile(r"^\s*([A-Za-z_]\w*)\s*:=\s*"), r"var \1 = "),
+    # ``len(x)``  →  ``x.size``   — applied last so any preceding
+    # rewrites still see the parentheses-form when relevant.
+    (re.compile(r"\blen\s*\(\s*([A-Za-z_]\w*(?:\s*\.\s*[A-Za-z_]\w*)*)\s*\)"),
+     r"\1.size"),
 ]
+
+
+# --------------------------------------------------------------------------- #
+#  Control-flow header rewrites.                                               #
+#                                                                              #
+#  Cangjie requires ``if (cond) {``, ``while (cond) {`` and ``for (var in     #
+#  iter) {`` — parenthesised conditions and an ``in``-style for.  These are   #
+#  pure-syntax transforms (no semantic translation needed) that ride on the   #
+#  fallback path when CHIME has no matching template.                          #
+#                                                                              #
+#  Each rule is shape-restricted (anchored, balanced-brace-aware) so it does  #
+#  not corrupt unrelated chunks like ``var x = if(cond) {…}`` (Cangjie's      #
+#  if-expression form, which already has parens).                              #
+# --------------------------------------------------------------------------- #
+
+
+def _parenthesise_condition(text: str, keyword: str,
+                            replacement_keyword: Optional[str] = None) -> str:
+    """Add Cangjie-style parentheses around the *condition* of a Go
+    control-flow header.
+
+    Handles ``if cond { … }``, ``else if cond { … }``, and ``for cond { … }``
+    (Go's ``for`` with no init/step is Cangjie's ``while``).  The
+    condition is taken as everything between the keyword and the matching
+    ``{`` that opens the body, with brace / bracket balance respected so
+    embedded composite literals don't trip the parser.  Returns ``text``
+    unchanged when the shape doesn't match.
+    """
+    out = replacement_keyword if replacement_keyword is not None else keyword
+    pattern = re.compile(
+        rf"(^|[^A-Za-z0-9_])\b{re.escape(keyword)}\b(?!\s*[(])"
+    )
+    result: List[str] = []
+    last = 0
+    for m in pattern.finditer(text):
+        start = m.end()
+        # Walk forward to the matching ``{`` (depth 0 in (), []).
+        paren = bracket = brace = 0
+        i = start
+        n = len(text)
+        in_str = False
+        str_ch = ""
+        while i < n:
+            c = text[i]
+            if in_str:
+                if c == "\\" and i + 1 < n:
+                    i += 2
+                    continue
+                if c == str_ch:
+                    in_str = False
+                i += 1
+                continue
+            if c in '"\'`':
+                in_str = True
+                str_ch = c
+                i += 1
+                continue
+            if c == "(":
+                paren += 1
+            elif c == ")":
+                paren = max(paren - 1, 0)
+            elif c == "[":
+                bracket += 1
+            elif c == "]":
+                bracket = max(bracket - 1, 0)
+            elif c == "{" and paren == 0 and bracket == 0:
+                brace = 1
+                break
+            i += 1
+        if brace != 1:
+            continue
+        cond = text[start:i].strip()
+        if not cond:
+            continue
+        # Already parenthesised — leave alone (would otherwise produce
+        # ``if ((cond)) {``).
+        if cond.startswith("(") and cond.endswith(")"):
+            # Only skip when the outer parens enclose the *whole* cond.
+            depth = 0
+            ok = True
+            for k, ch in enumerate(cond):
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+                    if depth == 0 and k != len(cond) - 1:
+                        ok = False
+                        break
+            if ok:
+                # Still rewrite the keyword (e.g. ``for`` → ``while``)
+                # without altering the parenthesised condition.
+                result.append(text[last:m.start()])
+                result.append(m.group(1))
+                result.append(out)
+                result.append(text[m.end():i])
+                result.append("{")
+                last = i + 1
+                continue
+        result.append(text[last:m.start()])
+        result.append(m.group(1))
+        result.append(out)
+        result.append(" (")
+        result.append(cond)
+        result.append(") {")
+        last = i + 1
+    if last == 0:
+        return text
+    result.append(text[last:])
+    return "".join(result)
 
 _FUNC_SIG_RE = re.compile(
     r"^func\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*"
@@ -565,6 +788,30 @@ def _fallback_rewrite(go_text: str) -> str:
     text = _rewrite_func_signature(go_text)
     for pat, sub in _FALLBACK_RULES:
         text = pat.sub(sub, text)
+    # Add Cangjie ``(`` / ``)`` around the condition of bare Go
+    # ``if`` / ``else if`` / ``for cond`` block openers.  These are
+    # cheap, shape-restricted transforms that turn a CHIME miss
+    # (which would otherwise leak raw Go syntax into the output) into
+    # a syntactically-correct Cangjie chunk.  ``for`` becomes
+    # ``while`` only when its condition is *not* a Go C-style header
+    # (``for init; cond; step``) — those have their own template
+    # neurons in CHIME and shouldn't be touched here.
+    # ``for cond`` becomes ``while (cond)`` *only* when the condition
+    # is genuinely a simple Go boolean (no ``;`` for the C-style
+    # ``init; cond; step`` header, no ``,`` or ``range``/``:=`` for
+    # range loops).  Those compound shapes have their own CHIME
+    # templates and shouldn't be mangled by the fallback.
+    m_for = re.search(r"\bfor\b\s+([^{;]+)\{", text)
+    if m_for:
+        cond = m_for.group(1)
+        is_range_or_cstyle = (
+            "," in cond
+            or re.search(r"\brange\b", cond) is not None
+            or ":=" in cond
+        )
+        if not is_range_or_cstyle:
+            text = _parenthesise_condition(text, "for", "while")
+    text = _parenthesise_condition(text, "if")
     return text
 
 

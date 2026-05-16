@@ -188,6 +188,151 @@ def _split_top_level(src: str, semi: str = ";") -> List[str]:
     return [c for c in chunks if c]
 
 
+def _block_split_text(stmt: str) -> Optional[Tuple[str, str]]:
+    """Text-based mirror of :func:`go2cj_new.converter._block_split`.
+
+    Returns ``(header_through_open_brace, body_between_braces)`` when
+    ``stmt`` is a single-block statement like ``for X { body ; body }``,
+    where the opening ``{`` matches the trailing ``}`` and the body
+    contains at least one top-level ``;``.  Returns ``None`` for
+    composite literals (``[]int{1, 2, 3}``), if-else (``if … {…} else
+    {…}``), and non-block statements.
+    """
+    text = stmt.strip()
+    if not text or text[-1] != "}":
+        return None
+    n = len(text)
+    paren = bracket = 0
+    open_idx = -1
+    i = 0
+    in_str = False
+    str_ch = ""
+    while i < n:
+        c = text[i]
+        if in_str:
+            if c == "\\" and i + 1 < n:
+                i += 2
+                continue
+            if c == str_ch:
+                in_str = False
+            i += 1
+            continue
+        if c in '"\'`':
+            in_str = True
+            str_ch = c
+            i += 1
+            continue
+        if c == "(":
+            paren += 1
+        elif c == ")":
+            paren = max(paren - 1, 0)
+        elif c == "[":
+            bracket += 1
+        elif c == "]":
+            bracket = max(bracket - 1, 0)
+        elif c == "{" and paren == 0 and bracket == 0:
+            open_idx = i
+            break
+        i += 1
+    if open_idx <= 0:
+        return None
+    # Walk to matching ``}``.  Must be exactly the final char.
+    depth = 1
+    j = open_idx + 1
+    in_str = False
+    str_ch = ""
+    while j < n and depth > 0:
+        c = text[j]
+        if in_str:
+            if c == "\\" and j + 1 < n:
+                j += 2
+                continue
+            if c == str_ch:
+                in_str = False
+            j += 1
+            continue
+        if c in '"\'`':
+            in_str = True
+            str_ch = c
+            j += 1
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        j += 1
+    if j != n - 1:
+        return None
+    header = text[:open_idx + 1]
+    body = text[open_idx + 1:j]
+    # Body must contain at least one top-level statement separator
+    # (``;`` *or* ``\n``) to count as a real statement block — this
+    # rules out composite literals like ``[]int{1, 2, 3}`` while
+    # admitting both ``if cond { return 1 }`` (newline-separated) and
+    # ``if cond { return 1; }`` (semicolon-separated) forms.
+    body_depth = 0
+    has_sep = False
+    in_body_str = False
+    body_str_ch = ""
+    bi = 0
+    bn = len(body)
+    while bi < bn:
+        bc = body[bi]
+        if in_body_str:
+            if bc == "\\" and bi + 1 < bn:
+                bi += 2
+                continue
+            if bc == body_str_ch:
+                in_body_str = False
+            bi += 1
+            continue
+        if bc in '"\'`':
+            in_body_str = True
+            body_str_ch = bc
+            bi += 1
+            continue
+        if bc in "{([":
+            body_depth += 1
+        elif bc in "})]":
+            body_depth = max(body_depth - 1, 0)
+        elif body_depth == 0 and bc in (";", "\n"):
+            has_sep = True
+            break
+        bi += 1
+    if not has_sep:
+        return None
+    return text[:open_idx + 1], body
+
+
+def _expand_block_pairs(go_stmt: str, cj_stmt: str) -> List[Tuple[str, str]]:
+    """Unfold a paired Go / Cj statement that has block shape
+    ``<header> { body }`` on both sides into header / body-stmt /
+    footer pairs.  *Non-recursive* — see the rationale in
+    :func:`_unfold_main_body`.
+
+    Currently unused (we keep the helper for future experiments, e.g.
+    when the trainset gains identifier-bounded loops that can match
+    test programs' literal-bounded loops); calling sites use the
+    flat statement zip instead.
+    """
+    gs = _block_split_text(go_stmt)
+    cs = _block_split_text(cj_stmt)
+    if gs is None or cs is None:
+        return []
+    go_header, go_body = gs
+    cj_header, cj_body = cs
+    go_stmts = _split_top_level(go_body.strip())
+    cj_stmts = _split_top_level(cj_body.strip())
+    if len(go_stmts) != len(cj_stmts):
+        return []
+    pairs: List[Tuple[str, str]] = [(go_header, cj_header)]
+    pairs.extend(zip(go_stmts, cj_stmts))
+    pairs.append(("}", "}"))
+    return pairs
+
+
 _GO_MAIN_RE = re.compile(r"^func\s+main\s*\(\s*\)\s*\{(.*)\}\s*$", re.S)
 _CJ_MAIN_RE = re.compile(r"^main\s*\(\s*\)\s*\{(.*)\}\s*$", re.S)
 _GO_FUNC_RE = re.compile(
@@ -259,6 +404,16 @@ def _unfold_main_body(go_chunk: str, cj_chunk: str) -> List[Tuple[str, str]]:
     cj_stmts = _split_top_level(cj_body)
     if len(go_stmts) != len(cj_stmts):
         return []
+    # Main-body statements are *not* recursively block-expanded: the
+    # existing v0.3.7 trainset already has rich one-block templates
+    # (``for i := 0; i < n; i++ { count++ }``) that retrieve cleanly
+    # at the whole-block level, and recursive unfold on main would
+    # require the trainset to *also* contain bare ``for i := 0; i <
+    # NUM; i++ {`` headers (it does not — main bodies typically use
+    # literal loop bounds, whereas inside a user function the bound
+    # is a parameter identifier).  Recursive expand is therefore
+    # reserved for user-function bodies, where chunks are long enough
+    # to be worth the OOD risk.
     return list(zip(go_stmts, cj_stmts))
 
 
@@ -294,7 +449,12 @@ def _unfold_user_func(go_chunk: str, cj_chunk: str) -> List[Tuple[str, str]]:
     if len(go_stmts) != len(cj_stmts):
         return []
     pairs: List[Tuple[str, str]] = [(go_header, cj_header)]
-    pairs.extend(zip(go_stmts, cj_stmts))
+    for g, c in zip(go_stmts, cj_stmts):
+        sub = _expand_block_pairs(g, c)
+        if sub:
+            pairs.extend(sub)
+        else:
+            pairs.append((g, c))
     pairs.append(("}", "}"))
     return pairs
 
