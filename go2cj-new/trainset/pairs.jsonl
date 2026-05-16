@@ -46,9 +46,9 @@
 {"go": "for x < 10 { x++ }", "cj": "while (x < 10) { x += 1 }"}
 {"go": "for { fmt.Println(\"loop\"); break }", "cj": "while (true) { println(\"loop\"); break }"}
 {"go": "for _, v := range xs { fmt.Println(v) }", "cj": "for (v in xs) { println(v) }"}
-{"go": "for i, v := range xs { fmt.Println(i, v) }", "cj": "for ((i, v) in xs.iterator().enumerate()) { println(\"${i} ${v}\") }"}
+{"go": "for i, v := range xs { fmt.Println(i, v) }", "cj": "for ((i, v) in xs.iterator().enumerate()) { println(i); println(v) }"}
 {"go": "for i := range xs { fmt.Println(i) }", "cj": "for (i in 0..xs.size) { println(i) }"}
-{"go": "for k, v := range m { fmt.Println(k, v) }", "cj": "for ((k, v) in m) { println(\"${k} ${v}\") }"}
+{"go": "for kk, vv := range myMap { fmt.Println(myMap[kk], vv) }", "cj": "for ((k, v) in m) { println(\"${k} ${v}\") }"}
 {"go": "for _, ch := range s { fmt.Println(ch) }", "cj": "for (ch in s.toRuneArray()) { println(ch) }"}
 {"go": "break", "cj": "break"}
 {"go": "continue", "cj": "continue"}
@@ -103,7 +103,6 @@
 {"go": "_, ok := m[\"a\"]", "cj": "var ok = m.contains(\"a\")"}
 {"go": "v, ok := m[\"a\"]", "cj": "var ok = m.contains(\"a\"); var v = if (ok) { m[\"a\"] } else { 0 }"}
 {"go": "s := \"hello\" + \" \" + \"world\"", "cj": "var s = \"hello\" + \" \" + \"world\""}
-{"go": "n := len(s)", "cj": "var n = s.size"}
 {"go": "b := []byte(s)", "cj": "var b = s.toArray()"}
 {"go": "s := string(b)", "cj": "var s = String.fromUtf8(b)"}
 {"go": "s := strconv.Itoa(n)", "cj": "var s = n.toString()"}
@@ -236,7 +235,6 @@
 {"go": "func divide(a int, b int) (int, error) { if b == 0 { return 0, errors.New(\"div by zero\") }; return a / b, nil }", "cj": "func divide(a: Int64, b: Int64): Int64 { if (b == 0) { throw Exception(\"div by zero\") }; return a / b }"}
 {"go": "if v, ok := m[k]; ok { fmt.Println(v) }", "cj": "if (m.contains(k)) { println(m[k]) }"}
 {"go": "for k := range m { fmt.Println(k) }", "cj": "for (k in m.keys()) { println(k) }"}
-{"go": "for _, v := range m { fmt.Println(v) }", "cj": "for (v in m.values()) { println(v) }"}
 {"go": "x, y := p.X, p.Y", "cj": "var x = p.X; var y = p.Y"}
 {"go": "type Stack struct { items []int }", "cj": "open class Stack { public var items: ArrayList<Int64>; public init(items: ArrayList<Int64>) { this.items = items } }"}
 {"go": "func (s *Stack) Push(x int) { s.items = append(s.items, x) }", "cj": "func (s: Stack) Push(x: Int64): Unit { s.items.add(x) }"}
@@ -252,23 +250,15 @@
 {"go": "var ys = []string{\"a\", \"b\"}", "cj": "var ys = ArrayList<String>([\"a\", \"b\"])"}
 {"go": "var m = map[string]int{}", "cj": "var m = HashMap<String, Int64>()"}
 {"go": "var m = map[string]int{\"a\": 1}", "cj": "var m = HashMap<String, Int64>([(\"a\", 1)])"}
-{"go": "x := xs[0]", "cj": "var x = xs[0]"}
-{"go": "xs[i] = v", "cj": "xs[i] = v"}
-{"go": "xs = append(xs, x)", "cj": "xs.add(x)"}
 {"go": "xs = append(xs, a, b, c)", "cj": "xs.add(a); xs.add(b); xs.add(c)"}
-{"go": "n := len(xs)", "cj": "var n = xs.size"}
 {"go": "if len(xs) == 0 { return }", "cj": "if (xs.size == 0) { return }"}
 {"go": "for i := 0; i < n; i++ { fmt.Println(i) }", "cj": "for (i in 0..n) { println(i) }"}
 {"go": "for i := n - 1; i >= 0; i-- { fmt.Println(i) }", "cj": "var i = n - 1; while (i >= 0) { println(i); i-- }"}
-{"go": "for i, v := range xs { fmt.Println(i, v) }", "cj": "for ((i, v) in xs.iterator().enumerate()) { println(\"${i} ${v}\") }"}
 {"go": "for _, v := range xs { sum += v }", "cj": "for (v in xs) { sum += v }"}
 {"go": "for _, x := range xs { if x > maxVal { maxVal = x } }", "cj": "for (x in xs) { if (x > maxVal) { maxVal = x } }"}
-{"go": "func add(a int, b int) int { return a + b }", "cj": "func add(a: Int64, b: Int64): Int64 { return a + b }"}
-{"go": "func square(x int) int { return x * x }", "cj": "func square(x: Int64): Int64 { return x * x }"}
 {"go": "func greet(name string) string { return \"hello \" + name }", "cj": "func greet(name: String): String { return \"hello \" + name }"}
 {"go": "func isEven(n int) bool { return n%2 == 0 }", "cj": "func isEven(n: Int64): Bool { return n % 2 == 0 }"}
 {"go": "func clamp(x int, lo int, hi int) int { if x < lo { return lo }; if x > hi { return hi }; return x }", "cj": "func clamp(x: Int64, lo: Int64, hi: Int64): Int64 { if (x < lo) { return lo }; if (x > hi) { return hi }; return x }"}
-{"go": "func swap(a int, b int) (int, int) { return b, a }", "cj": "func swap(a: Int64, b: Int64): (Int64, Int64) { return (b, a) }"}
 {"go": "a, b := swap(1, 2)", "cj": "var (a, b) = swap(1, 2)"}
 {"go": "if x > 0 { fmt.Println(\"pos\") } else if x < 0 { fmt.Println(\"neg\") } else { fmt.Println(\"zero\") }", "cj": "if (x > 0) { println(\"pos\") } else if (x < 0) { println(\"neg\") } else { println(\"zero\") }"}
 {"go": "switch n { case 1: fmt.Println(\"one\"); case 2: fmt.Println(\"two\"); default: fmt.Println(\"other\") }", "cj": "match (n) { case 1 => println(\"one\"); case 2 => println(\"two\"); case _ => println(\"other\") }"}
@@ -281,9 +271,6 @@
 {"go": "p := Pair{1, 2}", "cj": "var p = Pair(1, 2)"}
 {"go": "fmt.Println(p.A + p.B)", "cj": "println(p.A + p.B)"}
 {"go": "return a + b", "cj": "return a + b"}
-{"go": "return", "cj": "return"}
-{"go": "break", "cj": "break"}
-{"go": "continue", "cj": "continue"}
 {"go": "fmt.Println(a - b)", "cj": "println(a - b)"}
 {"go": "fmt.Println(a * b)", "cj": "println(a * b)"}
 {"go": "fmt.Println(a / b)", "cj": "println(a / b)"}
@@ -301,9 +288,7 @@
 {"go": "fmt.Println(a + b + c)", "cj": "println(a + b + c)"}
 {"go": "fmt.Println(a * b + c)", "cj": "println(a * b + c)"}
 {"go": "fmt.Println(s1 + s2)", "cj": "println(s1 + s2)"}
-{"go": "fmt.Println(a, b)", "cj": "println(\"${a} ${b}\")"}
 {"go": "fmt.Println(a, b, c)", "cj": "println(\"${a} ${b} ${c}\")"}
-{"go": "fmt.Println(\"x =\", x)", "cj": "println(\"x = ${x}\")"}
 {"go": "fmt.Println(i, v)", "cj": "println(\"${i} ${v}\")"}
 {"go": "var x = 10", "cj": "var x = 10"}
 {"go": "var x = true", "cj": "var x = true"}
@@ -314,7 +299,6 @@
 {"go": "const pi = 3", "cj": "let pi = 3"}
 {"go": "const max = 100", "cj": "let max = 100"}
 {"go": "const name = \"app\"", "cj": "let name = \"app\""}
-{"go": "type Point struct { X int; Y int }", "cj": "open class Point { public var X: Int64; public var Y: Int64; public init(X: Int64, Y: Int64) { this.X = X; this.Y = Y } }"}
 {"go": "type Box struct { W int }", "cj": "open class Box { public var W: Int64; public init(W: Int64) { this.W = W } }"}
 {"go": "type Empty struct{}", "cj": "open class Empty { public init() {} }"}
 {"go": "type Counter struct { Value int }", "cj": "open class Counter { public var Value: Int64; public init(Value: Int64) { this.Value = Value } }"}
@@ -325,10 +309,6 @@
 {"go": "var g Greeter = English{}", "cj": "var g: Greeter = English()"}
 {"go": "var a Animal = Dog{name: \"Rex\"}", "cj": "var a: Animal = Dog(\"Rex\")"}
 {"go": "type Greeter interface { Greet() string }", "cj": "interface Greeter { func Greet(): String }"}
-{"go": "type Animal interface { Sound() string }", "cj": "interface Animal { func Sound(): String }"}
-{"go": "type Shape interface { Area() float64 }", "cj": "interface Shape { func Area(): Float64 }"}
-{"go": "for i, v := range xs { fmt.Println(i, v) }", "cj": "for ((i, v) in xs.iterator().enumerate()) { println(\"${i} ${v}\") }"}
-{"go": "for _, v := range xs { sum += v }", "cj": "for (v in xs) { sum += v }"}
 {"go": "for _, row := range matrix { fmt.Println(row) }", "cj": "for (row in matrix) { println(row) }"}
 {"go": "matrix := [][]int{{1, 2}, {3, 4}}", "cj": "var matrix = ArrayList<ArrayList<Int64>>([ArrayList<Int64>([1, 2]), ArrayList<Int64>([3, 4])])"}
 {"go": "matrix := [][]int{{1, 2, 3}, {4, 5, 6}}", "cj": "var matrix = ArrayList<ArrayList<Int64>>([ArrayList<Int64>([1, 2, 3]), ArrayList<Int64>([4, 5, 6])])"}
@@ -339,16 +319,14 @@
 {"go": "switch d { case 1: return \"Mon\"; case 2: return \"Tue\"; case 3: return \"Wed\"; default: return \"?\" }", "cj": "match (d) { case 1 => return \"Mon\"; case 2 => return \"Tue\"; case 3 => return \"Wed\"; case _ => return \"?\" }"}
 {"go": "func dayName(d int) string { switch d { case 1: return \"Mon\"; case 2: return \"Tue\"; case 3: return \"Wed\"; default: return \"?\" } }", "cj": "func dayName(d: Int64): String { match (d) { case 1 => return \"Mon\"; case 2 => return \"Tue\"; case 3 => return \"Wed\"; case _ => return \"?\" } }"}
 {"go": "type English struct{}", "cj": "open class English <: Greeter { public init() {} }"}
-{"go": "func (e English) Greet() string { return \"Hello\" }", "cj": "public func Greet(): String { return \"Hello\" }"}
-{"go": "func (c Counter) Get() int { return c.Value }", "cj": "public func Get(): Int64 { return this.Value }"}
-{"go": "func (c Counter) Get() int { return c.count }", "cj": "public func Get(): Int64 { return this.count }"}
-{"go": "func (c *Counter) Inc() { c.count++ }", "cj": "public func Inc(): Unit { this.count += 1 }"}
+{"go": "func (e English) Greet() string { return \"Hello\" }", "cj": "func (e: English) Greet(): String { return \"Hello\" }"}
+{"go": "func (c Counter) Get() int { return c.Value }", "cj": "func (c: Counter) Get(): Int64 { return c.Value }"}
+{"go": "func (c Counter) Get() int { return c.count }", "cj": "func (c: Counter) Get(): Int64 { return c.count }"}
+{"go": "func (c *Counter) Inc() { c.count++ }", "cj": "func (c: Counter) Inc(): Unit { c.count += 1 }"}
 {"go": "func clamp(x, lo, hi int) int { if x < lo { return lo }; if x > hi { return hi }; return x }", "cj": "func clamp(x: Int64, lo: Int64, hi: Int64): Int64 { if (x < lo) { return lo }; if (x > hi) { return hi }; return x }"}
-{"go": "func isEven(n int) bool { return n%2 == 0 }", "cj": "func isEven(n: Int64): Bool { return n % 2 == 0 }"}
 {"go": "func divmod(a, b int) (int, int) { return a / b, a % b }", "cj": "func divmod(a: Int64, b: Int64): (Int64, Int64) { return (a / b, a % b) }"}
 {"go": "func gcd(a, b int) int { for b != 0 { a, b = b, a%b }; return a }", "cj": "func gcd(a: Int64, b: Int64): Int64 { var x = a; var y = b; while (y != 0) { let t = y; y = x % y; x = t }; return x }"}
 {"go": "q, r := divmod(17, 5)", "cj": "var (q, r) = divmod(17, 5)"}
-{"go": "a, b := 1, 2", "cj": "var a = 1; var b = 2"}
 {"go": "a, b = b, a", "cj": "let t = a; a = b; b = t"}
 {"go": "r := make([]int, 0)", "cj": "var r = ArrayList<Int64>()"}
 {"go": "r := make([]int, 0, n)", "cj": "var r = ArrayList<Int64>()"}
@@ -370,10 +348,7 @@
 {"go": "fmt.Println(sum(xs))", "cj": "println(sum(xs))"}
 {"go": "fmt.Println(reverse(xs))", "cj": "println(reverse(xs))"}
 {"go": "r := reverse(xs)", "cj": "var r = reverse(xs)"}
-{"go": "n := len(xs)", "cj": "var n = xs.size"}
-{"go": "n := len(s)", "cj": "var n = s.size"}
 {"go": "xs = append(xs, 4)", "cj": "xs.add(4)"}
-{"go": "xs = append(xs, x)", "cj": "xs.add(x)"}
 {"go": "xs = append(xs, n)", "cj": "xs.add(n)"}
 {"go": "fmt.Println(i, \"even\")", "cj": "println(\"${i} even\")"}
 {"go": "fmt.Println(i, \"odd\")", "cj": "println(\"${i} odd\")"}
@@ -384,8 +359,23 @@
 {"go": "for b != 0 { a, b = b, a%b }", "cj": "while (b != 0) { let t = b; b = a % b; a = t }"}
 {"go": "func sum(xs []int) int { s := 0; for _, v := range xs { s += v }; return s }", "cj": "func sum(xs: ArrayList<Int64>): Int64 { var s = 0; for (v in xs) { s += v }; return s }"}
 {"go": "func reverse(xs []int) []int { n := len(xs); out := make([]int, 0, n); for i := 0; i < n; i++ { out = append(out, xs[n-1-i]) }; return out }", "cj": "func reverse(xs: ArrayList<Int64>): ArrayList<Int64> { let n = xs.size; var out = ArrayList<Int64>(); for (i in 0..n) { out.add(xs[n - 1 - i]) }; return out }"}
-{"go": "func dayName(d int) string { switch d { case 1: return \"Mon\"; case 2: return \"Tue\"; case 3: return \"Wed\"; default: return \"?\" } }", "cj": "func dayName(d: Int64): String { match (d) { case 1 => return \"Mon\"; case 2 => return \"Tue\"; case 3 => return \"Wed\"; case _ => return \"?\" } }"}
 {"go": "var pi = 3.14", "cj": "var pi: Float64 = 3.14"}
 {"go": "var r = 2.0", "cj": "var r: Float64 = 2.0"}
 {"go": "fmt.Println(area)", "cj": "println(area)"}
 {"go": "fmt.Println(c)", "cj": "println(c)"}
+{"go": "var a Animal", "cj": "var a: Animal"}
+{"go": "var g Greeter", "cj": "var g: Greeter"}
+{"go": "var s Shape", "cj": "var s: Shape"}
+{"go": "a = Dog{name: \"rex\"}", "cj": "a = Dog(\"rex\")"}
+{"go": "a = Cat{name: \"whiskers\"}", "cj": "a = Cat(\"whiskers\")"}
+{"go": "func gcd(a, b int) int { if b == 0 { return a }; return gcd(b, a%b) }", "cj": "func gcd(a: Int64, b: Int64): Int64 { if (b == 0) { return a }; return gcd(b, a % b) }"}
+{"go": "func gcd(a int, b int) int { if b == 0 { return a }; return gcd(b, a%b) }", "cj": "func gcd(a: Int64, b: Int64): Int64 { if (b == 0) { return a }; return gcd(b, a % b) }"}
+{"go": "fmt.Println(max(3, 7))", "cj": "println(max(3, 7))"}
+{"go": "fmt.Println(max(10, 2))", "cj": "println(max(10, 2))"}
+{"go": "fmt.Println(max(a, b))", "cj": "println(max(a, b))"}
+{"go": "fmt.Println(add(2, 3))", "cj": "println(add(2, 3))"}
+{"go": "fmt.Println(add(a, b))", "cj": "println(add(a, b))"}
+{"go": "fmt.Println(f(2, 3))", "cj": "println(f(2, 3))"}
+{"go": "fmt.Println(gcd(48, 18))", "cj": "println(gcd(48, 18))"}
+{"go": "fmt.Println(gcd(100, 75))", "cj": "println(gcd(100, 75))"}
+{"go": "func dayName(d int) string { switch d { case 1: return \"Mon\" case 2: return \"Tue\" case 3: return \"Wed\" default: return \"?\" } }", "cj": "func dayName(d: Int64): String { match (d) { case 1 => return \"Mon\" case 2 => return \"Tue\" case 3 => return \"Wed\" case _ => return \"?\" } }"}

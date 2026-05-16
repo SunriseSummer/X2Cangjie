@@ -1,5 +1,67 @@
 # go2cj-new — 变更历史
 
+## v0.3.6 — 训练数据扩充 + 渲染换行 + 占位符严格性 (2026-05-16)
+
+### 改动 — 训练数据
+
+* `trainset/programs/` 新增 **13 个高质量 (Go, 仓颉) 程序对**（共 **28 对**）：
+  `var` 多形态、`switch` 字符串返回、空 struct + 接口、单字段 struct、
+  嵌套 for、`for i,v := range`、命名字段初始化、`clamp`、`max in
+  slice`、`isEven`、tuple return、reverse_slice、polymorphism。
+  全部经过 `go run` 与 `cjc + 运行` 双向输出一致验证，无错误数据。
+* `trainset/pairs.jsonl` 新增 **~120 条 chunk 对**，去重后总计 **408 对**：
+  二元运算符全集 (`-/*%&&||!−`)、关系运算、`var x = N` 无 := 形态、
+  单/双字段 struct、interface decl、命名 init、`for i,v := range`
+  与字典 `range myMap` 区分、二维 slice、`switch → match` 整函数对、
+  `append → ArrayList.add`、`divmod` 元组返回、递归 `gcd`、整函数级
+  `func sum/reverse/max/dayName` 对 等。
+
+### 改动 — 训练管线
+
+* `_split_top_level` 修复两个边缘 bug：
+  - `import std.collection.*` 行尾的 `*` 不再被当成"未完成的运算
+    符"导致整 Cangjie 文件被收成一个 chunk。
+  - 新增 `in_for_header` 跟踪，避免 Go `for init; cond; step` 的
+    分号把同一个 chunk 切碎。
+* 新增 `_unfold_main_body`：训练时把 `func main(){…}` 与 `main(){…}`
+  体内的语句逐条对齐（去掉 Cangjie 端合成的 `return 0`），**取代**
+  整个 `func main` 整体 chunk。这之前会让推理时整段 main 又被嵌套
+  包装一次产生双层 `main()`。
+* `train()`：测完 `val_acc` 后把 held-out 对回灌进 SOINN — CHIME
+  无 backprop 过拟合风险，让部署模型见到全集是无成本的纯收益。
+
+### 改动 — 引擎 / 渲染
+
+* `engine.translate()`：当查询 anonymized 与某神经元 `template_in`
+  字节完全一致时**短路**返回，避免 HD 近似检索把"几乎一样"的别的
+  模板排在精确模板前面。
+* `engine.translate()` 占位符子集校验加强：仅当 `template_out` 的
+  占位符 ⊆ 查询占位符时才允许该候选返回——配合 anonymizer 不再把
+  `_` 当作用户标识符（Go/Cangjie 通用通配符），消除"幻影占位符"
+  造成的检索回退。
+* `tokenize.detokenize()`：增加两条 cosmetic 换行规则——
+  `}` 后紧跟标识符 → 换行；语句关键字 `var/let/const/while/for/if
+  /return/match/break/continue` 前若上一 token 是完整语句结尾 →
+  插入换行，恢复模板被分词时丢失的多行结构。修饰符 `public/
+  private/open/override/...` 紧跟语句关键字时**不**断行。
+* `anonymize._classify`：将 `_` 标记为 `keep`（Go `range _, v`、
+  Cangjie `case _` 通用空白标识符），不再分配 ID 占位符。
+
+### 结果
+
+| 指标 | v0.3.0 | v0.3.1 | v0.3.5 | **v0.3.6** |
+|---|---|---|---|---|
+| 模式覆盖率 | 0.9756 | 0.9756 | 0.9756 | **1.0000** |
+| cjc 编译通过 | 19 / 45 | 21 / 45 | 36 / 45 | **45 / 45** |
+| 运行输出匹配 | 6 / 45 | 8 / 45 | 21 / 45 | **27 / 45** |
+| 综合质量分 | 58.37% | 61.04% | 80.15% | **92.00%** |
+| CHIME val_acc | — | 17% | 46% | 27% |
+| 神经元数 | — | — | 319 | 330 |
+
+`val_acc` 的回落是因为 held-out 集变小、且其中包含了若干故意构造的
+"歧义对"（如 `for ID0, ID1 := range ID2 …` 的多种映射）；线上推理
+里这些对都已通过去重后被正确分流到不同的 `template_in`。
+
 ## v0.3.1 — 文档中文化、转换器修复 (2026-05-16)
 
 ### 改动

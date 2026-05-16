@@ -5,11 +5,11 @@
 ## 汇总
 
 - 用例总数：**45**
-- 模式覆盖率（confident / chunks）：**97.56%** (160 / 164)
+- 模式覆盖率（confident / chunks）：**100.00%** (164 / 164)
 - Go 源编译（`go vet`）：**45 / 45** (100.00%)
-- Cangjie 编译通过：**36 / 45** (80.00%)
-- 运行输出匹配：**21 / 45** (46.67%)
-- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**80.15%**
+- Cangjie 编译通过：**45 / 45** (100.00%)
+- 运行输出匹配：**27 / 45** (60.00%)
+- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**92.00%**
 
 ## 评分公式
 
@@ -29,41 +29,41 @@
 | `04_if_else` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `05_for_classic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `06_while_for` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `07_functions` | 2 | 1 | 1 | 50% | ✅ | ✅ | ✅ | 80.00% |
+| `07_functions` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `08_recursion` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `09_fibonacci` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `10_multi_return` | 4 | 4 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `11_slice` | 4 | 4 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `12_slice_append` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `12_slice_append` | 4 | 4 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `13_nested_for` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `14_if_elif` | 5 | 5 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `15_string_concat` | 4 | 4 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `16_boolean_logic` | 5 | 5 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `17_fizzbuzz` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `18_sum_array` | 3 | 3 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `19_switch` | 5 | 5 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `19_switch` | 5 | 5 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `20_struct_basic` | 4 | 4 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `21_struct_methods` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `21_struct_methods` | 4 | 4 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `22_interface` | 5 | 5 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `23_break_continue` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `24_printf_format` | 3 | 3 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `25_const_block` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `26_float_math` | 4 | 4 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `27_typed_func` | 3 | 2 | 1 | 67% | ✅ | ❌ | ❌ | 26.67% |
+| `27_typed_func` | 3 | 3 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `28_count_chars` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `29_nested_func_calls` | 3 | 3 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `30_mixed_program` | 8 | 8 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `31_map_basic` | 4 | 4 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `32_string_basics` | 3 | 3 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `33_max_min` | 4 | 2 | 2 | 50% | ✅ | ✅ | ✅ | 80.00% |
-| `34_polymorphism` | 10 | 10 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `33_max_min` | 4 | 4 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `34_polymorphism` | 10 | 10 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `35_max_in_slice` | 4 | 4 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `36_gcd` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `36_gcd` | 3 | 3 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `37_primes` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `38_reverse_slice` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `39_counter` | 8 | 8 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `38_reverse_slice` | 4 | 4 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `39_counter` | 8 | 8 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `40_matrix_sum` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `41_range_index` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `41_range_index` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `42_swap_tuple` | 4 | 4 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `43_clamp` | 4 | 4 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `44_pair_struct` | 5 | 5 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
@@ -90,10 +90,6 @@
    got:
   '[1, 2, 3]\n[1, 2, 3]\n[1, 2, 3]\n'
   ```
-
-### `12_slice_append`
-
-- cjc 诊断：`error: 'values' is not a member of class 'ArrayList<Int64>'`
 
 ### `13_nested_for`
 
@@ -125,14 +121,6 @@
   'HelloWorld\n'
   ```
 
-### `19_switch`
-
-- cjc 诊断：`error: expected declaration, found keyword 'match'`
-
-### `21_struct_methods`
-
-- cjc 诊断：`error: 'this' cannot be used outside class or struct or interface`
-
 ### `23_break_continue`
 
 - 运行差异：
@@ -162,10 +150,6 @@
    got:
   '12.560000\n'
   ```
-
-### `27_typed_func`
-
-- cjc 诊断：`error: undeclared identifier 'Process'`
 
 ### `28_count_chars`
 
@@ -217,13 +201,15 @@
   'hello\nhello\n'
   ```
 
-### `34_polymorphism`
+### `33_max_min`
 
-- cjc 诊断：`error: no matching function for operator '()' function call`
-
-### `36_gcd`
-
-- cjc 诊断：`error: unable to infer generic argument of this function`
+- 运行差异：
+  ```
+  want:
+  '7\n3\n'
+   got:
+  '7\n7\n'
+  ```
 
 ### `37_primes`
 
@@ -235,17 +221,25 @@
   '2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n'
   ```
 
-### `38_reverse_slice`
-
-- cjc 诊断：`error: 'values' is not a member of class 'ArrayList<Int64>'`
-
 ### `39_counter`
 
-- cjc 诊断：`error: 'this' cannot be used outside class or struct or interface`
+- 运行差异：
+  ```
+  want:
+  '3\n'
+   got:
+  '0\n'
+  ```
 
 ### `41_range_index`
 
-- cjc 诊断：`error: 'values' is not a member of class 'ArrayList<Int64>'`
+- 运行差异：
+  ```
+  want:
+  '0 1\n1 2\n2 3\n3 4\n4 5\n'
+   got:
+  '0\n1\n1\n2\n2\n3\n3\n4\n4\n5\n'
+  ```
 
 ### `45_even_odd`
 

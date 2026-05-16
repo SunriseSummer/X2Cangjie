@@ -135,6 +135,13 @@ def _classify(tok: str) -> str:
         return "num"
     if tok in KEEP_TOKENS:
         return "keep"
+    # ``_`` is the universal wildcard / blank-identifier in both Go
+    # (``for _, v := range …``) and Cangjie (``case _``).  Anonymising
+    # it as a user identifier introduces a phantom placeholder that
+    # then fails the strict ``placeholders ⊆ query`` subset check at
+    # retrieval time, so we keep it as-is.
+    if tok == "_":
+        return "keep"
     if _IDENT_RE.match(tok):
         return "id"
     return "keep"

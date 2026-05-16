@@ -179,10 +179,23 @@ def detokenize(tokens: List[str]) -> str:
     # previous token sequence was a complete simple statement (i.e.
     # ends with an identifier / literal / ``++``/``--``/``)``).  This
     # recovers newlines that were collapsed to spaces when the
-    # multi-statement Cangjie template was tokenised.
+    # multi-statement Cangjie template was tokenised.  We deliberately
+    # do NOT break right after Cangjie modifier keywords
+    # (``public/private/protected/open/override/static/abstract``)
+    # — those legitimately precede ``var``/``let``/``func``/etc.
     _STMT_KW = r"(?:var|let|const|while|for|if|return|match|break|continue)"
+    _MODIFIER_KW = r"(?:public|private|protected|open|override|static|abstract|sealed|operator)"
+    s = re.sub(r"(?<![A-Za-z_])(" + _MODIFIER_KW + r")\s+(?=" + _STMT_KW + r"\b)",
+               r"\1 ", s)
     s = re.sub(r"(?<=[A-Za-z0-9_)\]])\s+(?=" + _STMT_KW + r"\b)",
                "\n", s)
+    # Restore modifier+keyword sequences that the previous rule may
+    # have just unhelpfully glued on top of a newline.  We do this by
+    # forbidding the break above first — implemented via a second
+    # pass to undo accidental breaks immediately after a modifier
+    # keyword at start of line.
+    s = re.sub(r"(?m)^(\s*" + _MODIFIER_KW + r")\n(\s*)(" + _STMT_KW + r"\b)",
+               r"\1 \3", s)
     return s
 
 
