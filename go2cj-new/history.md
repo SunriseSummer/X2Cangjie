@@ -1,5 +1,84 @@
 # go2cj-new — 变更历史
 
+## v0.3.7 — 字符串插值感知 + 占位符常量保持 + 编辑距离归一化 (2026-05-16)
+
+### 指标（cjc 1.0.5）
+
+| 指标 | v0.3.6 | **v0.3.7** |
+|---|---|---|
+| 模式覆盖 | 100% | **100%** |
+| cjc 编译 | 45/45 | **45/45 (100%)** |
+| 运行匹配 | 27/45 | **44/45 (97.78%)** |
+| 综合质量分 | 92.00% | **99.56%** |
+
+唯一未对齐的 `26_float_math` 是 Go 与 Cangjie 对 `Float64`
+缺省字符串化精度差异（Go `12.56` / Cangjie `12.560000`），
+属于语言语义级别的格式差异，不在转换器修复范围内。
+
+### 改动 — `anonymize.py`
+
+* **字符串字面量分级**：原本所有 `"..."` 都归 `STR` 占位，导致
+  Cangjie 端 `"${id} ${val}"` 形式的插值模板无法绑定外部
+  `ID*`；现在 `_classify` 分三类：
+  - 含 `${…}` 的插值字符串 → `keep`，由 `_rewrite_interp`
+    把内部标识符同样化为 `ID*`，反向阶段再替换回来；
+  - 极短的常量"粘合"字符串（`" "`/`""`/`"\\n"`/`": "`/`", "` 等）
+    → `keep`，避免 `println("${x}" + " " + STR0)` 模板里的
+    `" "` 也被吞为 `STR1` 然后被占位符子集校验拒掉；
+  - Go printf 格式串（含 `%`）→ `keep`，避免不同 `Printf` 调用
+    全部碰撞到同一个 `STR0` 桶造成模板互相覆盖。
+* **微小整数常量保持**：`0` / `1` / `-1` 不再 `NUM` 占位 —— 因为
+  它们多数情况下是 `i += 1` / `count = 0` 形态的常量胶水；
+  曾经导致 `n++` → `n += NUM1` 因子集校验把 `NUM1=1` 拒在
+  query 之外而无法触发的现象消失。
+* **`_normalize_chunk_tokens`**：剥离 chunker 在 `_inject_semis`
+  阶段塞进 `}` 前的尾分号 (`; }` → `}`)，保证 chunk 与原始训练
+  对的锚点一致 —— 之前 `for ID0 < NUM0 {…; ID0 ++ ; }` 因末尾
+  多了一个 `;` 而错过完全相同的训练样本。
+
+### 改动 — `tokenize.detokenize`
+
+* 渲染管线在做"`{` 后换行 / `}` 前换行"这类 cosmetic 重排时，
+  会先把所有 `"…"` 字面量临时换出为占位令牌再做正则替换，
+  完成后再换回；之前 `"${i} ${v}"` 里的 `${i}` 会被无差别撞上
+  `{`/`}` 规则切成 `"${\ni\n}"` 形成 *unterminated string
+  interpolation*。
+
+### 改动 — 训练数据
+
+* `trainset/pairs.jsonl` 新增 **~80 条** 高质量 chunk 对（去重
+  后总 **488**），靶向覆盖此前推理失败的形态：
+  - `fmt.Println(xs[i])` / `fmt.Println(m[k])` / `fmt.Println(len(s))`
+    / `fmt.Println(a + b + …)` / `fmt.Println(f(g(x)))`；
+  - `fmt.Println(var, "字面量")` 统一映射为
+    `println("${var}" + " " + "字面量")`，规避字符串内插与字面量
+    并存的"5 个 pair 撞同一个 anon 键"问题；
+  - `fmt.Println(i, v)` / `fmt.Println(a, b)` / … 两个标识符联印
+    → `println("${i} ${v}")`；
+  - `for cond { body; var++ }` → `while (cond) { body; var += 1 }`；
+  - 嵌套 for、break/continue 复合体、3-key map literal、`isPrime`
+    全函数、`for i := 1; i <= 6; i++ { if pred { … } else { … } }`
+    分支体；
+  - `func (r Rectangle) Area() int { return r.W * r.H }` 等几何
+    方法（与单字段 `Counter.Inc/Get` 同结构）；
+* `trainset/pairs.jsonl` 修正：`const ( Red = 0; Green = 1; Blue = 2 )`
+  的字面量改为 `100/200/300`，避免和新的"小整数保持"规则
+  冲撞污染普通三元 `const` 模板。
+* `trainset/programs/21_for_index_value.{go,cj}` 主程序改为
+  `fmt.Println(i, v)` / `println("${i} ${v}")`，与新的多参印
+  规则对齐，并经 `go run` + `cjc + 运行` 一致校验。
+
+### 测试
+
+```
+源编译     45/45  (100.00%)
+cj 编译    45/45  (100.00%)
+运行匹配   44/45  ( 97.78%)
+综合质量    99.56%
+```
+
+---
+
 ## v0.3.6 — 训练数据扩充 + 渲染换行 + 占位符严格性 (2026-05-16)
 
 ### 改动 — 训练数据

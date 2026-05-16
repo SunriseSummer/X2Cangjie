@@ -164,6 +164,18 @@ def detokenize(tokens: List[str]) -> str:
         prev = tok
     s = "".join(out)
     # Cosmetic newlines after statement separators / block opens / closes.
+    # We need to apply these regexes to source-level tokens only —
+    # never inside string literals (Cangjie has live ``${expr}``
+    # interpolation, and naive substitution would split the string).
+    # So we first mask out string literals, transform, then restore.
+    _placeholders: List[str] = []
+
+    def _mask(m: re.Match) -> str:
+        _placeholders.append(m.group(0))
+        return f"\x00STR{len(_placeholders) - 1}\x00"
+
+    s = re.sub(r'"(?:\\.|[^"\\])*"', _mask, s)
+
     s = re.sub(r" *; *", "\n", s)
     s = re.sub(r"\{ *", "{\n", s)
     s = re.sub(r" *\}", "\n}", s)
@@ -196,6 +208,12 @@ def detokenize(tokens: List[str]) -> str:
     # keyword at start of line.
     s = re.sub(r"(?m)^(\s*" + _MODIFIER_KW + r")\n(\s*)(" + _STMT_KW + r"\b)",
                r"\1 \3", s)
+    # Restore string-literal placeholders.
+    s = re.sub(
+        r"\x00STR(\d+)\x00",
+        lambda m: _placeholders[int(m.group(1))],
+        s,
+    )
     return s
 
 

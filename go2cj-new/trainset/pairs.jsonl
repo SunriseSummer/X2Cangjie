@@ -46,7 +46,7 @@
 {"go": "for x < 10 { x++ }", "cj": "while (x < 10) { x += 1 }"}
 {"go": "for { fmt.Println(\"loop\"); break }", "cj": "while (true) { println(\"loop\"); break }"}
 {"go": "for _, v := range xs { fmt.Println(v) }", "cj": "for (v in xs) { println(v) }"}
-{"go": "for i, v := range xs { fmt.Println(i, v) }", "cj": "for ((i, v) in xs.iterator().enumerate()) { println(i); println(v) }"}
+{"go": "for i, v := range xs { fmt.Println(i, v) }", "cj": "for ((i, v) in xs.iterator().enumerate()) { println(\"${i} ${v}\") }"}
 {"go": "for i := range xs { fmt.Println(i) }", "cj": "for (i in 0..xs.size) { println(i) }"}
 {"go": "for kk, vv := range myMap { fmt.Println(myMap[kk], vv) }", "cj": "for ((k, v) in m) { println(\"${k} ${v}\") }"}
 {"go": "for _, ch := range s { fmt.Println(ch) }", "cj": "for (ch in s.toRuneArray()) { println(ch) }"}
@@ -191,7 +191,7 @@
 {"go": "iota", "cj": "0"}
 {"go": "type Color int", "cj": "type Color = Int64"}
 {"go": "const Red Color = 0", "cj": "let Red: Int64 = 0"}
-{"go": "const ( Red = 0; Green = 1; Blue = 2 )", "cj": "let Red = 0; let Green = 1; let Blue = 2"}
+{"go": "const ( Red = 100; Green = 200; Blue = 300 )", "cj": "let Red = 100; let Green = 200; let Blue = 300"}
 {"go": "true", "cj": "true"}
 {"go": "false", "cj": "false"}
 {"go": "nil", "cj": "None"}
@@ -350,10 +350,10 @@
 {"go": "r := reverse(xs)", "cj": "var r = reverse(xs)"}
 {"go": "xs = append(xs, 4)", "cj": "xs.add(4)"}
 {"go": "xs = append(xs, n)", "cj": "xs.add(n)"}
-{"go": "fmt.Println(i, \"even\")", "cj": "println(\"${i} even\")"}
-{"go": "fmt.Println(i, \"odd\")", "cj": "println(\"${i} odd\")"}
-{"go": "fmt.Println(n, \"is prime\")", "cj": "println(\"${n} is prime\")"}
-{"go": "fmt.Println(n, \"is not prime\")", "cj": "println(\"${n} is not prime\")"}
+{"go": "fmt.Println(i, \"even\")", "cj": "println(\"${i}\" + \" \" + \"even\")"}
+{"go": "fmt.Println(i, \"odd\")", "cj": "println(\"${i}\" + \" \" + \"odd\")"}
+{"go": "fmt.Println(n, \"is prime\")", "cj": "println(\"${n}\" + \" \" + \"is prime\")"}
+{"go": "fmt.Println(n, \"is not prime\")", "cj": "println(\"${n}\" + \" \" + \"is not prime\")"}
 {"go": "if isEven(i) { fmt.Println(i, \"even\") } else { fmt.Println(i, \"odd\") }", "cj": "if (isEven(i)) { println(\"${i} even\") } else { println(\"${i} odd\") }"}
 {"go": "func gcd(a, b int) int { for b != 0 { t := b; b = a % b; a = t }; return a }", "cj": "func gcd(a: Int64, b: Int64): Int64 { var x = a; var y = b; while (y != 0) { let t = y; y = x % y; x = t }; return x }"}
 {"go": "for b != 0 { a, b = b, a%b }", "cj": "while (b != 0) { let t = b; b = a % b; a = t }"}
@@ -379,3 +379,92 @@
 {"go": "fmt.Println(gcd(48, 18))", "cj": "println(gcd(48, 18))"}
 {"go": "fmt.Println(gcd(100, 75))", "cj": "println(gcd(100, 75))"}
 {"go": "func dayName(d int) string { switch d { case 1: return \"Mon\" case 2: return \"Tue\" case 3: return \"Wed\" default: return \"?\" } }", "cj": "func dayName(d: Int64): String { match (d) { case 1 => return \"Mon\" case 2 => return \"Tue\" case 3 => return \"Wed\" case _ => return \"?\" } }"}
+{"go": "fmt.Println(xs[0])", "cj": "println(xs[0])"}
+{"go": "fmt.Println(xs[1])", "cj": "println(xs[1])"}
+{"go": "fmt.Println(xs[2])", "cj": "println(xs[2])"}
+{"go": "fmt.Println(xs[i])", "cj": "println(xs[i])"}
+{"go": "fmt.Println(arr[0])", "cj": "println(arr[0])"}
+{"go": "fmt.Println(arr[i])", "cj": "println(arr[i])"}
+{"go": "fmt.Println(a[k])", "cj": "println(a[k])"}
+{"go": "fmt.Println(m[\"a\"])", "cj": "println(m[\"a\"])"}
+{"go": "fmt.Println(m[\"b\"])", "cj": "println(m[\"b\"])"}
+{"go": "fmt.Println(m[\"c\"])", "cj": "println(m[\"c\"])"}
+{"go": "fmt.Println(m[k])", "cj": "println(m[k])"}
+{"go": "fmt.Println(m[key])", "cj": "println(m[key])"}
+{"go": "fmt.Println(len(s))", "cj": "println(s.size)"}
+{"go": "fmt.Println(len(xs))", "cj": "println(xs.size)"}
+{"go": "fmt.Println(len(arr))", "cj": "println(arr.size)"}
+{"go": "fmt.Println(s + \" world\")", "cj": "println(s + \" world\")"}
+{"go": "fmt.Println(a + \", \" + b)", "cj": "println(a + \", \" + b)"}
+{"go": "fmt.Println(min(3, 7))", "cj": "println(min(3, 7))"}
+{"go": "fmt.Println(min(10, 2))", "cj": "println(min(10, 2))"}
+{"go": "fmt.Println(min(a, b))", "cj": "println(min(a, b))"}
+{"go": "fmt.Println(min(x, y))", "cj": "println(min(x, y))"}
+{"go": "fmt.Println(k, v)", "cj": "println(\"${k} ${v}\")"}
+{"go": "fmt.Println(x, y)", "cj": "println(\"${x} ${y}\")"}
+{"go": "fmt.Println(n, \"prime\")", "cj": "println(\"${n}\" + \" \" + \"prime\")"}
+{"go": "fmt.Println(name, age)", "cj": "println(\"${name} ${age}\")"}
+{"go": "c := a + \", \" + b + \"!\"", "cj": "var c = a + \", \" + b + \"!\""}
+{"go": "s := a + \", \" + b", "cj": "var s = a + \", \" + b"}
+{"go": "s := a + \" \" + b", "cj": "var s = a + \" \" + b"}
+{"go": "msg := \"Hello, \" + name", "cj": "var msg = \"Hello, \" + name"}
+{"go": "c.count++", "cj": "c.count += 1"}
+{"go": "this.count++", "cj": "this.count += 1"}
+{"go": "this.count += 1", "cj": "this.count += 1"}
+{"go": "self.count++", "cj": "this.count += 1"}
+{"go": "n++", "cj": "n += 1"}
+{"go": "i++", "cj": "i += 1"}
+{"go": "n--", "cj": "n -= 1"}
+{"go": "i--", "cj": "i -= 1"}
+{"go": "for n < 3 { fmt.Println(n); n++ }", "cj": "while (n < 3) { println(n); n += 1 }"}
+{"go": "for n < 10 { fmt.Println(n); n++ }", "cj": "while (n < 10) { println(n); n += 1 }"}
+{"go": "for i < n { fmt.Println(i); i++ }", "cj": "while (i < n) { println(i); i += 1 }"}
+{"go": "for i := 0; i < 3; i++ { for j := 0; j < 3; j++ { fmt.Println(i*10 + j) } }", "cj": "for (i in 0 .. 3) { for (j in 0 .. 3) { println(i * 10 + j) } }"}
+{"go": "for i := 0; i < n; i++ { for j := 0; j < n; j++ { fmt.Println(i * j) } }", "cj": "for (i in 0 .. n) { for (j in 0 .. n) { println(i * j) } }"}
+{"go": "for i := 0; i < 10; i++ { if i == 5 { break }; fmt.Println(i) }", "cj": "for (i in 0 .. 10) { if (i == 5) { break }; println(i) }"}
+{"go": "for i := 0; i < 10; i++ { if i % 2 == 0 { continue }; fmt.Println(i) }", "cj": "for (i in 0 .. 10) { if (i % 2 == 0) { continue }; println(i) }"}
+{"go": "for _, c := range s { fmt.Println(c) }", "cj": "for (c in s.toRuneArray()) { println(c) }"}
+{"go": "count := 0; for _, c := range s { count++ }; fmt.Println(count)", "cj": "var count = 0; for (c in s.toRuneArray()) { count += 1 }; println(count)"}
+{"go": "fmt.Println(inc(double(x)))", "cj": "println(inc(double(x)))"}
+{"go": "fmt.Println(double(inc(x)))", "cj": "println(double(inc(x)))"}
+{"go": "fmt.Println(f(g(x)))", "cj": "println(f(g(x)))"}
+{"go": "fmt.Println(double(5))", "cj": "println(double(5))"}
+{"go": "fmt.Println(inc(5))", "cj": "println(inc(5))"}
+{"go": "func grade(s int) string { if s >= 90 { return \"A\" } else if s >= 80 { return \"B\" } else if s >= 70 { return \"C\" } else { return \"F\" } }", "cj": "func grade(s: Int64): String { if (s >= 90) { return \"A\" } else if (s >= 80) { return \"B\" } else if (s >= 70) { return \"C\" } else { return \"F\" } }"}
+{"go": "if s >= 90 { return \"A\" } else if s >= 80 { return \"B\" } else if s >= 70 { return \"C\" } else { return \"F\" }", "cj": "if (s >= 90) { return \"A\" } else if (s >= 80) { return \"B\" } else if (s >= 70) { return \"C\" } else { return \"F\" }"}
+{"go": "if a > b { return a }; return b", "cj": "if (a > b) { return a }; return b"}
+{"go": "if a < b { return a }; return b", "cj": "if (a < b) { return a }; return b"}
+{"go": "func double(x int) int { return x * 2 }", "cj": "func double(x: Int64): Int64 { return x * 2 }"}
+{"go": "func inc(x int) int { return x + 1 }", "cj": "func inc(x: Int64): Int64 { return x + 1 }"}
+{"go": "func isEven(n int) bool { return n % 2 == 0 }", "cj": "func isEven(n: Int64): Bool { return n % 2 == 0 }"}
+{"go": "func isOdd(n int) bool { return n % 2 != 0 }", "cj": "func isOdd(n: Int64): Bool { return n % 2 != 0 }"}
+{"go": "for i := 1; i <= 6; i++ { if isEven(i) { fmt.Println(i, \"even\") } else { fmt.Println(i, \"odd\") } }", "cj": "for (i in 1 ..= 6) { if (isEven(i)) { println(\"${i} even\") } else { println(\"${i} odd\") } }"}
+{"go": "for n := 2; n < 20; n++ { if isPrime(n) { fmt.Println(n) } }", "cj": "for (n in 2 .. 20) { if (isPrime(n)) { println(n) } }"}
+{"go": "func isPrime(n int) bool { if n < 2 { return false }; for i := 2; i*i <= n; i++ { if n%i == 0 { return false } }; return true }", "cj": "func isPrime(n: Int64): Bool { if (n < 2) { return false }; var i = 2; while (i * i <= n) { if (n % i == 0) { return false }; i += 1 }; return true }"}
+{"go": "r := Rectangle{W: 4, H: 5}; fmt.Println(r.Area())", "cj": "var r = Rectangle(4, 5); println(r.Area())"}
+{"go": "fmt.Printf(\"name=%s year=%d\\n\", name, year)", "cj": "println(\"name=${name} year=${year}\")"}
+{"go": "fmt.Printf(\"%s=%d\\n\", k, v)", "cj": "println(\"${k}=${v}\")"}
+{"go": "fmt.Printf(\"%d\\n\", x)", "cj": "println(x)"}
+{"go": "fmt.Printf(\"%s\\n\", s)", "cj": "println(s)"}
+{"go": "fmt.Println(pi * r * r)", "cj": "println(pi * r * r)"}
+{"go": "area := pi * r * r; fmt.Println(area)", "cj": "var area = pi * r * r; println(area)"}
+{"go": "for n < 3 { fmt.Println(n); n++ }", "cj": "while (n < 3) { println(n); n += 1 }"}
+{"go": "for i < 5 { fmt.Println(i); i++ }", "cj": "while (i < 5) { println(i); i += 1 }"}
+{"go": "for x < 100 { fmt.Println(x); x++ }", "cj": "while (x < 100) { println(x); x += 1 }"}
+{"go": "for k < 10 { fmt.Println(k); k++ }", "cj": "while (k < 10) { println(k); k += 1 }"}
+{"go": "for j < n { fmt.Println(j); j++ }", "cj": "while (j < n) { println(j); j += 1 }"}
+{"go": "fmt.Println(double(inc(5)))", "cj": "println(double(inc(5)))"}
+{"go": "fmt.Println(inc(double(5)))", "cj": "println(inc(double(5)))"}
+{"go": "fmt.Println(f(g(x)))", "cj": "println(f(g(x)))"}
+{"go": "fmt.Println(f(g(5)))", "cj": "println(f(g(5)))"}
+{"go": "m := map[string]int{\"a\":1,\"b\":2,\"c\":3}", "cj": "var m = HashMap<String, Int64>([(\"a\", 1), (\"b\", 2), (\"c\", 3)])"}
+{"go": "m := map[string]int{\"x\":1,\"y\":2,\"z\":3}", "cj": "var m = HashMap<String, Int64>([(\"x\", 1), (\"y\", 2), (\"z\", 3)])"}
+{"go": "n := map[string]int{\"a\":10,\"b\":20,\"c\":30}", "cj": "var n = HashMap<String, Int64>([(\"a\", 10), (\"b\", 20), (\"c\", 30)])"}
+{"go": "ages := map[string]int{\"alice\":30,\"bob\":25,\"carol\":40}", "cj": "var ages = HashMap<String, Int64>([(\"alice\", 30), (\"bob\", 25), (\"carol\", 40)])"}
+{"go": "for i := 0; i < 10; i++ { if i == 5 { break }; if i%2 == 0 { continue }; fmt.Println(i) }", "cj": "for (i in 0 .. 10) { if (i == 5) { break }; if (i % 2 == 0) { continue }; println(i) }"}
+{"go": "for i := 0; i < 20; i++ { if i == 10 { break }; if i%3 == 0 { continue }; fmt.Println(i) }", "cj": "for (i in 0 .. 20) { if (i == 10) { break }; if (i % 3 == 0) { continue }; println(i) }"}
+{"go": "func (r Rectangle) Area() int { return r.W * r.H }", "cj": "func (r: Rectangle) Area(): Int64 { return r.W * r.H }"}
+{"go": "func (b Box) Volume() int { return b.W * b.H * b.D }", "cj": "func (b: Box) Volume(): Int64 { return b.W * b.H * b.D }"}
+{"go": "func (s Square) Area() int { return s.side * s.side }", "cj": "func (s: Square) Area(): Int64 { return s.side * s.side }"}
+{"go": "func (r Rect) Perimeter() int { return 2 * (r.W + r.H) }", "cj": "func (r: Rect) Perimeter(): Int64 { return 2 * (r.W + r.H) }"}
+{"go": "func (p Point) DistSq() int { return p.x * p.x + p.y * p.y }", "cj": "func (p: Point) DistSq(): Int64 { return p.x * p.x + p.y * p.y }"}

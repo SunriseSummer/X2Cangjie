@@ -126,12 +126,43 @@ class Anonymization:
 
 def _classify(tok: str) -> str:
     if tok.startswith('"') and tok.endswith('"'):
+        # Cangjie interpolated strings (``"${expr}"``) embed live code
+        # references — anonymising them would erase the binding to the
+        # surrounding ``ID*`` placeholders and cause the subset-check
+        # at retrieval time to reject the template.  Keep them verbatim
+        # so deanonymisation can rewrite the embedded identifiers via
+        # the chunk-level mapping.
+        if "${" in tok:
+            return "keep"
+        # Tiny "glue" string literals (single space, empty, newline)
+        # are constants used as joiners in templates.  Anonymising
+        # them would introduce STR placeholders not present in the
+        # caller query and reject otherwise-valid template matches.
+        body = tok[1:-1]
+        if body in ("", " ", "\\n", "\\t", ", ", ": ", " = ", "=", " - ", " + "):
+            return "keep"
+        # ``fmt.Printf`` format strings contain ``%s``/``%d``/``%v``…
+        # placeholders that drive the *structure* of the output.  If
+        # we anonymise them all to ``STR0`` the engine sees identical
+        # keys for every ``Printf`` call and arbitrary template wins,
+        # so keep formatted strings verbatim.
+        if "%" in body:
+            return "keep"
         return "str"
     if tok.startswith("'") and tok.endswith("'"):
         return "chr"
     if tok.startswith("`") and tok.endswith("`"):
         return "str"
     if _INT_RE.match(tok) or _FLOAT_RE.match(tok):
+        # Tiny constant numeric literals (``0``/``1``/``-1``) appear
+        # as constant glue in templates (``i += 1``, ``count = 0``,
+        # ``return -1``) that the model must reproduce verbatim
+        # regardless of the surrounding placeholders.  Anonymising
+        # them creates spurious NUM placeholders that the
+        # placeholder-subset check would then require the query to
+        # also contain, rejecting otherwise-valid templates.
+        if tok in ("0", "1", "-1"):
+            return "keep"
         return "num"
     if tok in KEEP_TOKENS:
         return "keep"
@@ -145,6 +176,24 @@ def _classify(tok: str) -> str:
     if _IDENT_RE.match(tok):
         return "id"
     return "keep"
+
+
+_INTERP_RE = re.compile(r"\$\{([^}]+)\}")
+
+
+def _rewrite_interp(tok: str, mapping: Dict[str, str]) -> str:
+    """Rewrite ``${name}`` interpolation placeholders inside a string
+    literal token using ``mapping``.  Names absent from ``mapping`` are
+    left as-is.  This is what makes Cangjie string-interpolation
+    templates round-trip through anonymisation symmetrically with the
+    surrounding token-level ``ID*`` placeholders.
+    """
+    if "${" not in tok:
+        return tok
+    return _INTERP_RE.sub(
+        lambda m: "${" + mapping.get(m.group(1), m.group(1)) + "}",
+        tok,
+    )
 
 
 def anonymize_tokens(tokens: List[str]) -> Tuple[List[str], Anonymization]:
@@ -186,7 +235,37 @@ def anonymize_tokens(tokens: List[str]) -> Tuple[List[str], Anonymization]:
                 anon.chr_map[ph] = tok
             out.append(f"CHR{chr_idx[tok]}")
         else:
-            out.append(tok)
+            # ``keep``: still rewrite any ``${name}`` interpolations
+            # inside string literals so the anonymised template binds
+            # to the surrounding ID-placeholders.
+            if tok.startswith('"') and "${" in tok:
+                # First pass — collect identifiers referenced by
+                # interpolation that haven't been bound yet so they
+                # share IDs with later occurrences in the chunk.
+                for m in _INTERP_RE.finditer(tok):
+                    name = m.group(1).strip()
+                    # only single-identifier interpolations get a
+                    # placeholder; more complex expressions are left
+                    # alone (kept verbatim).
+                    if _IDENT_RE.match(name) and name not in KEEP_TOKENS \
+                            and name != "_":
+                        if name not in id_idx:
+                            id_idx[name] = len(id_idx)
+                            anon.id_map[f"ID{id_idx[name]}"] = name
+                rewritten = _INTERP_RE.sub(
+                    lambda m: (
+                        "${" + (
+                            f"ID{id_idx[m.group(1).strip()]}"
+                            if _IDENT_RE.match(m.group(1).strip())
+                            and m.group(1).strip() in id_idx
+                            else m.group(1)
+                        ) + "}"
+                    ),
+                    tok,
+                )
+                out.append(rewritten)
+            else:
+                out.append(tok)
     return out, anon
 
 
@@ -202,20 +281,51 @@ def deanonymize_tokens(tokens: List[str], anon: Anonymization) -> List[str]:
         elif tok in anon.chr_map:
             out.append(anon.chr_map[tok])
         else:
+            # Cangjie ``"${ID0}"`` interpolations — rewrite each ID
+            # back to its actual identifier from the chunk's anon map.
+            if tok.startswith('"') and "${" in tok:
+                tok = _rewrite_interp(tok, anon.id_map)
             out.append(tok)
     return out
 
 
+def _normalize_chunk_tokens(toks: List[str]) -> List[str]:
+    """Strip chunker-inserted semicolons that immediately precede a
+    closing brace and any leading/trailing semicolons.  Statement
+    separators between sibling statements (``... ; if ... ;``) are kept
+    so the template structure remains intact, but trailing ``; }``
+    sequences — purely an artefact of the segmenter — are dropped so
+    they don't break exact-template lookups against pair files that
+    don't include them.
+    """
+    out: List[str] = []
+    for tok in toks:
+        if tok == ";" and out and out[-1] == "}":
+            # collapse ``} ;`` → ``}`` (irrelevant statement sep
+            # immediately after a block close).
+            continue
+        if tok == "}" and out and out[-1] == ";":
+            out.pop()
+        out.append(tok)
+    # also drop a trailing semicolon at end-of-chunk.
+    while out and out[-1] == ";":
+        out.pop()
+    while out and out[0] == ";":
+        out.pop(0)
+    return out
+
+
 def anonymize_text(text: str) -> Tuple[str, Anonymization]:
-    toks, anon = anonymize_tokens(tokenize_text(text))
+    toks = _normalize_chunk_tokens(tokenize_text(text))
+    toks, anon = anonymize_tokens(toks)
     return " ".join(toks), anon
 
 
 def anonymize_pair(go_text: str, cj_text: str) -> Tuple[str, str]:
     """Anonymize a parallel pair, using a *shared* placeholder map so
     the same Go ID maps to the same Cangjie ID."""
-    go_toks = tokenize_text(go_text)
-    cj_toks = tokenize_text(cj_text)
+    go_toks = _normalize_chunk_tokens(tokenize_text(go_text))
+    cj_toks = _normalize_chunk_tokens(tokenize_text(cj_text))
     anon = Anonymization()
     id_idx: Dict[str, int] = {}
     num_idx: Dict[str, int] = {}
@@ -247,6 +357,26 @@ def anonymize_pair(go_text: str, cj_text: str) -> Tuple[str, str]:
                     anon.chr_map[f"CHR{chr_idx[tok]}"] = tok
                 out.append(f"CHR{chr_idx[tok]}")
             else:
+                # ``keep`` — rewrite ``${name}`` interpolations inside
+                # string literals so cross-side ID-bindings hold.
+                if tok.startswith('"') and "${" in tok:
+                    for m in _INTERP_RE.finditer(tok):
+                        name = m.group(1).strip()
+                        if _IDENT_RE.match(name) and name not in KEEP_TOKENS \
+                                and name != "_" and name not in id_idx:
+                            id_idx[name] = len(id_idx)
+                            anon.id_map[f"ID{id_idx[name]}"] = name
+                    tok = _INTERP_RE.sub(
+                        lambda m: (
+                            "${" + (
+                                f"ID{id_idx[m.group(1).strip()]}"
+                                if _IDENT_RE.match(m.group(1).strip())
+                                and m.group(1).strip() in id_idx
+                                else m.group(1)
+                            ) + "}"
+                        ),
+                        tok,
+                    )
                 out.append(tok)
         return out
 
