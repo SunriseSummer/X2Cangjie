@@ -51,7 +51,7 @@ class PredictiveContext:
     """A leaky-integrated context HV used to bias retrieval."""
 
     decay: float = 0.85
-    # Bipolar bipolar HV — starts zero.  Use float for accumulation
+    # Bipolar HV — starts zero.  Use float for accumulation
     # then sign() for sampling.
     _accum: np.ndarray = field(default_factory=lambda: np.zeros(hdc.DIM, dtype=np.float32))
 

@@ -7,9 +7,9 @@
 - 用例总数：**45**
 - 模式覆盖率（confident / chunks）：**97.56%** (160 / 164)
 - Go 源编译（`go vet`）：**45 / 45** (100.00%)
-- Cangjie 编译通过：**19 / 45** (42.22%)
-- 运行输出匹配：**6 / 45** (13.33%)
-- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**58.37%**
+- Cangjie 编译通过：**21 / 45** (46.67%)
+- 运行输出匹配：**8 / 45** (17.78%)
+- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**61.04%**
 
 ## 评分公式
 
@@ -29,7 +29,7 @@
 | `04_if_else` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `05_for_classic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `06_while_for` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `07_functions` | 2 | 1 | 1 | 50% | ✅ | ❌ | ❌ | 20.00% |
+| `07_functions` | 2 | 1 | 1 | 50% | ✅ | ✅ | ✅ | 80.00% |
 | `08_recursion` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `09_fibonacci` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `10_multi_return` | 4 | 4 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
@@ -55,7 +55,7 @@
 | `30_mixed_program` | 8 | 8 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `31_map_basic` | 4 | 4 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `32_string_basics` | 3 | 3 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `33_max_min` | 4 | 2 | 2 | 50% | ✅ | ❌ | ❌ | 20.00% |
+| `33_max_min` | 4 | 2 | 2 | 50% | ✅ | ✅ | ✅ | 80.00% |
 | `34_polymorphism` | 10 | 10 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `35_max_in_slice` | 4 | 4 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `36_gcd` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
@@ -83,7 +83,7 @@
 
 ### `03_vars`
 
-- cjc 诊断：`error: expected declaration, found 'y'`
+- cjc 诊断：`error: undeclared identifier 'y'`
 
 ### `06_while_for`
 
@@ -94,10 +94,6 @@
    got:
   ''
   ```
-
-### `07_functions`
-
-- cjc 诊断：`error: undeclared identifier 'fmt'`
 
 ### `08_recursion`
 
@@ -209,7 +205,7 @@
 
 ### `27_typed_func`
 
-- cjc 诊断：`error: undeclared identifier 'fmt'`
+- cjc 诊断：`error: undeclared identifier 'Process'`
 
 ### `28_count_chars`
 
@@ -254,10 +250,6 @@
    got:
   'hello\nhello\n'
   ```
-
-### `33_max_min`
-
-- cjc 诊断：`error: undeclared identifier 'fmt'`
 
 ### `34_polymorphism`
 

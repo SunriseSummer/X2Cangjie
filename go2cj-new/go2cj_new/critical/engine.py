@@ -153,7 +153,9 @@ class CHIME:
             return "", 0.0
 
         # Strict placeholder-set check: every placeholder appearing in
-        # the candidate template must appear in the input chunk.
+        # the candidate template must appear in the input chunk.  Without
+        # this, deanonymisation would leak dangling ``ID3`` / ``STR2``
+        # tokens into the output and guarantee a compile failure.
         in_set = set(_placeholders_of(anon_go))
         candidates.sort(key=lambda x: x[1], reverse=True)
         seen: set = set()

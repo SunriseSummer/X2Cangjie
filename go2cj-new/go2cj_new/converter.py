@@ -228,9 +228,9 @@ def _is_func_main(chunk: List[Token]) -> bool:
             and chunk[-1].value == "}")
 
 
-def _unfold_main(chunks: List[List[Token]]) -> Tuple[List[List[Token]], bool]:
+def _unfold_main(chunks: List[List[Token]]) -> Tuple[List[List[Token]], List[bool]]:
     """Replace any ``func main(){body}`` chunk with the body's per-stmt
-    chunks.
+    chunks, and return a parallel ``from_main`` flag list.
 
     Motivation: the CHIME associative memory retrieves on a per-chunk
     basis.  Keeping the entire ``main`` body as a single huge chunk is
@@ -238,13 +238,17 @@ def _unfold_main(chunks: List[List[Token]]) -> Tuple[List[List[Token]], bool]:
     OOD pitfall that hurts go2cj v1's end-to-end pass rate).  By
     unfolding the body into individual statements, we get many more
     accurate hits.  The lifted-and-assembled output re-wraps the body
-    in ``main(): Unit { ... return 0 }`` automatically.
+    in ``main() { ... return 0 }`` automatically.
+
+    The ``from_main`` flag is needed because once the body is unfolded
+    the statements look like top-level decls (e.g. ``var y = 10``)
+    which the assembler would otherwise hoist to module scope.  The
+    flag forces them back into the synthesised main body.
     """
     out: List[List[Token]] = []
-    found = False
+    from_main: List[bool] = []
     for ch in chunks:
         if _is_func_main(ch):
-            found = True
             # Drop the leading ``func main () {`` and trailing ``}``.
             body = ch[5:-1]
             # Re-run the same segmenter on the body — bracketed
@@ -252,9 +256,11 @@ def _unfold_main(chunks: List[List[Token]]) -> Tuple[List[List[Token]], bool]:
             # top-level statements split.
             for sub in _segment_chunks(body):
                 out.append(sub)
+                from_main.append(True)
         else:
             out.append(ch)
-    return out, found
+            from_main.append(False)
+    return out, from_main
 
 
 def _render_chunk(chunk: List[Token]) -> str:
@@ -282,6 +288,92 @@ def _render_chunk(chunk: List[Token]) -> str:
 
 
 _NEEDS_COLLECTION = re.compile(r"\b(?:ArrayList|HashMap|HashSet)\b")
+
+
+# --------------------------------------------------------------------------- #
+#  Fallback rewrites                                                          #
+# --------------------------------------------------------------------------- #
+#
+# When the CHIME associative memory has no clean match for a chunk, we emit
+# the chunk's Go text verbatim and rely on overlap between the two languages
+# (binary ops, calls, indexing, var := …).  These tiny lexical rewrites
+# bridge the most common idioms that *don't* overlap so the surrounding
+# program still has a chance of compiling.  These are deliberately kept
+# small and conservative — they are not intended to be a rule-based
+# translator, only to keep the fallback path useful.
+
+_FALLBACK_RULES = [
+    # fmt.Println(x)  →  println(x)   (also Print/Printf as best-effort)
+    (re.compile(r"\bfmt\s*\.\s*Println\s*\("), "println("),
+    (re.compile(r"\bfmt\s*\.\s*Print\s*\("),   "print("),
+    (re.compile(r"\bfmt\s*\.\s*Printf\s*\("),  "print("),
+    # Function decls:  func name(a int, b int) int {  →
+    #                   func name(a: Int64, b: Int64): Int64 {
+    # Conservative: only rewrites when the entire chunk *starts* with
+    # `func` and we can find ``)`` before ``{``.  Keeps `func main()`
+    # untouched (no return type to inject) — that's handled at assemble
+    # time.
+    (re.compile(r"\b(int|int64)\b"),       "Int64"),
+    (re.compile(r"\b(int32)\b"),           "Int32"),
+    (re.compile(r"\b(float32)\b"),         "Float32"),
+    (re.compile(r"\b(float64)\b"),         "Float64"),
+    (re.compile(r"\bbool\b"),              "Bool"),
+    (re.compile(r"\bstring\b"),            "String"),
+    # Go short var:  x := expr  →  var x = expr   (only when at chunk start
+    # so we don't break `for i := 0;` headers etc.).
+    (re.compile(r"^\s*([A-Za-z_]\w*)\s*:=\s*"), r"var \1 = "),
+]
+
+_FUNC_SIG_RE = re.compile(
+    r"^func\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*([A-Za-z_]\w*)?\s*\{",
+    flags=re.S,
+)
+
+
+def _rewrite_func_signature(text: str) -> str:
+    """Rewrite a leading Go ``func`` signature into Cangjie shape.
+
+    Only rewrites when the chunk starts with ``func name(params) ret {``
+    and the params look like ``a int, b int`` (Go-style ``name type``).
+    Cangjie wants ``a: Int64, b: Int64`` and ``: Int64`` after the param
+    list.  ``func main()`` is untouched (Cangjie infers the return type
+    from ``return 0``).
+    """
+    m = _FUNC_SIG_RE.match(text.lstrip())
+    if not m:
+        return text
+    name, params, ret = m.group(1), m.group(2), m.group(3)
+    if name == "main":
+        return text
+    new_params: List[str] = []
+    for raw in params.split(","):
+        p = raw.strip()
+        if not p:
+            continue
+        bits = p.split()
+        if len(bits) == 2:
+            new_params.append(f"{bits[0]}: {bits[1]}")
+        else:
+            new_params.append(p)
+    rewritten_head = f"func {name}({', '.join(new_params)})"
+    if ret:
+        rewritten_head += f": {ret}"
+    rewritten_head += " {"
+    return _FUNC_SIG_RE.sub(lambda _: rewritten_head, text.lstrip(), count=1)
+
+
+def _fallback_rewrite(go_text: str) -> str:
+    """Apply a pinch of string-level rewrites to a Go chunk.
+
+    The goal is to make the *fallback* (no-CHIME-match) path produce
+    something Cangjie has a chance of compiling, without pretending to
+    be a real translator.  Bigger transformations stay the
+    responsibility of the CHIME engine.
+    """
+    text = _rewrite_func_signature(go_text)
+    for pat, sub in _FALLBACK_RULES:
+        text = pat.sub(sub, text)
+    return text
 
 
 def _cosmetic(text: str) -> str:
@@ -324,13 +416,16 @@ def convert_source(go_source: str, wrap_main: bool = True) -> ConversionResult:
     # short, statement-shaped chunks than on a 200-token main body.
     # NB: after unfolding there is no ``func main`` chunk left, so we
     # want the converter to *synthesise* one around the freed body
-    # statements at assembly time.
-    chunks, _unfolded = _unfold_main(chunks)
+    # statements at assembly time.  ``from_main`` is a parallel flag
+    # list that records which output chunks came from inside ``main``
+    # so we don't accidentally hoist them to module scope.
+    chunks, from_main = _unfold_main(chunks)
 
     # 2. Skim ``package`` / ``import`` and identify ``func main``.
     translatable: List[List[Token]] = []
+    translatable_from_main: List[bool] = []
     has_user_main = False  # set True only if a non-unfolded main remains
-    for ch in chunks:
+    for ch, fm in zip(chunks, from_main):
         if not ch:
             continue
         if ch[0].kind == "KEYWORD" and ch[0].value in ("package", "import"):
@@ -339,6 +434,7 @@ def convert_source(go_source: str, wrap_main: bool = True) -> ConversionResult:
                 and ch[1].value == "main" and ch[2].value == "("):
             has_user_main = True
         translatable.append(ch)
+        translatable_from_main.append(fm)
 
     result = ConversionResult(source="", notes=notes, chunks=len(translatable))
 
@@ -355,24 +451,30 @@ def convert_source(go_source: str, wrap_main: bool = True) -> ConversionResult:
     for ch, cj in zip(translatable, cj_texts):
         cj = cj.strip()
         if not cj:
-            # Fallback: emit the chunk's Go text verbatim.  Many Go
-            # expressions (binary ops, function calls, indexing) are
-            # already valid Cangjie syntax; emitting them gives a
-            # chance of compiling even when associative memory had
-            # no confident match.  At minimum this is far better than
-            # a guaranteed-broken commented placeholder.
+            # Fallback: emit the chunk's Go text verbatim, then run a
+            # tiny set of textual rewrites bridging the most common
+            # idioms (fmt.Println, primitive type names, ``x := …``
+            # short var, Go-style func signature).  Many Go expressions
+            # (binary ops, function calls, indexing) are already valid
+            # Cangjie syntax, so this gives a real chance of compiling
+            # even when the associative memory had no confident match.
             result.fallback_chunks += 1
-            rendered.append(_render_chunk(ch))
+            rendered.append(_fallback_rewrite(_render_chunk(ch)))
         else:
             result.confident_chunks += 1
             rendered.append(cj)
 
     # 4. Classify into top-level decls vs main-body free statements.
+    # Chunks unfolded out of ``func main(){…}`` *always* belong in the
+    # main body, regardless of how their leading token looks (a stray
+    # ``var y = 10`` from inside main must not be hoisted to module
+    # scope).
     top_decls: List[str] = []
     main_body: List[str] = []
-    for ch, cj in zip(translatable, rendered):
+    for ch, cj, fm in zip(translatable, rendered, translatable_from_main):
         first = ch[0].value if ch else ""
-        if first in ("func", "type", "var", "const", "interface", "class"):
+        if (not fm) and first in ("func", "type", "var", "const",
+                                  "interface", "class"):
             top_decls.append(cj)
         else:
             main_body.append(cj)
