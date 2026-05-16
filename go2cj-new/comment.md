@@ -257,7 +257,7 @@ CHIME 没有反向传播，但不是完全静态查表。SOINN 图中的边体�
 CHIME 在每次学习后计算一个简化 avalanche：从刚命中的神经元出发，查看 Hebbian 邻居中有多少与它足够相似、能被当前阈值点燃。然后用稳态规则调整全局阈值：
 
 ```text
-θ(t+1) = θ(t) + η · (σ(t) - 1)
+θ(t+1) = θ(t) + η * (σ(t) - 1)
 ```
 
 如果网络偏超临界，阈值升高；如果偏亚临界，阈值降低。这个机制不是直接写翻译规则，而是在调节“激活能扩散多远”，让关联记忆保持在既不过冷、也不过热的状态。
@@ -271,7 +271,7 @@ CHIME 在每次学习后计算一个简化 avalanche：从刚命中的神经元�
 同一个 Go 片段放在不同上下文中，可能应当偏向不同模板。CHIME 因此在处理一个程序的多个 chunk 时维护一个漏积分上下文 HV：
 
 ```text
-s(t) = decay · s(t-1) + (1 - decay) · hv(chunk_t)
+s(t) = decay * s(t-1) + (1 - decay) * hv(chunk_t)
 ```
 
 推理时，CHIME 同时尝试：
@@ -364,7 +364,7 @@ fallback 很克制，只做少量高确定性文本改写：
 综合质量分公式：
 
 ```text
-score = 0.4 × pattern_coverage + 0.4 × cj_compiles + 0.2 × runs_and_matches_expected
+score = 0.4 * pattern_coverage + 0.4 * cj_compiles + 0.2 * runs_and_matches_expected
 ```
 
 这比只看 `val_template_acc` 更接近真实目标。`val_template_acc` 衡量 held-out 模板是否完全匹配；端到端测试衡量生成的仓颉文件是否能编译、运行、输出正确。
