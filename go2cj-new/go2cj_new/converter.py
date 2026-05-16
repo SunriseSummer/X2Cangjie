@@ -1634,6 +1634,22 @@ _FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
     # rewriter converts to a positional ``Type(val, val, …)``
     # which lines up with the synthesised Cangjie constructor.
     re.compile(r"\b[A-Z][A-Za-z_]\w*\s*\{\s*[A-Za-z_]\w*\s*:\s*[^{}]+\}"),
+    # ``IDENT := IDENT OP …`` short-var declaration with an
+    # arithmetic RHS (``j := i - 1``).  CHIME's small template set
+    # for short-var routinely loses the operator and binds the
+    # variable to just the leading operand (``var j = i``,
+    # off-by-one for insertion-sort key indices).  The
+    # deterministic identity-rewrite ``var x = expr`` keeps the
+    # entire RHS intact.
+    re.compile(r"^\s*[A-Za-z_]\w*\s*:=\s*[A-Za-z_]\w*\s*[+\-*/%]",
+               re.MULTILINE),
+    # ``IDENT = INT_LITERAL`` simple integer assignment.  CHIME
+    # has a habit of retrieving a templated ``IDENT = -IDENT``
+    # (negation) when the LHS already appeared on the RHS of a
+    # preceding chunk in the same template family, e.g.
+    # ``cost = 0`` after ``var cost = 1`` becomes ``cost = -cost``.
+    # The deterministic identity-rewrite preserves the literal.
+    re.compile(r"^\s*[A-Za-z_]\w*\s*=\s*-?\d+\s*$", re.MULTILINE),
 ]
 
 
