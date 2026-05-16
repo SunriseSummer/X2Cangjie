@@ -254,7 +254,7 @@ CHIME 没有反向传播，但不是完全静态查表。SOINN 图中的边体�
 - σ > 1：超临界，激活爆炸扩散，模式区分度下降；
 - σ ≈ 1：临界，动态范围和信息传输能力最大。
 
-CHIME 在每次学习后计算一个简化 avalanche：从刚命中的神经元出发，查看 Hebbian 邻居中有多少与它足够相似、能被当前阈值点燃。然后用稳态规则调整全局阈值：
+CHIME 在每次学习后计算一个简化 avalanche：从刚命中的神经元出发，查看 Hebbian 邻居中有多少与它足够相似、能被当前阈值点燃。然后用稳态规则调整全局阈值。这里 `theta` 表示全局发火阈值，`eta` 表示稳态更新的学习率，`sigma` 表示本次 avalanche 的分支比：
 
 ```text
 theta_next = theta + eta * (sigma - 1)
@@ -366,6 +366,8 @@ fallback 很克制，只做少量高确定性文本改写：
 ```text
 score = 0.4 * pattern_coverage + 0.4 * cj_compiles + 0.2 * runs_and_matches_expected
 ```
+
+其中 `pattern_coverage` 是 confident chunk 占全部 chunk 的比例；`cj_compiles` 是生成仓颉源码能否通过 `cjc` 编译的 0/1 指标；`runs_and_matches_expected` 是二进制能否运行并与 `.expected` 输出逐字节一致的 0/1 指标。
 
 这比只看 `val_template_acc` 更接近真实目标。`val_template_acc` 衡量 held-out 模板是否完全匹配；端到端测试衡量生成的仓颉文件是否能编译、运行、输出正确。
 
