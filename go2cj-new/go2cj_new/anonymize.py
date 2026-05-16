@@ -124,6 +124,12 @@ class Anonymization:
     chr_map: Dict[str, str] = field(default_factory=dict)     # CHR0 → orig
 
 
+_GLUE_STRINGS = frozenset({
+    "", " ", "\\n", "\\t",
+    ", ", ": ", " = ", "=", " - ", " + ",
+})
+
+
 def _classify(tok: str) -> str:
     if tok.startswith('"') and tok.endswith('"'):
         # Cangjie interpolated strings (``"${expr}"``) embed live code
@@ -139,7 +145,7 @@ def _classify(tok: str) -> str:
         # them would introduce STR placeholders not present in the
         # caller query and reject otherwise-valid template matches.
         body = tok[1:-1]
-        if body in ("", " ", "\\n", "\\t", ", ", ": ", " = ", "=", " - ", " + "):
+        if body in _GLUE_STRINGS:
             return "keep"
         # ``fmt.Printf`` format strings contain ``%s``/``%d``/``%v``…
         # placeholders that drive the *structure* of the output.  If
