@@ -1,5 +1,95 @@
 # go2cj-new — 变更历史
 
+## v0.3.8 — 确定性 Go 习语改写器 + 易脆形状兜底 (2026-05-16)
+
+### 指标（cjc 1.0.5，测试用例扩到 50 例）
+
+| 指标 | v0.3.7 (45 例) | **v0.3.8 (50 例)** |
+|---|---|---|
+| 模式覆盖 | 100% | 67.93% |
+| cjc 编译 | 45/45 (100%) | **50/50 (100%)** |
+| 运行匹配 | 44/45 (97.78%) | **49/50 (98.00%)** |
+| 综合质量分 | 99.56% | 86.83% |
+
+`tests/cases/` 在本轮迭代中加入 5 个真实算法用例（`46_knapsack`
+0/1 背包、`47_binary_search` 二分查找、`48_lcs` 最长公共子序列、
+`49_quicksort` 快排、`50_knapsack_full` 多函数混合背包），
+首次跑出来时只有 44/50 能编译、约 40/50 能运行匹配。这些用例
+集中暴露了 CHIME 关联记忆的一类系统性弱点：**当训练集里没有
+"该形状的确切配对"时，CHIME 会按结构相似度检索一条来自完全
+不同程序的模板，让占位符按位置对齐而把变量绑定搞错**（典型例：
+`dp[w] = max(dp[w], dp[w-weights[i]]+values[i])` 被映射成
+`i[dp] = max(i[dp], i[dp-w[weights]]+values[weights])`）。
+
+### 改动 — `converter.py`
+
+* **`_rewrite_go_idioms` 全新一轮确定性改写器**：对一组高频、
+  形状稳定、CHIME 又抓不住的 Go 习语做"模板无关"的转写，
+  正确性来自语法形状本身而非模式匹配。覆盖：
+
+  | Go 习语 | Cangjie 输出 |
+  |---|---|
+  | `make([]T, n)` | `ArrayList<T>(n, {_ => 0})` |
+  | `make([][]T, n)` | `ArrayList<ArrayList<T>>(n, {_ => ArrayList<T>()})` |
+  | `[]T{a,b,c}` | `ArrayList<T>([a, b, c])` |
+  | `[][]T{{…},{…}}` | `ArrayList<ArrayList<T>>([ArrayList<T>([…]),…])` |
+  | `for _, v := range xs {` | `for (v in xs) {` |
+  | `for i := range xs {` | `for (i in 0..(xs).size) {` |
+  | `for i, v := range xs {` | `for (i in 0..(xs).size) { let v = (xs)[i]; …` |
+  | `for i := 0; i < n; i++ {` | `for (i in 0..n) {` |
+  | `for i := 0; i*i <= n; i++ {` | `var i = 0; while (i*i <= n) { … i++ }` |
+  | `a, b = b, a` | `let __tmp_swap = a; a = b; b = __tmp_swap` |
+  | `var x: Float64 = 10` | `var x: Float64 = 10.0` |
+  | `fmt.Println(a, b)` | `println("${a} ${b}")` |
+  | `fmt.Printf("…%s…%d\n", a, b)` | `println("…${a}…${b}")` |
+  | `len(x)` | `x.size` |
+  | `func F() {…}` | `func F(): Unit {…}` |
+
+  其中 `fmt.Println` / `fmt.Printf` 多参数走括号平衡解析
+  （`_balanced_call_rewrite`），保证 `fmt.Println(foo(x, y), z)`
+  也能正确切分。`for init;cond;step` 的非范围形式通过
+  `__cstyle_step__:` 标记把 step 嵌到 while 循环体末尾，
+  由 `_resolve_cstyle_steps` 在装配后扫描配对的 `}` 注入。
+
+* **`_has_fragile_idiom` — 易脆形状兜底**：CHIME 命中（confident）
+  也不一定代表正确。对于经验上**容易模板错位**的形状（双下标
+  `dp[i][j]`、单下标 `arr[idx] = val`、`}else{`、3+ 参数函数调用、
+  `a, b = b, a`、`fmt.Println(a, b)`、`fmt.Printf(...)`、`make`、
+  范围 `for ... range`、C-style for、`var x = INT_LIT` 无类型注解）
+  强制走确定性 fallback，绕开 CHIME 检索。这一改动是把 cjc 编译率
+  从 44/50 推到 50/50 的关键。
+
+* **`_dedup_var_in_block`**：相邻两段 C-style `for i :=` 展开为
+  `var i = …; while (…) { … i++ }` 后会出现同作用域 `var i`
+  二次声明 → Cangjie `redefinition`。新增装配后处理：按花括号深度
+  跟踪同名声明，二次起追加 `_2/_3` 数字后缀，同时把同一作用域
+  内之后的引用同步重命名。
+
+* **`_rewrite_func_signature` 默认 `: Unit`**：原本无返回类型的
+  Go 函数（如 `func quicksort(...)`）转译时省略 Cangjie 返回类型，
+  导致**递归函数推断失败**（cjc 报 "unable to infer return type"）。
+  现在统一显式注入 `: Unit`，对非递归 void 函数也无副作用。
+
+* **`make([][]T, n)` 元素类型与 `make([]T, n)` 对齐**：两者都用
+  `ArrayList`，保证 `dp[i] = make([]T, m+1)` 这种二维 DP 的行
+  赋值不会因为 `Array` vs `ArrayList` 元素类型不匹配而拒绝。
+
+* **`x := expr` 在非行首位置也改写**：之前的 `^\s*IDENT\s*:=`
+  只识别 chunk 开头；CHIME 把 `for (row in matrix) { sum := 0 …`
+  这类合并在一行的语句聚成一个 chunk 后，内部的 `sum := 0` 无法
+  改写。改成 `(^|[;{\s])IDENT\s*:=` 后，行内短变量也能转成
+  `var sum = 0`。
+
+### 唯一未对齐用例
+
+`26_float_math`：Go `fmt.Println(area)` 输出 `12.56`，Cangjie
+`println(area)` 输出 `12.560000`。属于两种语言对 `Float64` 默认
+字符串化的精度差异，非转换器可修复——除非在 `fmt.Println(float)`
+位置额外注入一个剥尾零的辅助函数，但这与"最小确定性改写"原则
+冲突且会牵涉到精度选择的语义假设，故保留现状。
+
+---
+
 ## v0.3.7 — 字符串插值感知 + 占位符常量保持 + 编辑距离归一化 (2026-05-16)
 
 ### 指标（cjc 1.0.5）

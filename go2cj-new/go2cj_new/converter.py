@@ -1261,11 +1261,27 @@ def _rewrite_go_idioms(text: str) -> str:
             if depth != 0:
                 continue
             args_text = text_in[start:j]
+
             class _Synth:
-                def __init__(self, t):
+                """Minimal ``re.Match``-shaped shim.
+
+                The ``make`` callbacks (``_fmt_println`` /
+                ``_fmt_printf``) only read ``group(1)`` — the
+                argument text between the call's parentheses.  We
+                synthesize that view here because Python's
+                ``re.Match`` can't be constructed manually and we
+                need a balanced-paren scan (not a regex) to find
+                the argument span.  ``i`` is intentionally ignored
+                because every consumer asks for the same single
+                captured group.
+                """
+
+                def __init__(self, t: str) -> None:
                     self._t = t
-                def group(self, i):
+
+                def group(self, i: int) -> str:  # noqa: ARG002 - mirror re.Match
                     return self._t
+
             out.append(text_in[last:m.start()])
             out.append(make(_Synth(args_text)))
             last = j + 1
@@ -1326,6 +1342,9 @@ def _rewrite_go_idioms(text: str) -> str:
     )
 
     return text
+
+
+# A small set of regex probes used to *prefer* the deterministic
 # fallback over a confident CHIME retrieval for chunks the
 # associative memory routinely mangles.  See
 # :func:`_has_fragile_idiom` for the rationale.
