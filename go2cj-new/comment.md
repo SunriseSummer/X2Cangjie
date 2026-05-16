@@ -254,11 +254,13 @@ CHIME 没有反向传播，但不是完全静态查表。SOINN 图中的边体�
 - σ > 1：超临界，激活爆炸扩散，模式区分度下降；
 - σ ≈ 1：临界，动态范围和信息传输能力最大。
 
-CHIME 在每次学习后计算一个简化 avalanche：从刚命中的神经元出发，查看 Hebbian 邻居中有多少与它足够相似、能被当前阈值点燃。然后用稳态规则调整全局阈值。这里 `theta` 表示全局发火阈值，`eta` 表示稳态更新的学习率，`sigma` 表示本次 avalanche 的分支比：
+CHIME 在每次学习后计算一个简化 avalanche：从刚命中的神经元出发，查看 Hebbian 邻居中有多少与它足够相似、能被当前阈值点燃。然后用稳态规则调整全局阈值：
 
 ```text
 theta_next = theta + eta * (sigma - 1)
 ```
+
+定义：`theta` = global firing threshold（全局发火阈值），`eta` = homeostatic learning rate（稳态更新学习率），`sigma` = current avalanche branching ratio（当前 avalanche 分支比）。
 
 如果网络偏超临界，阈值升高；如果偏亚临界，阈值降低。这个机制不是直接写翻译规则，而是在调节“激活能扩散多远”，让关联记忆保持在既不过冷、也不过热的状态。
 
@@ -367,7 +369,7 @@ fallback 很克制，只做少量高确定性文本改写：
 score = 0.4 * pattern_coverage + 0.4 * cj_compiles + 0.2 * runs_and_matches_expected
 ```
 
-其中 `pattern_coverage` 是 confident chunk 占全部 chunk 的比例；`cj_compiles` 是生成仓颉源码能否通过 `cjc` 编译的 0/1 指标；`runs_and_matches_expected` 是二进制能否运行并与 `.expected` 输出逐字节一致的 0/1 指标。
+定义：`pattern_coverage` 表示 confident translations chunk 占全部 chunk 的比例，取值范围为 0-1；`cj_compiles` 是生成仓颉源码是否通过 `cjc` 编译的二元指标（成功为 1，失败为 0）；`runs_and_matches_expected` 是二进制是否成功运行且与 `.expected` 输出逐字节一致的二元指标（匹配为 1，不匹配为 0）。
 
 这比只看 `val_template_acc` 更接近真实目标。`val_template_acc` 衡量 held-out 模板是否完全匹配；端到端测试衡量生成的仓颉文件是否能编译、运行、输出正确。
 
