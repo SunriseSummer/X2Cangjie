@@ -1278,6 +1278,44 @@ def _rewrite_go_idioms(text: str) -> str:
         text,
     )
 
+    # --- Struct keyed literal ``Type{F: v, …}`` ------------------- #
+    # Convert to a positional ``Type(v, …)`` call which matches the
+    # synthesised Cangjie ``init(F: T, …)`` constructor (positional
+    # arguments fill the declared fields in order).  Conservative:
+    # only fires when *every* element has the ``IDENT:`` keyed form,
+    # so anonymous map / slice literals (``map[…]{…}``) are skipped.
+    def _struct_keyed(m: re.Match) -> str:
+        type_name = m.group(1)
+        body = m.group(2).strip().rstrip(",")
+        # Split body on top-level commas.
+        parts: List[str] = []
+        depth = 0
+        cur: List[str] = []
+        for ch in body:
+            if ch in "([{":
+                depth += 1
+            elif ch in ")]}":
+                depth -= 1
+            if ch == "," and depth == 0:
+                parts.append("".join(cur).strip())
+                cur = []
+            else:
+                cur.append(ch)
+        if cur:
+            parts.append("".join(cur).strip())
+        vals: List[str] = []
+        for p in parts:
+            km = re.match(r"^([A-Za-z_]\w*)\s*:\s*(.+)$", p, flags=re.S)
+            if not km:
+                return m.group(0)
+            vals.append(km.group(2).strip())
+        return f"{type_name}({', '.join(vals)})"
+    text = re.sub(
+        r"\b([A-Z][A-Za-z_]\w*)\s*\{\s*"
+        r"([A-Za-z_]\w*\s*:\s*[^{}]+?)\s*\}",
+        _struct_keyed, text,
+    )
+
     # --- Multi-argument ``fmt.Println`` / ``fmt.Print`` ---------- #
     # Cangjie's ``println(x)`` takes a single argument; Go's
     # ``fmt.Println(a, b, c)`` prints space-separated.  Translate by
@@ -1569,6 +1607,33 @@ _FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
     # to ``var VAR = START; while (COND) { … VAR = VAR OP …; }``.
     re.compile(r"\bfor\s+[A-Za-z_]\w*\s*:=\s*[^;]+;\s*[^;{]+;\s*"
                r"[A-Za-z_]\w*\s*=\s*[A-Za-z_]\w*\s*[+\-*/%]"),
+    # ``return EXPR`` that contains an arithmetic / unary operator
+    # (``+ - * / %``).  CHIME has only a handful of return
+    # templates and routinely substitutes the wrong literal /
+    # operand from a structurally-similar template (``return -x``
+    # → ``return -1``, ``return a/b`` → ``return a``).  The
+    # deterministic identity-rewrite always keeps the original
+    # expression intact.  Anchored to the *start* of the chunk
+    # (``^`` or after a newline) so it doesn't fire on inline
+    # one-liner method bodies like
+    # ``func (r Rectangle) Area() int { return r.W * r.H }``
+    # whose receiver syntax the deterministic rewriter can't
+    # promote into a Cangjie method.
+    re.compile(r"(?:^|\n)\s*return\b[^{;\n]*?[+\-*/%]"),
+    # ``fmt.Println`` / ``fmt.Printf`` / ``fmt.Print`` whose
+    # *single* argument is itself a function call.  CHIME's
+    # one-arg-call retrieval often substitutes the inner numeric
+    # literal (``fmt.Println(abs(5))`` → ``println("")``).  The
+    # deterministic ``_fmt_println`` handler rewrites this
+    # verbatim into ``println(abs(5))``.
+    re.compile(r"\bfmt\s*\.\s*Print(?:ln|f)?\s*\(\s*"
+               r"[A-Za-z_]\w*\s*\("),
+    # Struct keyed literal ``Type{Field: val, …}`` — CHIME has no
+    # template for keyed literals and routinely drops fields
+    # (``Point{X: 0, Y: 0}`` → ``Point(0)``).  The deterministic
+    # rewriter converts to a positional ``Type(val, val, …)``
+    # which lines up with the synthesised Cangjie constructor.
+    re.compile(r"\b[A-Z][A-Za-z_]\w*\s*\{\s*[A-Za-z_]\w*\s*:\s*[^{}]+\}"),
 ]
 
 
