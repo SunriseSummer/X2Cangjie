@@ -7,9 +7,9 @@
 - 用例总数：**45**
 - 模式覆盖率（confident / chunks）：**97.56%** (160 / 164)
 - Go 源编译（`go vet`）：**45 / 45** (100.00%)
-- Cangjie 编译通过：**24 / 45** (53.33%)
-- 运行输出匹配：**10 / 45** (22.22%)
-- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**64.59%**
+- Cangjie 编译通过：**31 / 45** (68.89%)
+- 运行输出匹配：**18 / 45** (40.00%)
+- 综合质量分（0.4×覆盖率 + 0.4×编译 + 0.2×运行）：**74.37%**
 
 ## 评分公式
 
@@ -24,8 +24,8 @@
 | 用例 | chunks | confident | fallback | 覆盖率 | Go vet | CJ 编译 | 运行 | 评分 |
 |---|---:|---:|---:|---:|:---:|:---:|:---:|---:|
 | `01_hello` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `02_arithmetic` | 7 | 7 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `03_vars` | 8 | 8 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `02_arithmetic` | 7 | 7 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `03_vars` | 8 | 8 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `04_if_else` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `05_for_classic` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `06_while_for` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
@@ -38,16 +38,16 @@
 | `13_nested_for` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `14_if_elif` | 5 | 5 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `15_string_concat` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `16_boolean_logic` | 5 | 5 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `17_fizzbuzz` | 1 | 1 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `16_boolean_logic` | 5 | 5 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `17_fizzbuzz` | 1 | 1 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `18_sum_array` | 3 | 3 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `19_switch` | 5 | 5 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `20_struct_basic` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `20_struct_basic` | 4 | 4 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `21_struct_methods` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `22_interface` | 5 | 5 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `23_break_continue` | 1 | 1 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `24_printf_format` | 3 | 3 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
-| `25_const_block` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
+| `25_const_block` | 2 | 2 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
 | `26_float_math` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `27_typed_func` | 3 | 2 | 1 | 67% | ✅ | ❌ | ❌ | 26.67% |
 | `28_count_chars` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
@@ -63,27 +63,13 @@
 | `38_reverse_slice` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `39_counter` | 8 | 8 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
 | `40_matrix_sum` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `41_range_index` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `41_range_index` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 | `42_swap_tuple` | 4 | 4 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
-| `43_clamp` | 4 | 4 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `44_pair_struct` | 5 | 5 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
-| `45_even_odd` | 2 | 2 | 0 | 100% | ✅ | ❌ | ❌ | 40.00% |
+| `43_clamp` | 4 | 4 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `44_pair_struct` | 5 | 5 | 0 | 100% | ✅ | ✅ | ✅ | 100.00% |
+| `45_even_odd` | 2 | 2 | 0 | 100% | ✅ | ✅ | ❌ | 80.00% |
 
 ## 失败 / 待改进用例诊断
-
-### `02_arithmetic`
-
-- 运行差异：
-  ```
-  want:
-  '13\n7\n30\n3\n1\n'
-   got:
-  '13\n10\n10\n10\n10\n'
-  ```
-
-### `03_vars`
-
-- cjc 诊断：`error: undeclared identifier 'y'`
 
 ### `06_while_for`
 
@@ -133,39 +119,21 @@
 
 - cjc 诊断：`error: undeclared identifier 'c'`
 
-### `16_boolean_logic`
-
-- 运行差异：
-  ```
-  want:
-  'false\ntrue\nfalse\n'
-   got:
-  'true\ntrue\ntrue\n'
-  ```
-
-### `17_fizzbuzz`
-
-- cjc 诊断：`error: unexpected main function in main function body`
-
 ### `18_sum_array`
 
 - cjc 诊断：`error: mismatched types`
 
 ### `19_switch`
 
-- cjc 诊断：`error: expected declaration, found keyword 'return'`
-
-### `20_struct_basic`
-
-- cjc 诊断：`error: mismatched types`
+- cjc 诊断：`error: expected declaration, found keyword 'match'`
 
 ### `21_struct_methods`
 
-- cjc 诊断：`error: undeclared identifier 'Value'`
+- cjc 诊断：`error: 'this' cannot be used outside class or struct or interface`
 
 ### `22_interface`
 
-- cjc 诊断：`error: expected a func name after keyword 'func', found '('`
+- cjc 诊断：`error: expected declaration, found 'English'`
 
 ### `23_break_continue`
 
@@ -185,16 +153,6 @@
   'name=Cangjie year=2024\n'
    got:
   'name=%s year=%d\n\n'
-  ```
-
-### `25_const_block`
-
-- 运行差异：
-  ```
-  want:
-  '60\n'
-   got:
-  '30\n'
   ```
 
 ### `26_float_math`
@@ -232,7 +190,7 @@
   want:
   '20\n6\n'
    got:
-  '6\n'
+  '9\n6\n'
   ```
 
 ### `31_map_basic`
@@ -257,7 +215,7 @@
 
 ### `34_polymorphism`
 
-- cjc 诊断：`error: undeclared identifier 'name'`
+- cjc 诊断：`error: no matching function for operator '()' function call`
 
 ### `36_gcd`
 
@@ -269,31 +227,35 @@
 
 ### `38_reverse_slice`
 
-- cjc 诊断：`error: undeclared identifier 'r'`
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'var'`
 
 ### `39_counter`
 
-- cjc 诊断：`error: undeclared identifier 'count'`
+- cjc 诊断：`error: 'this' cannot be used outside class or struct or interface`
 
 ### `40_matrix_sum`
 
-- cjc 诊断：`error: undeclared identifier 'sum'`
+- cjc 诊断：`error: expected ';' or '<NL>', found keyword 'for'`
 
 ### `41_range_index`
 
-- cjc 诊断：`error: 'values' is not a member of class 'ArrayList<Int64>'`
-
-### `43_clamp`
-
-- cjc 诊断：`error: missing argument for parameter list '(Int64, Int64, Int64)' in call`
-
-### `44_pair_struct`
-
-- cjc 诊断：`error: mismatched types`
+- 运行差异：
+  ```
+  want:
+  '0 1\n1 2\n2 3\n3 4\n4 5\n'
+   got:
+  '1\n2\n3\n4\n5\n'
+  ```
 
 ### `45_even_odd`
 
-- cjc 诊断：`error: cannot convert an integer literal to type '(Int64) -> Bool'`
+- 运行差异：
+  ```
+  want:
+  '1 odd\n2 even\n3 odd\n4 even\n5 odd\n6 even\n'
+   got:
+  'false\ntrue\nfalse\ntrue\nfalse\ntrue\n'
+  ```
 
 
 ## 质量分析

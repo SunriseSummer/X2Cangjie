@@ -91,6 +91,11 @@ def _split_top_level(src: str, semi: str = ";") -> List[str]:
     chunks: List[str] = []
     cur: List[str] = []
     db = dp = ds = 0
+    # Track whether we're inside a Go ``for init; cond; step`` header
+    # so the ``;`` separators inside it do not split the chunk.  We
+    # enter on a top-level ``for`` keyword and exit on the matching
+    # ``{`` that opens the loop body.
+    in_for_header = False
     i, n = 0, len(src)
     in_str = False
     str_ch = ""
@@ -111,8 +116,20 @@ def _split_top_level(src: str, semi: str = ";") -> List[str]:
             str_ch = c
             i += 1
             continue
+        # ``for`` keyword detection — only at depth 0 and as a
+        # whole word.  We need this so the ``;`` separators in a Go
+        # ``for init; cond; step`` header do not split the chunk.
+        if (c == "f" and db == 0 and dp == 0 and ds == 0
+                and src[i:i + 3] == "for"
+                and (i + 3 >= n or not (src[i + 3].isalnum()
+                                        or src[i + 3] == "_"))
+                and (i == 0 or not (src[i - 1].isalnum()
+                                    or src[i - 1] == "_"))):
+            in_for_header = True
         if c == "{":
             db += 1
+            if in_for_header and db == 1:
+                in_for_header = False
         elif c == "}":
             db = max(db - 1, 0)
             if db == 0 and dp == 0 and ds == 0:
@@ -127,26 +144,19 @@ def _split_top_level(src: str, semi: str = ";") -> List[str]:
             ds += 1
         elif c == "]":
             ds = max(ds - 1, 0)
-        elif c == semi and db == 0 and dp == 0 and ds == 0:
+        elif (c == semi and db == 0 and dp == 0 and ds == 0
+              and not in_for_header):
             chunks.append("".join(cur[:-1]).strip())
             cur = []
         elif c == "\n" and db == 0 and dp == 0 and ds == 0:
             cur_str = "".join(cur).strip()
-            # Heuristic: a top-level line that looks like a complete
-            # statement (no trailing operator) is its own chunk.
-            if cur_str and not cur_str.rstrip().endswith((",", "+", "-", "*",
-                                                          "/", "=", "&", "|",
-                                                          "(", "[", "{")):
-                # ``func ... {`` / ``type X struct {`` / etc need their
-                # ``{…}`` body before they're a complete statement, so
-                # we don't split *inside* such a declaration.  Detect
-                # via the trailing token: if it ends with ``{`` we
-                # already excluded above.  ``package main`` and
-                # ``import "fmt"`` are complete statements at top
-                # level and *do* deserve their own chunk — previously
-                # the leading-keyword check refused to split them too,
-                # which collapsed whole Go files into a single chunk
-                # at training time.
+            # Split on every top-level newline.  Previously we tried to
+            # be clever and refuse to split when the trailing token
+            # looked like an "operator" — but ``import std.collection.*``
+            # ends with ``*`` and that gentleness collapsed entire
+            # Cangjie files into one chunk.  Brace balance alone is a
+            # sufficient guard against splitting mid-statement.
+            if cur_str:
                 chunks.append(cur_str)
                 cur = []
         i += 1
@@ -219,12 +229,21 @@ def _load_programs() -> List[Tuple[str, str]]:
         if len(go_chunks) != len(cj_chunks):
             continue
         for g, c in zip(go_chunks, cj_chunks):
-            pairs.append((g, c))
-            # If this chunk is a main body, *also* emit each of its
-            # inner statements as a separate training pair.  The
-            # whole-main pair is still kept so we can fall back to it
-            # if the inference-time chunker fails to unfold.
-            pairs.extend(_unfold_main_body(g, c))
+            # If this is a paired ``func main(){…}`` / ``main(){…}``
+            # chunk, emit the body's per-statement pairs *instead of*
+            # the whole-main pair.  Reason: at inference time the
+            # converter's ``_unfold_main`` always strips ``main`` and
+            # rebuilds it from per-statement chunks, so a stored
+            # whole-main template can only ever match a *missed*
+            # unfolding — and worse, when it does match, it adds an
+            # extra ``main(){…}`` wrapper *inside* the synthesised
+            # main, producing nested ``main() { main() { … } }`` (we
+            # observed exactly this on ``17_fizzbuzz`` in v0.3.3).
+            unfolded = _unfold_main_body(g, c)
+            if unfolded:
+                pairs.extend(unfolded)
+            else:
+                pairs.append((g, c))
     return pairs
 
 
@@ -275,6 +294,17 @@ def train(seed: int = 0, val_frac: float = 0.10, verbose: bool = True) -> CHIME:
         if pred.strip() == anon_cj.strip():
             correct += 1
     val_acc = correct / max(1, len(val))
+
+    # After measuring validation accuracy, fold the held-out pairs
+    # back into the engine so the *deployed* model has seen every
+    # curated chunk.  CHIME has no backprop / overfitting failure
+    # mode — the substrate is just associative memory, so withholding
+    # supervision from the deployed model would only hurt downstream
+    # retrieval.  We do this *after* val measurement so val_acc still
+    # reflects true held-out generalisation.
+    for go_text, cj_text in val:
+        anon_go, anon_cj = anonymize_pair(go_text, cj_text)
+        engine.learn(anon_go, anon_cj)
 
     if verbose:
         s = engine.stats()
