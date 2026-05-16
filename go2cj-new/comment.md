@@ -65,7 +65,7 @@ go2cj_new/critical/model/
       └── meta.json
 ```
 
-训练不是多 epoch 反传。当前实现先对 90% 训练集做一次在线吸收，再轻量 replay 两轮以刷新 Hebbian 边、稳定临界态；测完 held-out `val_template_acc` 后，会把验证集也回灌进部署模型。这样做的理由是：CHIME 的底物是关联记忆，不是靠梯度压缩分布参数的模型；部署时让记忆见到全部策展规则通常只会提升召回。
+训练不是多 epoch 反传。当前实现先对 90% 训练集做一次在线吸收，再轻量 replay 两轮以刷新 Hebbian 边、稳定临界态。测完 held-out `val_template_acc` 后，会把验证集也回灌进部署模型。这样做的理由是：CHIME 的底物是关联记忆，不是靠梯度压缩分布参数的模型。部署时让记忆见到全部策展规则通常只会提升召回。
 
 ### 2.2 推理 / 转换路径
 
@@ -257,10 +257,10 @@ CHIME 没有反向传播，但不是完全静态查表。SOINN 图中的边体�
 CHIME 在每次学习后计算一个简化 avalanche：从刚命中的神经元出发，查看 Hebbian 邻居中有多少与它足够相似、能被当前阈值点燃。然后用稳态规则调整全局阈值：
 
 ```text
-theta_next = theta + eta * (sigma - 1)
+theta_t+1 = theta_t + eta * (sigma - 1)
 ```
 
-定义：`theta` = global firing threshold（全局发火阈值），`eta` = homeostatic learning rate（稳态更新学习率），`sigma` = current avalanche branching ratio（当前 avalanche 分支比）。
+定义：`theta_t` = global firing threshold（全局发火阈值），`eta` = homeostatic learning rate（稳态更新学习率），`sigma` = current avalanche branching ratio（当前 avalanche 分支比）。
 
 如果网络偏超临界，阈值升高；如果偏亚临界，阈值降低。这个机制不是直接写翻译规则，而是在调节“激活能扩散多远”，让关联记忆保持在既不过冷、也不过热的状态。
 
@@ -273,7 +273,7 @@ theta_next = theta + eta * (sigma - 1)
 同一个 Go 片段放在不同上下文中，可能应当偏向不同模板。CHIME 因此在处理一个程序的多个 chunk 时维护一个漏积分上下文 HV：
 
 ```text
-state_next = decay * state_prev + (1 - decay) * chunk_hv
+state_t+1 = decay * state_t + (1 - decay) * chunk_hv
 ```
 
 推理时，CHIME 同时尝试：
