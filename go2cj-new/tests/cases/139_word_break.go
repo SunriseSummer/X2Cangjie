@@ -2,27 +2,36 @@ package main
 
 import "fmt"
 
-func wordBreak(s string, dict []string) bool {
-set := map[string]bool{}
-for _, w := range dict {
-set[w] = true
+func rob(nums []int) int {
+if len(nums) == 0 {
+return 0
 }
-n := len(s)
-dp := make([]bool, n+1)
-dp[0] = true
-for i := 1; i <= n; i++ {
-for j := 0; j < i; j++ {
-if dp[j] && set[s[j:i]] {
-dp[i] = true
-break
+if len(nums) == 1 {
+return nums[0]
+}
+prev2 := nums[0]
+if nums[1] > nums[0] {
+prev2 = nums[1]
+}
+prev1 := prev2
+for i := 2; i < len(nums); i++ {
+pick := prev2 + nums[i]
+if i == 2 {
+pick = nums[0] + nums[i]
+}
+if pick > prev1 {
+tmp := prev1
+prev1 = pick
+prev2 = tmp
+} else {
+prev2 = prev1
 }
 }
-}
-return dp[n]
+return prev1
 }
 
 func main() {
-fmt.Println(wordBreak("leetcode", []string{"leet", "code"}))
-fmt.Println(wordBreak("applepenapple", []string{"apple", "pen"}))
-fmt.Println(wordBreak("catsandog", []string{"cats", "dog", "sand", "and", "cat"}))
+fmt.Println(rob([]int{1, 2, 3, 1}))
+fmt.Println(rob([]int{2, 7, 9, 3, 1}))
+fmt.Println(rob([]int{2, 1, 1, 2}))
 }

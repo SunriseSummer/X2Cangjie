@@ -576,7 +576,7 @@ _FALLBACK_RULES = [
     (re.compile(r"(^|[;{\s])([A-Za-z_]\w*)\s*:=\s*"), r"\1var \2 = "),
     # ``len(x)``  →  ``x.size``   — applied last so any preceding
     # rewrites still see the parentheses-form when relevant.
-    (re.compile(r"\blen\s*\(\s*([A-Za-z_]\w*(?:\s*\.\s*[A-Za-z_]\w*)*)\s*\)"),
+    (re.compile(r"\blen\s*\(\s*([A-Za-z_]\w*(?:\s*(?:\.\s*[A-Za-z_]\w*|\[[^\[\]]+\]))*)\s*\)"),
      r"\1.size"),
 ]
 
@@ -1361,6 +1361,10 @@ def _rewrite_go_idioms(text: str) -> str:
         r"\1.add(\2)", text,
     )
     text = re.sub(
+        r"(\b[A-Za-z_]\w*\s*\[[^\[\]]+\])\s*=\s*append\s*\(\s*\1\s*,\s*([^()]+?)\s*\)",
+        r"\1.add(\2)", text,
+    )
+    text = re.sub(
         r"\bappend\s*\(\s*([A-Za-z_]\w*)\s*,\s*([^()]+?)\s*\)",
         r"\1.add(\2)", text,
     )
@@ -1369,8 +1373,21 @@ def _rewrite_go_idioms(text: str) -> str:
     # → ``var (a, b) = f(...)``.  Cangjie tuple destructure uses
     # parens around the binding pattern.
     text = re.sub(
-        r"(^|[;{\s])([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*)\s*:=\s*",
+        r"(^|(?:[;{]\s*)|(?:\n\s*))([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*)\s*:=\s*"
+        r"([^,\n;{}()]+)\s*,\s*([^,\n;{}()]+)",
+        r"\1var \2 = \4; var \3 = \5", text,
+    )
+    text = re.sub(
+        r"(^|(?:[;{]\s*)|(?:\n\s*))([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*)\s*:=\s*",
         r"\1var (\2, \3) = ", text,
+    )
+    text = re.sub(
+        r"(\b[A-Za-z_]\w*\s*\[[^\[\]]+\])\s*\+\+",
+        r"\1 += 1", text,
+    )
+    text = re.sub(
+        r"(\b[A-Za-z_]\w*\s*\[[^\[\]]+\])\s*--",
+        r"\1 -= 1", text,
     )
     # ``return a, b``  →  ``return(a, b)`` for tuple-return funcs.
     text = re.sub(
@@ -1739,6 +1756,8 @@ _FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
     # whose receiver syntax the deterministic rewriter can't
     # promote into a Cangjie method.
     re.compile(r"(?:^|\n)\s*return\b[^{;\n]*?[+\-*/%]"),
+    # ``return arr[i]`` indexed return.
+    re.compile(r"\breturn\s+[A-Za-z_]\w*\s*\[[^\[\]]+\]"),
     # ``fmt.Println`` / ``fmt.Printf`` / ``fmt.Print`` whose
     # *single* argument is itself a function call.  CHIME's
     # one-arg-call retrieval often substitutes the inner numeric
@@ -1758,6 +1777,8 @@ _FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
     # this shape; the deterministic rewriter produces
     # ``ArrayList<T>([T(...), T(...), …])``.
     re.compile(r"\[\s*\]\s*[A-Z][A-Za-z_]\w*\s*\{\s*\{"),
+    # Indexed increment/decrement (``arr[i]++`` / ``arr[i]--``).
+    re.compile(r"[A-Za-z_]\w*\s*\[[^\[\]]+\]\s*(?:\+\+|--)"),
     # ``IDENT := IDENT OP …`` short-var declaration with an
     # arithmetic RHS (``j := i - 1``).  CHIME's small template set
     # for short-var routinely loses the operator and binds the
@@ -1820,6 +1841,9 @@ _FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
     # rewriter handles it correctly.
     re.compile(r"^\s*if\s+[A-Za-z_]\w*\s*(?:<=|>=|<|>|==|!=)\s*"
                r"[A-Za-z_]\w*\s*\{", re.MULTILINE),
+    # ``len(xs[i])`` style length-of-indexed-expr.  CHIME often maps
+    # this to a plain ``len(xs)`` template; fallback keeps indexing.
+    re.compile(r"\blen\s*\(\s*[A-Za-z_]\w*\s*\[[^\[\]]+\]\s*\)"),
 ]
 
 

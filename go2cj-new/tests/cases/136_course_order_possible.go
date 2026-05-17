@@ -17,7 +17,8 @@ q = append(q, i)
 }
 }
 seen := 0
-for head := 0; head < len(q); head++ {
+head := 0
+for head < len(q) {
 u := q[head]
 seen++
 for _, v := range g[u] {
@@ -26,6 +27,7 @@ if indeg[v] == 0 {
 q = append(q, v)
 }
 }
+head++
 }
 return seen == num
 }

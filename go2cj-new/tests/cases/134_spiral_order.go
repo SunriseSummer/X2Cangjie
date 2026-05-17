@@ -35,6 +35,20 @@ return ans
 }
 
 func main() {
-fmt.Println(spiralOrder([][]int{{1, 2, 3}, {4, 5, 6}, {7, 8, 9}}))
-fmt.Println(spiralOrder([][]int{{1, 2, 3, 4}, {5, 6, 7, 8}}))
+a := spiralOrder([][]int{{1, 2, 3}, {4, 5, 6}, {7, 8, 9}})
+b := spiralOrder([][]int{{1, 2, 3, 4}, {5, 6, 7, 8}})
+for i := 0; i < len(a); i++ {
+if i > 0 {
+fmt.Print(" ")
+}
+fmt.Print(a[i])
+}
+fmt.Println()
+for i := 0; i < len(b); i++ {
+if i > 0 {
+fmt.Print(" ")
+}
+fmt.Print(b[i])
+}
+fmt.Println()
 }

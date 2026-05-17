@@ -19,6 +19,8 @@ return ans
 }
 
 func main() {
-fmt.Println(productExceptSelf([]int{1, 2, 3, 4}))
-fmt.Println(productExceptSelf([]int{2, 3, 5}))
+a := productExceptSelf([]int{1, 2, 3, 4})
+b := productExceptSelf([]int{2, 3, 5})
+fmt.Println(a[0], a[1], a[2], a[3])
+fmt.Println(b[0], b[1], b[2])
 }
