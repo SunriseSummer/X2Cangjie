@@ -1086,8 +1086,9 @@ def _rewrite_go_idioms(text: str) -> str:
         size = m.group(2).strip()
         return (f"ArrayList<ArrayList<{inner}>>({size}, "
                 f"{{_ => ArrayList<{inner}>()}})")
+    _SIZE_EXPR_RE = r"((?:[^()]+|\([^()]*\))+?)"
     text = re.sub(
-        r"\bmake\s*\(\s*\[\s*\]\s*\[\s*\]\s*([A-Za-z_]\w*)\s*,\s*([^)]+?)\s*\)",
+        rf"\bmake\s*\(\s*\[\s*\]\s*\[\s*\]\s*([A-Za-z_]\w*)\s*,\s*{_SIZE_EXPR_RE}\s*\)",
         _make_2d, text,
     )
     # ``make([]T, n)``.  Cangjie's ``ArrayList<T>(size: Int64,
@@ -1104,7 +1105,7 @@ def _rewrite_go_idioms(text: str) -> str:
         default = '""' if inner == "String" else ("false" if inner == "Bool" else "0")
         return f"ArrayList<{inner}>({size}, {{_ => {default}}})"
     text = re.sub(
-        r"\bmake\s*\(\s*\[\s*\]\s*([A-Za-z_]\w*)\s*,\s*([^)]+?)\s*\)",
+        rf"\bmake\s*\(\s*\[\s*\]\s*([A-Za-z_]\w*)\s*,\s*{_SIZE_EXPR_RE}\s*\)",
         _make_1d, text,
     )
 
@@ -1370,6 +1371,12 @@ def _rewrite_go_idioms(text: str) -> str:
     text = re.sub(
         r"(^|[;{\s])([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*)\s*:=\s*",
         r"\1var (\2, \3) = ", text,
+    )
+    # ``return a, b``  →  ``return(a, b)`` for tuple-return funcs.
+    text = re.sub(
+        r"(^|[;{\s])return\s+([^,\n;{}]+?)\s*,\s*([^,\n;{}]+?)(?=\s*(?:$|[;\n}]))",
+        r"\1return(\2, \3)",
+        text,
     )
 
     # --- Slice of struct keyed literals ``[]T{{F:v,…}, {F:v,…}}`` --- #
@@ -1644,6 +1651,12 @@ _FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
     # like ``i*i <= n`` or ``i+1 < len(xs)`` still trigger.
     re.compile(r"\bfor\s+[A-Za-z_]\w*\s*:=\s*[^;]+;\s*[^;{]+;\s*"
                r"[^{]*?(?:\+\+|--|\+=|-=)"),
+    # Plain condition-loop ``for cond { ... }`` (Go's while form).
+    # CHIME can mis-retrieve this shape as an ``if cond`` template,
+    # silently dropping loop semantics.  Deterministic fallback
+    # rewrites it via ``for`` → ``while`` parenthesisation.
+    re.compile(r"^\s*for\s+(?![^{}\n]*;)(?![^{}\n]*\brange\b)"
+               r"[^{}\n]+\s*\{", re.MULTILINE),
     # ``if … { … } else { … }`` blocks where both branches sit in
     # the same chunk — CHIME has a habit of retrieving an
     # ``if`` template and dropping the ``else`` arm entirely
@@ -1784,6 +1797,12 @@ _FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
     # keeps the arithmetic intact.
     re.compile(r"\b[A-Za-z_]\w*\s*\[\s*[A-Za-z_]\w*\s*[+\-*/%]\s*"
                r"[A-Za-z_0-9]"),
+    # Binary arithmetic where *both* operands are indexed reads
+    # (``xs[i] + xs[j]`` etc.).  CHIME can mis-retrieve this as a
+    # range expression ``xs[i..j]``.  Deterministic fallback keeps
+    # the original scalar arithmetic.
+    re.compile(r"[A-Za-z_]\w*\s*\[[^\[\]]+\]\s*[+\-*/%]\s*"
+               r"[A-Za-z_]\w*\s*\[[^\[\]]+\]"),
     # Comparison ``arr[i] (op) X`` or ``X (op) arr[i]`` where one
     # side is an indexed read.  CHIME often drops the subscript
     # (``cand < dp[i]`` → ``cand < dp``), turning a scalar
