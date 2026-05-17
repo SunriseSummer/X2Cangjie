@@ -1,5 +1,90 @@
 # go2cj-new — 变更历史
 
+## v0.3.10 — 循环迭代扩张 120→130 例 + 三类确定性修复 (2026-05-17)
+
+### 指标（cjc 1.0.5）
+
+| 指标 | v0.3.9 (120 例) | **v0.3.10 (130 例)** |
+|---|---|---|
+| cjc 编译 | 120/120 (100%) | **130/130 (100%)** |
+| 运行匹配 | 119/120 (99.17%) | **129/130 (99.23%)** |
+| 唯一遗留 | `26_float_math` `%.2f` 输出格式 | 同左（与本轮无关） |
+
+本轮新增 `121_*`~`130_*` 共 10 个大小混合算法用例（prefix sums、
+two-sum、row sums、histogram、matvec、subset sum、sliding window、
+range diff、grid paths with blocks）。首次回归出现 4 个编译失败与 1
+个运行偏差；针对新暴露形状做最小确定性修复后，新增 10 例达到
+**10/10 编译通过 + 10/10 运行匹配**。
+
+### 转换器净增量（`converter.py`）
+
+* `make([]T, SIZE)` / `make([][]T, SIZE)` 的 `SIZE` 匹配放宽到可包含
+  `len(xs)` 一类括号表达式，避免误生成 `len ( xs, {_ => ...})`。
+* 新增 tuple return 归一化：`return a, b` → `return(a, b)`，修复
+  二元返回函数在 Cangjie 侧的语法错误。
+* `_FRAGILE_IDIOM_PROBES` 新增两类探针（强制走确定性回退）：
+  - 双索引算术表达式（`xs[i] + xs[j]`）；
+  - Go while 形态循环（`for cond { ... }`），避免 CHIME 误路由为 `if`。
+
+---
+
+## v0.3.9 — 循环迭代扩张 50→120 例 + 14 类新 fragile 探针 (2026-05-16)
+
+### 指标（cjc 1.0.5）
+
+| 指标 | v0.3.8 (50 例) | **v0.3.9 (120 例)** |
+|---|---|---|
+| cjc 编译 | 50/50 (100%) | **120/120 (100%)** |
+| 运行匹配 | 49/50 (98.00%) | **119/120 (99.17%)** |
+| 唯一遗留 | `26_float_math` `%.2f` 输出格式 | 同左（与本轮无关） |
+
+按"循环迭代优化"方法连续追加 7 轮新用例（每轮 10 例，小/中/大
+混合），共 70 例。前 5 轮在新用例暴露 CHIME 错配时持续打磨
+转换器；最后 2 轮（`101_*`~`120_*`）**完全不改转换器**，仍
+20/20 全部通过——证明确定性 spine 已具备真正的泛化能力。
+
+### 每轮规模与发现的 CHIME 模式失效
+
+| 轮次 | 新增范围 | 主要新形状 | 修复的 CHIME 模式失效 |
+|---|---|---|---|
+| R1 | 51-60 | factorial / sum_range / bubble_sort / prime_sieve | 多维 slice 返回类型、形参重赋值 |
+| R2 | 61-70 | abs / collatz / point_dist / matmul | `return -x`、`Println(call(LIT))`、`Point{X:0,Y:0}` |
+| R3 | 71-80 | gcd_rec / insertion_sort / levenshtein | `j := i-1`、`cost = 0` |
+| R4 | 81-90 | clamp / merge_sorted / coin_change | 3 字段 struct、`append(xs,v)`、`a,b := f()`、`dp[i-c]`、`if c<=i` 误为 while |
+| R5 | 91-100 | quicksort / lis / pair_slice | `best = dp[i]` 角色反转、`[]Pair{{…}}` |
+| R6 | 101-110 | filter_positive / pascal / knapsack | （无新修复）10/10 直接通过 |
+| R7 | 111-120 | sum_product / ackermann / floyd | （无新修复）10/10 直接通过 |
+
+### 转换器净增量（`converter.py`）
+
+* `_FUNC_SIG_RE`：放宽对 `[][]T` 等多维 slice 返回类型的接纳。
+* `_shadow_mutated_params`：新增 post-assembly 段，扫描每个
+  函数体内对形参的 `=` / `OP=` 赋值，自动重命名形参并注入
+  `var p = p_param` 影子（Cangjie 形参默认 immutable）。
+* `_FRAGILE_IDIOMS` 增加 **14** 类形状探针（强制走确定性回退）：
+  自更新 `x = x op …`、`x := y[i]` 索引短变量、`return …
+  (cmp) …` 布尔比较、C-style for 步长 `j = j + i`、`return EXPR
+  含 +-*/%`、`Println(call())`、struct keyed literal、`x := y
+  op …`、`x = INT`、`type T struct {…}` 3+ 字段、`append(…)`、
+  tuple `a, b := f()`、`arr[i±j]` 算术下标、`arr[i] cmp X`、
+  `if ID cmp ID`、`x = arr[i]` 普通赋值、`[]T{{…}}`。
+* `_rewrite_go_idioms` 新增确定性改写：
+  - `type T struct { F1 T1; F2 T2; F3 T3 }` → 多字段 `open class T`
+    （结合现有 `synthesize_class_inits` 自动合成 init）
+  - `Type{F1: v1, F2: v2}` → `Type(v1, v2)` 位置参数构造
+  - `append(xs, v)` / `xs = append(xs, v)` → `xs.add(v)`
+  - `a, b := f(x)` → `var (a, b) = f(x)` 元组解构
+  - `[]T{{F:v,…}, {F:v,…}}` → `ArrayList<T>([T(v,…), T(v,…), …])`
+
+### 收敛判据
+
+R6 + R7 连续两轮"零修改"通过率 = **100%**（20/20 新用例 cjc 编译
+成功且运行输出与 Go 一致），满足"高泛化"标准。总用例规模
+从 50 扩至 120，cjc 编译率始终保持 100%，运行匹配率从 98.00%
+升至 99.17%。
+
+---
+
 ## v0.3.8 — 确定性 Go 习语改写器 + 易脆形状兜底 (2026-05-16)
 
 ### 指标（cjc 1.0.5，测试用例扩到 50 例）

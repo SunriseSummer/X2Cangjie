@@ -691,7 +691,7 @@ def _parenthesise_condition(text: str, keyword: str,
 
 _FUNC_SIG_RE = re.compile(
     r"^func\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*"
-    r"(\[\s*\]\s*[A-Za-z_]\w*"        # ``[]int`` slice return
+    r"((?:\[\s*\]\s*)+[A-Za-z_]\w*"   # ``[]int`` / ``[][]int`` slice return
     r"|\([^)]*\)"                      # ``(int, int)`` tuple return
     r"|[A-Za-z_]\w*"                  # plain identifier return
     r")?\s*\{",
@@ -829,6 +829,128 @@ def _resolve_cstyle_steps(text: str) -> str:
     return text
 
 
+def _shadow_mutated_params(text: str) -> str:
+    """Cangjie function parameters are immutable (implicit ``let``).
+    Go parameters can be freely reassigned.  When a Go function
+    body reassigns a parameter (``n = n / 10``), the literal
+    Cangjie translation fails to compile with::
+
+        error: cannot assign to immutable value
+        note: parameter 'n' is immutable
+
+    We post-process the assembled output by scanning each
+    ``func NAME(p1: T1, p2: T2, …): R { body }`` block and, for
+    every parameter ``p`` whose ``body`` contains an assignment
+    ``p = …`` or ``p OP= …``, rename the signature slot to
+    ``p_param`` and prepend a single ``var p = p_param`` shadow
+    at the top of the body.  This way every existing reference to
+    ``p`` inside the body — including the assignment that caused
+    the error — works against the shadow, and call sites are
+    unaffected (parameter names are positional in Cangjie).
+    ``main`` has no parameters so this pass is a no-op for it.
+    """
+    out: List[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        # Find ``func NAME(...) ...{``.
+        m = re.search(r"\bfunc\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*"
+                      r"(?::[^{]*)?\{", text[i:])
+        if not m:
+            out.append(text[i:])
+            break
+        # Copy leading text up to the function header.
+        head_start = i + m.start()
+        body_start = i + m.end()  # right after ``{``
+        out.append(text[i:body_start])
+        # Locate the matching closing ``}`` of the body.
+        depth = 1
+        j = body_start
+        in_str = False
+        str_ch = ""
+        while j < n and depth > 0:
+            c = text[j]
+            if in_str:
+                if c == "\\" and j + 1 < n:
+                    j += 2
+                    continue
+                if c == str_ch:
+                    in_str = False
+            else:
+                if c in ('"', "'"):
+                    in_str = True
+                    str_ch = c
+                elif c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+            j += 1
+        if depth != 0:
+            # Unbalanced — give up and copy the rest verbatim.
+            out.append(text[body_start:])
+            break
+        body = text[body_start:j]
+        # Parse parameters: split on top-level commas.
+        params_raw = m.group(2)
+        parts: List[str] = []
+        depth_p = 0
+        cur: List[str] = []
+        for ch in params_raw:
+            if ch == "(" or ch == "<" or ch == "[":
+                depth_p += 1
+            elif ch == ")" or ch == ">" or ch == "]":
+                depth_p -= 1
+            if ch == "," and depth_p == 0:
+                parts.append("".join(cur))
+                cur = []
+            else:
+                cur.append(ch)
+        if cur:
+            parts.append("".join(cur))
+        # For each ``name: type`` slot, see whether body mutates name.
+        new_parts: List[str] = []
+        shadows: List[str] = []
+        changed = False
+        for part in parts:
+            stripped = part.strip()
+            sm = re.match(r"^([A-Za-z_]\w*)\s*:\s*(.+)$", stripped)
+            if not sm:
+                new_parts.append(part)
+                continue
+            pname, ptype = sm.group(1), sm.group(2).strip()
+            mut_re = re.compile(rf"\b{re.escape(pname)}\s*"
+                                rf"(?:[+\-*/%]?=)(?!=)")
+            if mut_re.search(body):
+                shadow_name = f"{pname}_param"
+                # Avoid collision with an existing identifier.
+                while re.search(rf"\b{re.escape(shadow_name)}\b", body):
+                    shadow_name += "_"
+                new_parts.append(f"{shadow_name}: {ptype}")
+                shadows.append(f"    var {pname} = {shadow_name}")
+                changed = True
+            else:
+                new_parts.append(part)
+        if changed:
+            # Rewrite the header in the already-emitted output.
+            old_header = text[head_start:body_start]
+            new_header = re.sub(
+                r"\(([^)]*)\)",
+                "(" + ", ".join(p.strip() for p in new_parts) + ")",
+                old_header, count=1,
+            )
+            out[-1] = text[i:head_start] + new_header
+            shadow_block = "\n".join(shadows) + "\n"
+            out.append(shadow_block + body)
+        else:
+            out.append(body)
+        out.append(text[j])  # the closing ``}``
+        i = j + 1
+    return "".join(out)
+
+
+
 def _dedup_var_in_block(text: str) -> str:
     """Rename successive ``var X`` declarations in the same brace
     scope to avoid the ``redefinition of declaration 'X'`` error
@@ -964,8 +1086,9 @@ def _rewrite_go_idioms(text: str) -> str:
         size = m.group(2).strip()
         return (f"ArrayList<ArrayList<{inner}>>({size}, "
                 f"{{_ => ArrayList<{inner}>()}})")
+    _SIZE_EXPR_RE = r"((?:[^()]+|\([^()]*\))+?)"
     text = re.sub(
-        r"\bmake\s*\(\s*\[\s*\]\s*\[\s*\]\s*([A-Za-z_]\w*)\s*,\s*([^)]+?)\s*\)",
+        rf"\bmake\s*\(\s*\[\s*\]\s*\[\s*\]\s*([A-Za-z_]\w*)\s*,\s*{_SIZE_EXPR_RE}\s*\)",
         _make_2d, text,
     )
     # ``make([]T, n)``.  Cangjie's ``ArrayList<T>(size: Int64,
@@ -982,7 +1105,7 @@ def _rewrite_go_idioms(text: str) -> str:
         default = '""' if inner == "String" else ("false" if inner == "Bool" else "0")
         return f"ArrayList<{inner}>({size}, {{_ => {default}}})"
     text = re.sub(
-        r"\bmake\s*\(\s*\[\s*\]\s*([A-Za-z_]\w*)\s*,\s*([^)]+?)\s*\)",
+        rf"\bmake\s*\(\s*\[\s*\]\s*([A-Za-z_]\w*)\s*,\s*{_SIZE_EXPR_RE}\s*\)",
         _make_1d, text,
     )
 
@@ -1154,6 +1277,149 @@ def _rewrite_go_idioms(text: str) -> str:
         r"(-?\d+)(\s*(?:;|$|\n))",
         lambda m: m.group(1) + m.group(2) + ".0" + m.group(3),
         text,
+    )
+
+    # --- ``type NAME struct { F1 T1; F2 T2; … }`` ----------------- #
+    # Convert to ``open class NAME { public var F1: T1; … }``.  The
+    # downstream :func:`synthesize_class_inits` pass adds the
+    # ``public init(...)`` so positional construction
+    # ``NAME(v1, v2, …)`` lines up with the field order.
+    def _struct_decl(m: re.Match) -> str:
+        name = m.group(1)
+        body = m.group(2)
+        # Drop a trailing newline / comment fragments; collapse semis.
+        body = body.strip().rstrip(";")
+        # Split on ``;`` or newlines.
+        fields_text = re.split(r"[;\n]+", body)
+        out_fields: List[str] = []
+        for raw in fields_text:
+            raw = raw.strip()
+            if not raw:
+                continue
+            fm = re.match(r"^([A-Za-z_]\w*)\s+(.+)$", raw)
+            if not fm:
+                continue
+            fname = fm.group(1)
+            ftype = _translate_go_type(fm.group(2).strip())
+            out_fields.append(f"public var {fname}: {ftype}")
+        if not out_fields:
+            return m.group(0)
+        body_out = "\n".join(out_fields)
+        return f"open class {name} {{\n{body_out}\n}}"
+    text = re.sub(
+        r"\btype\s+([A-Z][A-Za-z_]\w*)\s+struct\s*\{([^{}]*)\}",
+        _struct_decl, text,
+    )
+
+    # --- Struct keyed literal ``Type{F: v, …}`` ------------------- #
+    # Convert to a positional ``Type(v, …)`` call which matches the
+    # synthesised Cangjie ``init(F: T, …)`` constructor (positional
+    # arguments fill the declared fields in order).  Conservative:
+    # only fires when *every* element has the ``IDENT:`` keyed form,
+    # so anonymous map / slice literals (``map[…]{…}``) are skipped.
+    def _struct_keyed(m: re.Match) -> str:
+        type_name = m.group(1)
+        body = m.group(2).strip().rstrip(",")
+        # Split body on top-level commas.
+        parts: List[str] = []
+        depth = 0
+        cur: List[str] = []
+        for ch in body:
+            if ch in "([{":
+                depth += 1
+            elif ch in ")]}":
+                depth -= 1
+            if ch == "," and depth == 0:
+                parts.append("".join(cur).strip())
+                cur = []
+            else:
+                cur.append(ch)
+        if cur:
+            parts.append("".join(cur).strip())
+        vals: List[str] = []
+        for p in parts:
+            km = re.match(r"^([A-Za-z_]\w*)\s*:\s*(.+)$", p, flags=re.S)
+            if not km:
+                return m.group(0)
+            vals.append(km.group(2).strip())
+        return f"{type_name}({', '.join(vals)})"
+    text = re.sub(
+        r"\b([A-Z][A-Za-z_]\w*)\s*\{\s*"
+        r"([A-Za-z_]\w*\s*:\s*[^{}]+?)\s*\}",
+        _struct_keyed, text,
+    )
+
+    # --- ``append(xs, v)`` → ``xs.add(v)`` ------------------------ #
+    # Go's built-in ``append`` returns a new slice; in Cangjie the
+    # ArrayList mutates in place via ``.add``.  Translate both the
+    # bare-call form ``append(xs, v)`` (used as an expression
+    # statement) and the canonical assignment form
+    # ``xs = append(xs, v)``.  The latter loses the assignment
+    # because ``add`` doesn't return the list.
+    text = re.sub(
+        r"\b([A-Za-z_]\w*)\s*=\s*append\s*\(\s*\1\s*,\s*([^()]+?)\s*\)",
+        r"\1.add(\2)", text,
+    )
+    text = re.sub(
+        r"\bappend\s*\(\s*([A-Za-z_]\w*)\s*,\s*([^()]+?)\s*\)",
+        r"\1.add(\2)", text,
+    )
+
+    # --- Tuple short-var declaration ``a, b := f(...)`` ----------- #
+    # → ``var (a, b) = f(...)``.  Cangjie tuple destructure uses
+    # parens around the binding pattern.
+    text = re.sub(
+        r"(^|[;{\s])([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*)\s*:=\s*",
+        r"\1var (\2, \3) = ", text,
+    )
+    # ``return a, b``  →  ``return(a, b)`` for tuple-return funcs.
+    text = re.sub(
+        r"(^|[;{\s])return\s+([^,\n;{}]+?)\s*,\s*([^,\n;{}]+?)(?=\s*(?:$|[;\n}]))",
+        r"\1return(\2, \3)",
+        text,
+    )
+
+    # --- Slice of struct keyed literals ``[]T{{F:v,…}, {F:v,…}}`` --- #
+    # Convert each inner ``{F:v, …}`` to a positional ``T(v, …)``
+    # call and wrap the whole slice as
+    # ``ArrayList<T>([T(v,…), T(v,…), …])``.  Conservative: only
+    # fires when the element type is a capitalised identifier and
+    # every element body is a keyed literal.
+    def _slice_struct_lit(m: re.Match) -> str:
+        type_name = m.group(1)
+        body = m.group(2)
+        # Find each balanced ``{...}`` element at the top level.
+        elements: List[str] = []
+        depth = 0
+        cur_start = -1
+        for i, ch in enumerate(body):
+            if ch == "{":
+                if depth == 0:
+                    cur_start = i + 1
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0 and cur_start >= 0:
+                    elements.append(body[cur_start:i])
+                    cur_start = -1
+        if not elements:
+            return m.group(0)
+        call_strs: List[str] = []
+        for elem in elements:
+            # Each elem is ``F1: v1, F2: v2, …``.
+            parts = [p.strip() for p in elem.split(",") if p.strip()]
+            vals: List[str] = []
+            for p in parts:
+                km = re.match(r"^[A-Za-z_]\w*\s*:\s*(.+)$", p, flags=re.S)
+                if not km:
+                    return m.group(0)
+                vals.append(km.group(1).strip())
+            call_strs.append(f"{type_name}({', '.join(vals)})")
+        return f"ArrayList<{type_name}>([{', '.join(call_strs)}])"
+    text = re.sub(
+        r"\[\s*\]\s*([A-Z][A-Za-z_]\w*)\s*"
+        r"\{\s*((?:\{[^{}]*\}\s*,?\s*)+)\}",
+        _slice_struct_lit, text,
     )
 
     # --- Multi-argument ``fmt.Println`` / ``fmt.Print`` ---------- #
@@ -1385,6 +1651,12 @@ _FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
     # like ``i*i <= n`` or ``i+1 < len(xs)`` still trigger.
     re.compile(r"\bfor\s+[A-Za-z_]\w*\s*:=\s*[^;]+;\s*[^;{]+;\s*"
                r"[^{]*?(?:\+\+|--|\+=|-=)"),
+    # Plain condition-loop ``for cond { ... }`` (Go's while form).
+    # CHIME can mis-retrieve this shape as an ``if cond`` template,
+    # silently dropping loop semantics.  Deterministic fallback
+    # rewrites it via ``for`` → ``while`` parenthesisation.
+    re.compile(r"^\s*for\s+(?![^{}\n]*;)(?![^{}\n]*\brange\b)"
+               r"[^{}\n]+\s*\{", re.MULTILINE),
     # ``if … { … } else { … }`` blocks where both branches sit in
     # the same chunk — CHIME has a habit of retrieving an
     # ``if`` template and dropping the ``else`` arm entirely
@@ -1413,6 +1685,141 @@ _FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
     # already valid Cangjie, so the fallback's identity-rewrite is
     # always safe here.
     re.compile(r"\b[A-Za-z_]\w*\s*\(\s*[^,()]+\s*,\s*[^,()]+\s*,\s*[^,()]+"),
+    # ``IDENT = IDENT OP …`` self-update assignment.  CHIME has a
+    # tendency to retrieve a *bare expression* template
+    # (``IDENT OP IDENT``) when the LHS and the first RHS token are
+    # the same identifier, silently dropping the ``IDENT =`` prefix
+    # and turning ``s = s + i`` into ``s + i`` (no-op).  Equally
+    # bad: an unrelated shift template can swap ``/ 10`` for
+    # ``>> 1``.  Probe with a backreference so we only fire on the
+    # genuine self-update shape; CHIME still handles other
+    # assignments fine.
+    re.compile(r"\b([A-Za-z_]\w*)\s*=\s*\1\b\s*[+\-*/%]"),
+    # ``IDENT := IDENT [ … ]`` short-var declaration whose RHS is a
+    # single indexed read.  CHIME routinely retrieves an unrelated
+    # short-var template and substitutes the subscript expression
+    # with a literal from that template, e.g. ``tmp := xs[j]`` →
+    # ``var tmp = xs[0]``.  The deterministic fallback's
+    # ``x := y`` → ``var x = y`` keeps the subscript intact.
+    re.compile(r"\b[A-Za-z_]\w*\s*:=\s*[A-Za-z_]\w*\s*\[[^\[\]]+\]\s*$",
+               re.MULTILINE),
+    # ``IDENT = IDENT [ … ]`` regular assignment whose RHS is a
+    # single indexed read.  CHIME has a template family that
+    # treats one operand as an array and *swaps the subscript
+    # role* (``best = dp[i]`` → ``best[dp] = i``).  The
+    # deterministic identity-rewrite keeps the original shape.
+    re.compile(r"^\s*[A-Za-z_]\w*\s*=\s*[A-Za-z_]\w*\s*\[[^\[\]]+\]\s*$",
+               re.MULTILINE),
+    # ``return EXPR`` whose body is a Go boolean comparison /
+    # logical combinator.  CHIME's small template set conflates
+    # ``return r == original`` with ``return r + original``
+    # (positional alignment against an arithmetic-return template),
+    # so we force the deterministic identity-rewrite which keeps
+    # the ``==`` / ``!=`` / ``<`` / ``>`` / ``&&`` / ``||`` intact.
+    re.compile(r"\breturn\b[^{]*?(==|!=|<=|>=|&&|\|\|)"),
+    # C-style ``for init; cond; step`` whose step is *not* a unit
+    # ``VAR++`` / ``VAR--`` / ``VAR +=`` / ``VAR -=`` but a generic
+    # ``VAR = VAR OP …`` (e.g. ``j = j + i`` in the sieve).  The
+    # narrower ``[+\-*/%]?=|\+\+|--`` probe above misses this
+    # shape; CHIME often retrieves a clean range-form template and
+    # loses the step entirely.  The deterministic rewriter expands
+    # to ``var VAR = START; while (COND) { … VAR = VAR OP …; }``.
+    re.compile(r"\bfor\s+[A-Za-z_]\w*\s*:=\s*[^;]+;\s*[^;{]+;\s*"
+               r"[A-Za-z_]\w*\s*=\s*[A-Za-z_]\w*\s*[+\-*/%]"),
+    # ``return EXPR`` that contains an arithmetic / unary operator
+    # (``+ - * / %``).  CHIME has only a handful of return
+    # templates and routinely substitutes the wrong literal /
+    # operand from a structurally-similar template (``return -x``
+    # → ``return -1``, ``return a/b`` → ``return a``).  The
+    # deterministic identity-rewrite always keeps the original
+    # expression intact.  Anchored to the *start* of the chunk
+    # (``^`` or after a newline) so it doesn't fire on inline
+    # one-liner method bodies like
+    # ``func (r Rectangle) Area() int { return r.W * r.H }``
+    # whose receiver syntax the deterministic rewriter can't
+    # promote into a Cangjie method.
+    re.compile(r"(?:^|\n)\s*return\b[^{;\n]*?[+\-*/%]"),
+    # ``fmt.Println`` / ``fmt.Printf`` / ``fmt.Print`` whose
+    # *single* argument is itself a function call.  CHIME's
+    # one-arg-call retrieval often substitutes the inner numeric
+    # literal (``fmt.Println(abs(5))`` → ``println("")``).  The
+    # deterministic ``_fmt_println`` handler rewrites this
+    # verbatim into ``println(abs(5))``.
+    re.compile(r"\bfmt\s*\.\s*Print(?:ln|f)?\s*\(\s*"
+               r"[A-Za-z_]\w*\s*\("),
+    # Struct keyed literal ``Type{Field: val, …}`` — CHIME has no
+    # template for keyed literals and routinely drops fields
+    # (``Point{X: 0, Y: 0}`` → ``Point(0)``).  The deterministic
+    # rewriter converts to a positional ``Type(val, val, …)``
+    # which lines up with the synthesised Cangjie constructor.
+    re.compile(r"\b[A-Z][A-Za-z_]\w*\s*\{\s*[A-Za-z_]\w*\s*:\s*[^{}]+\}"),
+    # ``[]T{{…}, {…}}`` slice-of-struct keyed literal.  CHIME
+    # leaves the tokens raw because nothing in the trainset has
+    # this shape; the deterministic rewriter produces
+    # ``ArrayList<T>([T(...), T(...), …])``.
+    re.compile(r"\[\s*\]\s*[A-Z][A-Za-z_]\w*\s*\{\s*\{"),
+    # ``IDENT := IDENT OP …`` short-var declaration with an
+    # arithmetic RHS (``j := i - 1``).  CHIME's small template set
+    # for short-var routinely loses the operator and binds the
+    # variable to just the leading operand (``var j = i``,
+    # off-by-one for insertion-sort key indices).  The
+    # deterministic identity-rewrite ``var x = expr`` keeps the
+    # entire RHS intact.
+    re.compile(r"^\s*[A-Za-z_]\w*\s*:=\s*[A-Za-z_]\w*\s*[+\-*/%]",
+               re.MULTILINE),
+    # ``IDENT = INT_LITERAL`` simple integer assignment.  CHIME
+    # has a habit of retrieving a templated ``IDENT = -IDENT``
+    # (negation) when the LHS already appeared on the RHS of a
+    # preceding chunk in the same template family, e.g.
+    # ``cost = 0`` after ``var cost = 1`` becomes ``cost = -cost``.
+    # The deterministic identity-rewrite preserves the literal.
+    re.compile(r"^\s*[A-Za-z_]\w*\s*=\s*-?\d+\s*$", re.MULTILINE),
+    # ``type NAME struct { …; …; … }`` with three or more fields.
+    # CHIME's training set only has 2-field struct templates and
+    # silently truncates extra fields.  The deterministic
+    # struct-decl rewrite emits every declared field.
+    re.compile(r"\btype\s+[A-Z][A-Za-z_]\w*\s+struct\s*\{[^{}]*"
+               r";[^{}]*;[^{}]*\}"),
+    # ``append(xs, v)`` or ``xs = append(xs, v)`` — Cangjie has no
+    # ``append`` builtin; force the deterministic ``.add`` rewrite.
+    re.compile(r"\bappend\s*\("),
+    # ``a, b := f(...)`` tuple short-var.  CHIME's template
+    # retrieval drops one of the LHS bindings or the call args; the
+    # deterministic rewriter emits the literal ``var (a, b) =
+    # f(...)`` Cangjie pattern.
+    re.compile(r"^\s*[A-Za-z_]\w*\s*,\s*[A-Za-z_]\w*\s*:=\s*[A-Za-z_]\w*\s*\(",
+               re.MULTILINE),
+    # Indexed read with arithmetic inside the subscript:
+    # ``arr[i - 1]``, ``dp[i-c]``, ``xs[j+1]``.  CHIME has a
+    # tendency to map this to a Cangjie *range* ``arr[i..c]`` or
+    # to drop the subscript entirely, producing ``cand < dp``
+    # comparisons against the whole collection.  Identity-rewrite
+    # keeps the arithmetic intact.
+    re.compile(r"\b[A-Za-z_]\w*\s*\[\s*[A-Za-z_]\w*\s*[+\-*/%]\s*"
+               r"[A-Za-z_0-9]"),
+    # Binary arithmetic where *both* operands are indexed reads
+    # (``xs[i] + xs[j]`` etc.).  CHIME can mis-retrieve this as a
+    # range expression ``xs[i..j]``.  Deterministic fallback keeps
+    # the original scalar arithmetic.
+    re.compile(r"[A-Za-z_]\w*\s*\[[^\[\]]+\]\s*[+\-*/%]\s*"
+               r"[A-Za-z_]\w*\s*\[[^\[\]]+\]"),
+    # Comparison ``arr[i] (op) X`` or ``X (op) arr[i]`` where one
+    # side is an indexed read.  CHIME often drops the subscript
+    # (``cand < dp[i]`` → ``cand < dp``), turning a scalar
+    # comparison into an illegal ``Int64 < ArrayList<Int64>``.  We
+    # force the deterministic identity rewrite to keep the
+    # subscript intact.
+    re.compile(r"[A-Za-z_]\w*\s*\[[^\[\]]+\]\s*(?:<=|>=|<|>|==|!=)"
+               r"|(?:<=|>=|<|>|==|!=)\s*[A-Za-z_]\w*\s*\["),
+    # ``if IDENT (cmp) IDENT {`` header where *both* sides of the
+    # comparison are bare identifiers (no literal, no subscript,
+    # no arithmetic).  CHIME confuses this shape with a ``for
+    # IDENT (cmp) IDENT {`` (Go's ``while`` form) and emits a
+    # ``while`` keyword, which silently turns the conditional
+    # body into an infinite loop.  The deterministic if-paren
+    # rewriter handles it correctly.
+    re.compile(r"^\s*if\s+[A-Za-z_]\w*\s*(?:<=|>=|<|>|==|!=)\s*"
+               r"[A-Za-z_]\w*\s*\{", re.MULTILINE),
 ]
 
 
@@ -1720,6 +2127,10 @@ def convert_source(go_source: str, wrap_main: bool = True) -> ConversionResult:
     # each loop body is reachable in the same string (chunks have
     # been spliced back into their functions).
     body_text = _resolve_cstyle_steps(body_text)
+    # Cangjie func parameters are immutable; Go's are not.  Shadow
+    # any reassigned param with a local ``var`` to keep the body
+    # legal without changing call sites.
+    body_text = _shadow_mutated_params(body_text)
     # Avoid Cangjie ``redefinition`` errors when two sequential
     # c-style loops in the same scope both expand to ``var i = …``.
     body_text = _dedup_var_in_block(body_text)
