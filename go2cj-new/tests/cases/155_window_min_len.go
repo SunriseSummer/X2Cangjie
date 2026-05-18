@@ -5,9 +5,11 @@ import "fmt"
 func minLen(target int, nums []int) int {
 left := 0
 sum := 0
-best := len(nums) + 1
+const INF = 1 << 30
+best := INF
 for right := 0; right < len(nums); right++ {
-sum += nums[right]
+v := nums[right]
+sum = sum + v
 for sum >= target {
 cur := right - left + 1
 if cur < best {
@@ -17,7 +19,7 @@ sum -= nums[left]
 left++
 }
 }
-if best == len(nums)+1 {
+	if best == INF {
 return 0
 }
 return best

@@ -10,8 +10,10 @@ steps := 0
 end := 0
 far := 0
 for i := 0; i < len(nums)-1; i++ {
-if i+nums[i] > far {
-far = i + nums[i]
+step := nums[i]
+reach := i + step
+if reach > far {
+far = reach
 }
 if i == end {
 steps++
