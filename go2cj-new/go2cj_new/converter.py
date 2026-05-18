@@ -1745,8 +1745,8 @@ _FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
     # before the indexed read.
     re.compile(r"^\s*[A-Za-z_]\w*\s*=\s*[^;\n]*[+\-*/%][^;\n]*\[[^\[\]]+\][^;\n]*$",
                re.MULTILINE),
-    # Same as above but unanchored: catches block chunks where the
-    # assignment appears inside an ``if { ... }`` body.
+    # Same as above but intentionally unanchored: catches block chunks
+    # where the assignment appears inside an ``if { ... }`` body.
     re.compile(r"[A-Za-z_]\w*\s*=\s*[^;\n{}]*\[[^\[\]]+\][^;\n{}]*[+\-*/%][^;\n{}]*"),
     # ``IDENT := EXPR`` short-var where RHS mixes an indexed read and
     # arithmetic (e.g. ``d := nums[i] - minV``).  CHIME may mis-retrieve
@@ -1755,7 +1755,7 @@ _FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
                re.MULTILINE),
     # ``x := len(arr) + 1`` style short-var declaration; CHIME may drop
     # the ``+ 1`` tail when retrieving a plain ``len`` template.
-    re.compile(r"\b[A-Za-z_]\w*\s*:=\s*len\s*\([^)]*\)\s*[+\-*/%]\s*[^;\n]+"),
+    re.compile(r"\b[A-Za-z_]\w*\s*:=\s*len\s*\([^)]*\)\s*[+\-*/%]\s*[^;\n{}]+"),
     # Compound assignment from an indexed read (``sum += nums[right]``).
     # CHIME can drop the subscript and emit ``sum += nums``.
     re.compile(r"^\s*[A-Za-z_]\w*\s*[+\-*/%]=\s*[A-Za-z_]\w*\s*\[[^\[\]]+\]\s*$",
