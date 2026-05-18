@@ -1357,15 +1357,15 @@ def _rewrite_go_idioms(text: str) -> str:
     # ``xs = append(xs, v)``.  The latter loses the assignment
     # because ``add`` doesn't return the list.
     text = re.sub(
-        r"\b([A-Za-z_]\w*)\s*=\s*append\s*\(\s*\1\s*,\s*([^()]+?)\s*\)",
+        r"\b([A-Za-z_]\w*)\s*=\s*append\s*\(\s*\1\s*,\s*(.+?)\s*\)",
         r"\1.add(\2)", text,
     )
     text = re.sub(
-        r"(\b[A-Za-z_]\w*\s*\[[^\[\]]+\])\s*=\s*append\s*\(\s*\1\s*,\s*([^()]+?)\s*\)",
+        r"(\b[A-Za-z_]\w*\s*\[[^\[\]]+\])\s*=\s*append\s*\(\s*\1\s*,\s*(.+?)\s*\)",
         r"\1.add(\2)", text,
     )
     text = re.sub(
-        r"\bappend\s*\(\s*([A-Za-z_]\w*)\s*,\s*([^()]+?)\s*\)",
+        r"\bappend\s*\(\s*([A-Za-z_]\w*)\s*,\s*(.+?)\s*\)",
         r"\1.add(\2)", text,
     )
 
@@ -1437,6 +1437,28 @@ def _rewrite_go_idioms(text: str) -> str:
         r"\[\s*\]\s*([A-Z][A-Za-z_]\w*)\s*"
         r"\{\s*((?:\{[^{}]*\}\s*,?\s*)+)\}",
         _slice_struct_lit, text,
+    )
+
+    # --- ``const ( A = ... B = ... )`` ---------------------------- #
+    # Go const-block form has no direct single-line Cangjie analogue;
+    # expand to one declaration per constant.
+    def _const_block(m: re.Match) -> str:
+        body = m.group(1).strip()
+        items: List[str] = []
+        for km in re.finditer(
+            r"([A-Za-z_]\w*)\s*=\s*(.+?)(?=(?:\s+[A-Za-z_]\w*\s*=)|$)",
+            body,
+            flags=re.S,
+        ):
+            items.append(f"const {km.group(1)} = {km.group(2).strip()}")
+        if not items:
+            return m.group(0)
+        return "\n".join(items)
+    text = re.sub(
+        r"\bconst\s*\(\s*([^)]+?)\s*\)",
+        _const_block,
+        text,
+        flags=re.S,
     )
 
     # --- Multi-argument ``fmt.Println`` / ``fmt.Print`` ---------- #
@@ -1637,6 +1659,8 @@ _FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
                r"[A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?\s*=\s*"
                r"[A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?\s*,\s*"
                r"[A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?"),
+    # Go const block ``const ( A = ... B = ... )``.
+    re.compile(r"^\s*const\s*\(", re.MULTILINE),
     # ``for _, v := range expr`` and friends.
     re.compile(r"\bfor\s+(?:_|[A-Za-z_]\w*)\s*(?:,\s*[A-Za-z_]\w*\s*)?"
                r":=\s*range\b"),
@@ -1712,6 +1736,11 @@ _FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
     # genuine self-update shape; CHIME still handles other
     # assignments fine.
     re.compile(r"\b([A-Za-z_]\w*)\s*=\s*\1\b\s*[+\-*/%]"),
+    # Simple assignment whose RHS mixes indexed reads with arithmetic
+    # (e.g. ``best = prices[i] - minP``). CHIME can misroute this to
+    # unrelated ``.add`` templates.
+    re.compile(r"^\s*[A-Za-z_]\w*\s*=\s*[^;\n]*\[[^\[\]]+\][^;\n]*[+\-*/%][^;\n]*$",
+               re.MULTILINE),
     # ``IDENT := IDENT [ … ]`` short-var declaration whose RHS is a
     # single indexed read.  CHIME routinely retrieves an unrelated
     # short-var template and substitutes the subscript expression
@@ -1766,6 +1795,9 @@ _FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
     # verbatim into ``println(abs(5))``.
     re.compile(r"\bfmt\s*\.\s*Print(?:ln|f)?\s*\(\s*"
                r"[A-Za-z_]\w*\s*\("),
+    # Bare function-call statement ``f(x, y)`` (non-fmt).  CHIME can
+    # misroute these to ``println(f(...))`` templates.
+    re.compile(r"^\s*[A-Za-z_]\w*\s*\([^;{}]*\)\s*$", re.MULTILINE),
     # Struct keyed literal ``Type{Field: val, …}`` — CHIME has no
     # template for keyed literals and routinely drops fields
     # (``Point{X: 0, Y: 0}`` → ``Point(0)``).  The deterministic
