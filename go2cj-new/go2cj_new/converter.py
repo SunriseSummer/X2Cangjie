@@ -1741,6 +1741,25 @@ _FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
     # unrelated ``.add`` templates.
     re.compile(r"^\s*[A-Za-z_]\w*\s*=\s*[^;\n]*\[[^\[\]]+\][^;\n]*[+\-*/%][^;\n]*$",
                re.MULTILINE),
+    # ``x = a + arr[i]`` variant where the arithmetic operator appears
+    # before the indexed read.
+    re.compile(r"^\s*[A-Za-z_]\w*\s*=\s*[^;\n]*[+\-*/%][^;\n]*\[[^\[\]]+\][^;\n]*$",
+               re.MULTILINE),
+    # Same as above but unanchored: catches block chunks where the
+    # assignment appears inside an ``if { ... }`` body.
+    re.compile(r"[A-Za-z_]\w*\s*=\s*[^;\n{}]*\[[^\[\]]+\][^;\n{}]*[+\-*/%][^;\n{}]*"),
+    # ``IDENT := EXPR`` short-var where RHS mixes an indexed read and
+    # arithmetic (e.g. ``d := nums[i] - minV``).  CHIME may mis-retrieve
+    # this as a slice-range template.
+    re.compile(r"^\s*[A-Za-z_]\w*\s*:=\s*[^;\n]*\[[^\[\]]+\][^;\n]*[+\-*/%][^;\n]*$",
+               re.MULTILINE),
+    # ``x := len(arr) + 1`` style short-var declaration; CHIME may drop
+    # the ``+ 1`` tail when retrieving a plain ``len`` template.
+    re.compile(r"\b[A-Za-z_]\w*\s*:=\s*len\s*\([^)]*\)\s*[+\-*/%]\s*[^;\n]+"),
+    # Compound assignment from an indexed read (``sum += nums[right]``).
+    # CHIME can drop the subscript and emit ``sum += nums``.
+    re.compile(r"^\s*[A-Za-z_]\w*\s*[+\-*/%]=\s*[A-Za-z_]\w*\s*\[[^\[\]]+\]\s*$",
+               re.MULTILINE),
     # ``IDENT := IDENT [ … ]`` short-var declaration whose RHS is a
     # single indexed read.  CHIME routinely retrieves an unrelated
     # short-var template and substitutes the subscript expression
@@ -1873,6 +1892,10 @@ _FRAGILE_IDIOM_PROBES: List[re.Pattern] = [
     # rewriter handles it correctly.
     re.compile(r"^\s*if\s+[A-Za-z_]\w*\s*(?:<=|>=|<|>|==|!=)\s*"
                r"[A-Za-z_]\w*\s*\{", re.MULTILINE),
+    # ``if`` header with indexed terms / indexed arithmetic
+    # (``if i + nums[i] > far {``).  CHIME can scramble nested index
+    # expressions in this shape.
+    re.compile(r"^\s*if\s+[^{}\n]*\[[^\[\]]+\][^{}\n]*\{", re.MULTILINE),
     # ``len(xs[i])`` style length-of-indexed-expr.  CHIME often maps
     # this to a plain ``len(xs)`` template; fallback keeps indexing.
     re.compile(r"\blen\s*\(\s*[A-Za-z_]\w*\s*\[[^\[\]]+\]\s*\)"),
