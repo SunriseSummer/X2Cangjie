@@ -19,7 +19,7 @@ sum -= nums[left]
 left++
 }
 }
-	if best == INF {
+    if best == INF {
 return 0
 }
 return best
