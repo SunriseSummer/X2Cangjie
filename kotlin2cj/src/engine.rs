@@ -173,6 +173,17 @@ impl Engine {
                 Some(format!("{}.{}", b, mapped))
             }
             Kind::Call { callee, args } => self.render_call(callee, &args),
+            Kind::CollLit { ctor, elem, args } => {
+                if args.is_empty() {
+                    match elem {
+                        Some(e) => Some(format!("{}<{}>()", ctor, e)),
+                        None => Some(format!("{}()", ctor)),
+                    }
+                } else {
+                    let a: Vec<String> = args.iter().map(|x| self.t(*x)).collect::<Option<_>>()?;
+                    Some(format!("{}([{}])", ctor, a.join(", ")))
+                }
+            }
             Kind::Lambda { params, body } => {
                 let inner = self.render_block_inner(body, 0)?;
                 let head = if params.is_empty() {
@@ -400,32 +411,9 @@ impl Engine {
     }
 
     fn render_call(&self, callee: NodeId, args: &[NodeId]) -> Option<String> {
-        // 集合字面量构造器
-        if let Kind::NameRef { original, .. } = self.g.kind(callee) {
-            match original.as_str() {
-                "listOf" | "mutableListOf" | "arrayListOf" => {
-                    return self.render_collection_literal("ArrayList", args);
-                }
-                "setOf" | "mutableSetOf" | "hashSetOf" => {
-                    return self.render_collection_literal("HashSet", args);
-                }
-                "mapOf" | "mutableMapOf" | "hashMapOf" => {
-                    return self.render_collection_literal("HashMap", args);
-                }
-                _ => {}
-            }
-        }
         let c = self.atom(callee)?;
         let a: Vec<String> = args.iter().map(|x| self.t(*x)).collect::<Option<_>>()?;
         Some(format!("{}({})", c, a.join(", ")))
-    }
-
-    fn render_collection_literal(&self, kind: &str, args: &[NodeId]) -> Option<String> {
-        if args.is_empty() {
-            return Some(format!("{}()", kind));
-        }
-        let a: Vec<String> = args.iter().map(|x| self.t(*x)).collect::<Option<_>>()?;
-        Some(format!("{}([{}])", kind, a.join(", ")))
     }
 
     fn render_program(&self, items: &[NodeId]) -> Option<String> {

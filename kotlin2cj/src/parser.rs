@@ -555,6 +555,15 @@ impl Parser {
         self.pos + 1 < self.toks.len() && matches!(&self.toks[self.pos + 1].tok, Tok::Sym(s) if s == "!")
     }
 
+    /// builder 名后紧跟 `(` 或 `<`（泛型实参）。
+    fn peek_after_ident_is_call_or_generic(&self) -> bool {
+        if self.pos + 1 < self.toks.len() {
+            matches!(&self.toks[self.pos + 1].tok, Tok::Sym(s) if s == "(" || s == "<")
+        } else {
+            false
+        }
+    }
+
     fn parse_args(&mut self) -> PResult<Vec<NodeId>> {
         self.expect_sym("(")?;
         self.skip_newlines();
@@ -664,6 +673,28 @@ impl Parser {
                 if name == "null" {
                     self.bump();
                     return Ok(self.g.add(Kind::Raw("None".into())));
+                }
+                // 集合字面量构造器（可带显式泛型实参）
+                if let Some(ctor) = collection_ctor(&name) {
+                    if self.peek_after_ident_is_call_or_generic() {
+                        self.bump(); // 消费 builder 名
+                        let mut elem = None;
+                        if self.eat_sym("<") {
+                            let mut tys = Vec::new();
+                            loop {
+                                tys.push(self.parse_type_raw()?);
+                                if !self.eat_sym(",") {
+                                    break;
+                                }
+                            }
+                            self.expect_sym(">")?;
+                            elem = Some(
+                                tys.iter().map(|t| map_type(t)).collect::<Vec<_>>().join(", "),
+                            );
+                        }
+                        let args = self.parse_args()?;
+                        return Ok(self.g.add(Kind::CollLit { ctor: ctor.to_string(), elem, args }));
+                    }
                 }
                 self.bump();
                 let decl = self.resolve(&name);
@@ -823,6 +854,16 @@ pub fn safe_name(name: &str) -> String {
         format!("`{}`", name)
     } else {
         name.to_string()
+    }
+}
+
+/// 集合字面量构造器名 → 仓颉容器类型名。
+pub fn collection_ctor(name: &str) -> Option<&'static str> {
+    match name {
+        "listOf" | "mutableListOf" | "arrayListOf" => Some("ArrayList"),
+        "setOf" | "mutableSetOf" | "hashSetOf" => Some("HashSet"),
+        "mapOf" | "mutableMapOf" | "hashMapOf" => Some("HashMap"),
+        _ => None,
     }
 }
 

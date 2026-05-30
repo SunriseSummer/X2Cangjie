@@ -9,7 +9,6 @@
 //! 引擎对图做异步松弛（worklist 迭代），每个节点仅依据 *自身 + 邻居* 的
 //! 状态更新自己的翻译，状态变更像沙堆崩塌一样沿边级联传播，直至收敛。
 
-use crate::lexer::StrPart;
 
 pub type NodeId = usize;
 
@@ -70,6 +69,8 @@ pub enum Kind {
     Binary { op: String, lhs: NodeId, rhs: NodeId },
     Range { lo: NodeId, hi: NodeId, inclusive: bool, down: bool, step: Option<NodeId> },
     Call { callee: NodeId, args: Vec<NodeId> },
+    /// 集合字面量构造（listOf / mapOf / setOf 等），记录显式元素类型以支持空集合。
+    CollLit { ctor: String, elem: Option<String>, args: Vec<NodeId> },
     Index { base: NodeId, index: NodeId },
     Member { base: NodeId, name: String },
     Lambda { params: Vec<String>, body: NodeId },
@@ -109,6 +110,7 @@ pub enum TemplatePart {
 pub struct State {
     pub target: Option<String>,
     pub confidence: f32,
+    #[allow(dead_code)]
     pub conflict: bool,
     pub version: u64,
     pub temperature: u32,
@@ -245,6 +247,7 @@ impl Graph {
                 v.push(*callee);
                 v.extend(args);
             }
+            Kind::CollLit { args, .. } => v.extend(args),
             Kind::Index { base, index } => {
                 v.push(*base);
                 v.push(*index);
