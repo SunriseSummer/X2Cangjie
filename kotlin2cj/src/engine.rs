@@ -138,6 +138,11 @@ impl Engine {
                 if op == "to" {
                     return Some(format!("({}, {})", l, r));
                 }
+                if op == "?:" {
+                    let la = self.atom(lhs)?;
+                    let ra = self.atom(rhs)?;
+                    return Some(format!("{} ?? {}", la, ra));
+                }
                 let la = self.atom(lhs)?;
                 let ra = self.atom(rhs)?;
                 Some(format!("{} {} {}", la, op, ra))
@@ -168,6 +173,9 @@ impl Engine {
                     "length" => "size",
                     "toUpperCase" | "uppercase" => "toAsciiUpper",
                     "toLowerCase" | "lowercase" => "toAsciiLower",
+                    "trim" => "trimAscii",
+                    "trimStart" => "trimAsciiStart",
+                    "trimEnd" => "trimAsciiEnd",
                     other => other,
                 };
                 Some(format!("{}.{}", b, mapped))
@@ -261,6 +269,16 @@ impl Engine {
             }
             Kind::While { cond, body } => {
                 Some(format!("while ({}) {}", self.t(cond)?, self.render_block(body)?))
+            }
+            Kind::DoWhile { body, cond } => {
+                Some(format!("do {} while ({})", self.render_block(body)?, self.t(cond)?))
+            }
+            Kind::Repeat { count, body } => {
+                Some(format!("for (_ in 0..{}) {}", self.atom(count)?, self.render_block(body)?))
+            }
+            Kind::Destructure { names } => {
+                let ns: Vec<String> = names.iter().map(|n| self.t(*n)).collect::<Option<_>>()?;
+                Some(format!("({})", ns.join(", ")))
             }
             Kind::ForRange { var, range, body } => {
                 let vn = self.loop_var_name(var)?;

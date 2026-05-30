@@ -53,8 +53,13 @@ pub enum Kind {
     Return { value: Option<NodeId> },
     If { cond: NodeId, then_b: NodeId, else_b: Option<NodeId> },
     While { cond: NodeId, body: NodeId },
+    DoWhile { body: NodeId, cond: NodeId },
     ForRange { var: NodeId, range: NodeId, body: NodeId },
     ForEach { var: NodeId, iter: NodeId, body: NodeId },
+    /// `repeat(n) { ... }` → `for (_ in 0..n) { ... }`
+    Repeat { count: NodeId, body: NodeId },
+    /// 解构循环变量 `(k, v)`，其名字节点用于在作用域内建立引用依赖。
+    Destructure { names: Vec<NodeId> },
     When { subject: Option<NodeId>, arms: Vec<WhenArm> },
 
     // ---- 表达式 ----
@@ -210,6 +215,10 @@ impl Graph {
                 v.push(*cond);
                 v.push(*body);
             }
+            Kind::DoWhile { body, cond } => {
+                v.push(*body);
+                v.push(*cond);
+            }
             Kind::ForRange { var, range, body } => {
                 v.push(*var);
                 v.push(*range);
@@ -220,6 +229,11 @@ impl Graph {
                 v.push(*iter);
                 v.push(*body);
             }
+            Kind::Repeat { count, body } => {
+                v.push(*count);
+                v.push(*body);
+            }
+            Kind::Destructure { names } => v.extend(names),
             Kind::When { subject, arms } => {
                 if let Some(s) = subject {
                     v.push(*s);

@@ -304,6 +304,9 @@ impl Parser {
         if self.is_kw("while") {
             return self.parse_while();
         }
+        if self.is_kw("do") {
+            return self.parse_do_while();
+        }
         if self.is_kw("for") {
             return self.parse_for();
         }
@@ -369,12 +372,50 @@ impl Parser {
         Ok(self.g.add(Kind::While { cond, body }))
     }
 
+    fn parse_do_while(&mut self) -> PResult<NodeId> {
+        self.eat_kw("do");
+        self.skip_newlines();
+        let body = self.parse_block_or_stmt()?;
+        self.skip_newlines();
+        if !self.eat_kw("while") {
+            return Err(format!("line {}: do 之后期望 while", self.line()));
+        }
+        self.expect_sym("(")?;
+        let cond = self.parse_expr()?;
+        self.expect_sym(")")?;
+        Ok(self.g.add(Kind::DoWhile { body, cond }))
+    }
+
     fn parse_for(&mut self) -> PResult<NodeId> {
         self.eat_kw("for");
         self.expect_sym("(")?;
+        self.push_scope();
+        // 解构循环变量：for ((k, v) in m)
+        if self.is_sym("(") {
+            self.bump();
+            let mut name_nodes = Vec::new();
+            loop {
+                let nm = self.expect_ident()?;
+                let nn = self.g.add(Kind::Name { original: nm.clone() });
+                self.declare(&nm, nn);
+                name_nodes.push(nn);
+                if !self.eat_sym(",") {
+                    break;
+                }
+                self.skip_newlines();
+            }
+            self.expect_sym(")")?;
+            self.eat_kw("in");
+            let var = self.g.add(Kind::Destructure { names: name_nodes });
+            let iter_expr = self.parse_expr()?;
+            self.expect_sym(")")?;
+            self.skip_newlines();
+            let body = self.parse_block_or_stmt()?;
+            self.pop_scope();
+            return Ok(self.g.add(Kind::ForEach { var, iter: iter_expr, body }));
+        }
         let var_name = self.expect_ident()?;
         self.eat_kw("in");
-        self.push_scope();
         let var_node = self.g.add(Kind::Name { original: var_name.clone() });
         self.declare(&var_name, var_node);
         let var = self.g.add(Kind::VarDecl {
@@ -674,6 +715,27 @@ impl Parser {
                     self.bump();
                     return Ok(self.g.add(Kind::Raw("None".into())));
                 }
+                // repeat(n) { ... } → for (_ in 0..n) { ... }
+                if name == "repeat" && self.peek_after_ident_is_call_or_generic() {
+                    self.bump(); // repeat
+                    self.expect_sym("(")?;
+                    self.skip_newlines();
+                    let count = self.parse_expr()?;
+                    self.skip_newlines();
+                    self.expect_sym(")")?;
+                    self.skip_newlines();
+                    let body = if self.is_sym("{") {
+                        let lam = self.parse_lambda()?;
+                        if let Kind::Lambda { body, .. } = self.g.kind(lam) {
+                            *body
+                        } else {
+                            lam
+                        }
+                    } else {
+                        self.g.add(Kind::Block { stmts: vec![] })
+                    };
+                    return Ok(self.g.add(Kind::Repeat { count, body }));
+                }
                 // 集合字面量构造器（可带显式泛型实参）
                 if let Some(ctor) = collection_ctor(&name) {
                     if self.peek_after_ident_is_call_or_generic() {
@@ -837,8 +899,10 @@ impl Parser {
             self.expect_sym(">")?;
             s = format!("{}<{}>", s, args.join(","));
         }
-        // 可空类型 `?` —— 去掉
-        self.eat_sym("?");
+        // 可空类型 `?` —— 保留为前缀标记，交由 map_type 处理
+        if self.eat_sym("?") {
+            s = format!("{}?", s);
+        }
         Ok(s)
     }
 }
@@ -870,6 +934,10 @@ pub fn collection_ctor(name: &str) -> Option<&'static str> {
 /// Kotlin 类型 → 仓颉类型。
 pub fn map_type(raw: &str) -> String {
     let raw = raw.trim();
+    // 可空类型：Kotlin `T?` → 仓颉 `?T`
+    if let Some(base) = raw.strip_suffix('?') {
+        return format!("?{}", map_type(base));
+    }
     // 解析泛型
     if let Some(lt) = raw.find('<') {
         let base = &raw[..lt];
