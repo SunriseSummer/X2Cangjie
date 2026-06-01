@@ -330,7 +330,14 @@ impl Engine {
             }
             Kind::ForEach { var, iter, body } => {
                 let vn = self.loop_var_name(var)?;
-                Some(format!("for ({} in {}) {}", vn, self.t(iter)?, self.render_block(body)?))
+                // 遍历字符串时改用 `.runes()` 以得到 Rune（与 Kotlin 的 Char 一致），
+                // 否则仓颉直接迭代字符串会逐字节产出 UInt8。
+                let it = if self.looks_string(iter) {
+                    format!("{}.runes()", self.atom(iter)?)
+                } else {
+                    self.t(iter)?
+                };
+                Some(format!("for ({} in {}) {}", vn, it, self.render_block(body)?))
             }
             Kind::Try { body, catches, finally } => {
                 let mut s = format!("try {}", self.render_block(body)?);
@@ -581,7 +588,7 @@ impl Engine {
                 // List<String>.joinToString(sep?) { transform? }
                 //   → String.join(xs.toArray(), delimiter: sep)
                 //   带 transform 时先 map 成字符串再收集为数组。
-                "joinToString" if self.looks_collection(*base) => {
+                "joinToString" if !self.provably_non_collection(*base) => {
                     let has_lambda = args
                         .last()
                         .map(|a| matches!(self.g.kind(*a), Kind::Lambda { .. }))
@@ -606,67 +613,67 @@ impl Engine {
                 }
                 // 排序：Kotlin 的 sorted*/reversed 返回新列表（不改原集合），
                 // 用立即调用闭包先拷贝再就地排序，整体作为表达式产出新 ArrayList。
-                "sorted" if args.is_empty() && self.looks_collection(*base) => {
+                "sorted" if args.is_empty() && !self.provably_non_collection(*base) => {
                     return Some(format!(
                         "({{ => let _s = collectArrayList({}); sort(_s); _s }})()",
                         self.as_iter(*base)?
                     ));
                 }
-                "sortedDescending" if args.is_empty() && self.looks_collection(*base) => {
+                "sortedDescending" if args.is_empty() && !self.provably_non_collection(*base) => {
                     return Some(format!(
                         "({{ => let _s = collectArrayList({}); sort(_s, descending: true); _s }})()",
                         self.as_iter(*base)?
                     ));
                 }
-                "sortedBy" if args.len() == 1 && self.looks_collection(*base) => {
+                "sortedBy" if args.len() == 1 && !self.provably_non_collection(*base) => {
                     return Some(format!(
                         "({{ => let _s = collectArrayList({}); sort(_s, key: {}); _s }})()",
                         self.as_iter(*base)?, self.t(args[0])?
                     ));
                 }
-                "sortedByDescending" if args.len() == 1 && self.looks_collection(*base) => {
+                "sortedByDescending" if args.len() == 1 && !self.provably_non_collection(*base) => {
                     return Some(format!(
                         "({{ => let _s = collectArrayList({}); sort(_s, key: {}, descending: true); _s }})()",
                         self.as_iter(*base)?, self.t(args[0])?
                     ));
                 }
-                "reversed" if args.is_empty() && self.looks_collection(*base) => {
+                "reversed" if args.is_empty() && !self.provably_non_collection(*base) => {
                     return Some(format!(
                         "({{ => let _s = collectArrayList({}); _s.reverse(); _s }})()",
                         self.as_iter(*base)?
                     ));
                 }
                 // xs.toList()/toMutableList() / (a..b).toList() → 收集为 ArrayList。
-                "toList" | "toMutableList" if args.is_empty() && self.looks_collection(*base) => {
+                "toList" | "toMutableList" if args.is_empty() && !self.provably_non_collection(*base) => {
                     return Some(format!("collectArrayList({})", self.atom(*base)?));
                 }
                 // 返回集合的链式高阶：map/filter 急切收集为 ArrayList，
                 // 既可继续链接、在 for 中遍历，也可存入变量后多次复用 / 取 size / 索引。
-                "map" | "filter" if args.len() == 1 && self.looks_collection(*base) => {
+                "map" | "filter" if args.len() == 1 && !self.provably_non_collection(*base) => {
                     return Some(format!(
                         "collectArrayList({}.{}({}))",
                         self.as_iter(*base)?, name, self.t(args[0])?
                     ));
                 }
                 // 布尔终结操作。
-                "any" | "all" if args.len() == 1 && self.looks_collection(*base) => {
+                "any" | "all" if args.len() == 1 && !self.provably_non_collection(*base) => {
                     return Some(format!("{}.{}({})", self.as_iter(*base)?, name, self.t(args[0])?));
                 }
-                "none" if args.len() == 1 && self.looks_collection(*base) => {
+                "none" if args.len() == 1 && !self.provably_non_collection(*base) => {
                     return Some(format!("!{}.any({})", self.as_iter(*base)?, self.t(args[0])?));
                 }
                 // 计数：带谓词时先 filter，再 count；无参时即 size。
-                "count" if args.len() == 1 && self.looks_collection(*base) => {
+                "count" if args.len() == 1 && !self.provably_non_collection(*base) => {
                     return Some(format!("{}.filter({}).count()", self.as_iter(*base)?, self.t(args[0])?));
                 }
-                "count" if args.is_empty() && self.looks_collection(*base) => {
+                "count" if args.is_empty() && !self.provably_non_collection(*base) => {
                     return Some(format!("{}.size", b));
                 }
                 // 求和：sum() 直接折叠；sumOf { } 先 map 再折叠（按 Int64 处理）。
-                "sum" if args.is_empty() && self.looks_collection(*base) => {
+                "sum" if args.is_empty() && !self.provably_non_collection(*base) => {
                     return Some(format!("{}.fold<Int64>(0, {{acc, x => acc + x}})", self.as_iter(*base)?));
                 }
-                "sumOf" if args.len() == 1 && self.looks_collection(*base) => {
+                "sumOf" if args.len() == 1 && !self.provably_non_collection(*base) => {
                     return Some(format!(
                         "{}.map({}).fold<Int64>(0, {{acc, x => acc + x}})",
                         self.as_iter(*base)?,
@@ -674,7 +681,7 @@ impl Engine {
                     ));
                 }
                 // fold(init) { acc, x -> } → iterator().fold<T>(init, lambda)，T 由 init 字面量推断。
-                "fold" if args.len() == 2 && self.looks_collection(*base) => {
+                "fold" if args.len() == 2 && !self.provably_non_collection(*base) => {
                     let ty = self.lit_type(args[0]);
                     return Some(format!(
                         "{}.fold<{}>({}, {})",
@@ -685,18 +692,18 @@ impl Engine {
                     ));
                 }
                 // reduce { a, b -> } → iterator().reduce(...).getOrThrow()（Kotlin reduce 返回非空 T）。
-                "reduce" if args.len() == 1 && self.looks_collection(*base) => {
+                "reduce" if args.len() == 1 && !self.provably_non_collection(*base) => {
                     return Some(format!("{}.reduce({}).getOrThrow()", self.as_iter(*base)?, self.t(args[0])?));
                 }
                 // max()/min()：折叠取极值并解包；maxOrNull()/minOrNull() 保留 Option 以便 `?:` 级联。
-                "max" | "min" if args.is_empty() && self.looks_collection(*base) => {
+                "max" | "min" if args.is_empty() && !self.provably_non_collection(*base) => {
                     let cmp = if name == "max" { ">" } else { "<" };
                     return Some(format!(
                         "{}.reduce({{a, b => if (a {} b) {{ a }} else {{ b }}}}).getOrThrow()",
                         self.as_iter(*base)?, cmp
                     ));
                 }
-                "maxOrNull" | "minOrNull" if args.is_empty() && self.looks_collection(*base) => {
+                "maxOrNull" | "minOrNull" if args.is_empty() && !self.provably_non_collection(*base) => {
                     let cmp = if name == "maxOrNull" { ">" } else { "<" };
                     return Some(format!(
                         "{}.reduce({{a, b => if (a {} b) {{ a }} else {{ b }}}})",
@@ -876,6 +883,119 @@ impl Engine {
                 false
             }
             Kind::Member { base, name, .. } => self.member_is_collection(*base, name),
+            _ => false,
+        }
+    }
+
+    /// 解析成员字段 `base.field` 是否为集合：Some(true)=集合、Some(false)=非集合、None=无法判定。
+    fn member_field_collection(&self, base: NodeId, field: &str) -> Option<bool> {
+        let cn = self.expr_type_name(base)?;
+        let cn = cn.trim_start_matches('?').to_string();
+        for node in &self.g.nodes {
+            if let Kind::Class { name, ctor_params, members, .. } = &node.kind {
+                if *name != cn {
+                    continue;
+                }
+                for p in ctor_params {
+                    if p.name == field {
+                        return Some(Self::is_coll_type(&p.ty));
+                    }
+                }
+                for m in members {
+                    if let Kind::VarDecl { name_node, ty, init, .. } = self.g.kind(*m) {
+                        if let Kind::Name { original } = self.g.kind(*name_node) {
+                            if original == field {
+                                if let Some(t) = ty {
+                                    return Some(Self::is_coll_type(t));
+                                }
+                                if let Some(i) = init {
+                                    return Some(self.looks_collection(*i));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// 接收者是否「可证明为非集合」：仅当能解析出确定的非集合类型时为真。
+    /// 用于保守地放行集合高阶方法——未知类型一律允许改写（覆盖循环变量、map 视图等），
+    /// 仅在接收者确为用户类/标量/字符串时阻止，避免误改同名自定义方法（如 `count()`）。
+    fn provably_non_collection(&self, id: NodeId) -> bool {
+        match self.g.kind(id) {
+            Kind::CollLit { .. } | Kind::Range { .. } => return false,
+            Kind::IntLit(_) | Kind::FloatLit(_) | Kind::BoolLit(_)
+            | Kind::CharLit(_) | Kind::StrTemplate { .. } => return true,
+            Kind::Member { base, name, .. } => {
+                match self.member_field_collection(*base, name) {
+                    Some(is_coll) => return !is_coll,
+                    None => return false,
+                }
+            }
+            Kind::Call { callee, .. } => {
+                // 构造器调用 `ClassName(...)` → 用户对象，确为非集合（非集合容器构造器）。
+                if let Kind::NameRef { original, .. } = self.g.kind(*callee) {
+                    if self.is_class_name(original) {
+                        return true;
+                    }
+                    if self.func_ret_is_coll(original) {
+                        return false;
+                    }
+                }
+                return false;
+            }
+            Kind::NameRef { decl: Some(d), .. } => {
+                let d = *d;
+                for node in &self.g.nodes {
+                    match &node.kind {
+                        Kind::VarDecl { name_node, ty, init, .. } if *name_node == d => {
+                            if let Some(t) = ty {
+                                return !Self::is_coll_type(t);
+                            }
+                            if let Some(i) = init {
+                                return self.provably_non_collection(*i);
+                            }
+                            return false; // 循环变量等：类型未知，放行
+                        }
+                        Kind::Param { name_node, ty } if *name_node == d => {
+                            return !Self::is_coll_type(ty);
+                        }
+                        _ => {}
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// 启发式判断表达式是否为字符串（用于把 `for (c in s)` 改写为遍历 `s.runes()`）。
+    fn looks_string(&self, id: NodeId) -> bool {
+        match self.g.kind(id) {
+            Kind::StrTemplate { .. } => true,
+            Kind::NameRef { decl: Some(d), .. } => {
+                let d = *d;
+                for node in &self.g.nodes {
+                    match &node.kind {
+                        Kind::VarDecl { name_node, ty, init, .. } if *name_node == d => {
+                            if let Some(t) = ty {
+                                return t == "String";
+                            }
+                            if let Some(i) = init {
+                                return matches!(self.g.kind(*i), Kind::StrTemplate { .. });
+                            }
+                            return false;
+                        }
+                        Kind::Param { name_node, ty } if *name_node == d => {
+                            return ty == "String";
+                        }
+                        _ => {}
+                    }
+                }
+                false
+            }
             _ => false,
         }
     }
