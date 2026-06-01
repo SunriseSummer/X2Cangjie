@@ -1,0 +1,11 @@
+Records: 4
+  name|age|city
+  Alice|30|Tokyo
+  Bob|25|London
+  Carol|35|Paris
+Columns: 3
+  [0] name
+  [1] age
+  [2] city
+Found Bob: age=25, city=London
+Data rows: 3

@@ -144,6 +144,10 @@ impl Engine {
             Kind::Assign { target, op, value } => {
                 let tt = self.t(target)?;
                 let v = self.t(value)?;
+                // String += Rune/non-string: convert RHS to string
+                if op == "+=" && self.looks_string(target) && !self.looks_string(value) {
+                    return Some(format!("{} += {}.toString()", tt, v));
+                }
                 Some(format!("{} {} {}", tt, op, v))
             }
             Kind::Return { value } => match value {
@@ -274,10 +278,10 @@ impl Engine {
         }
         let la = self.atom(lhs)?;
         let ra = self.atom(rhs)?;
-        if op == "+" && (self.looks_string(lhs) || self.looks_string(rhs)) {
+        if (op == "+" || op == "+=") && (self.looks_string(lhs) || self.looks_string(rhs)) {
             let lc = if self.looks_string(lhs) { la.clone() } else { format!("{}.toString()", la) };
             let rc = if self.looks_string(rhs) { ra.clone() } else { format!("{}.toString()", ra) };
-            return Some(format!("{} + {}", lc, rc));
+            return Some(format!("{} {} {}", lc, op, rc));
         }
         if matches!(op, "-" | "+")
             && self.looks_char(lhs)
@@ -322,7 +326,14 @@ impl Engine {
             };
             (bs, "?.")
         } else {
-            (self.atom(base)?, ".")
+            // Auto-unwrap nullable types: if base has type ?T, use .getOrThrow() before member access
+            let raw = self.atom(base)?;
+            let b = if self.is_nullable_expr(base) {
+                format!("{}.getOrThrow()", raw)
+            } else {
+                raw
+            };
+            (b, ".")
         };
         let mapped = match name {
             "length" => "size",
@@ -404,6 +415,7 @@ impl Engine {
         let r = match ret {
             Some(r) => format!(": {}", r),
             None if self.refers_name(body, name) => ": Unit".to_string(),
+            None if is_abstract => ": Unit".to_string(),
             None => String::new(),
         };
         let sig = format!("{}({}){}", name, ps.join(", "), r);
@@ -529,6 +541,19 @@ impl Engine {
         if is_data {
             ifaces.push("ToString".to_string());
         }
+        // Auto-add ToString interface if class has a toString() method
+        if !is_data && !ifaces.contains(&"ToString".to_string()) {
+            let has_to_string = members.iter().any(|&m| {
+                if let Kind::Func { name: fn_name, is_override, .. } = self.g.kind(m) {
+                    fn_name == "toString" && *is_override
+                } else {
+                    false
+                }
+            });
+            if has_to_string {
+                ifaces.push("ToString".to_string());
+            }
+        }
         let sup = if ifaces.is_empty() {
             String::new()
         } else {
@@ -632,6 +657,25 @@ impl Engine {
                         None => {
                             body.push_str(&format!("case _ => {}\n", arm_body));
                         }
+                    }
+                }
+                // 非枚举类型的 match 需要 catch-all 以确保穷举
+                let has_catch_all = arms.iter().any(|a| a.patterns.is_none());
+                if !has_catch_all {
+                    // Check if subject is an enum type (already exhaustive)
+                    let is_enum = arms.iter().any(|a| {
+                        a.patterns.as_ref().map_or(false, |ps| {
+                            ps.iter().any(|p| {
+                                if let Some(s) = self.t(*p) {
+                                    s.contains('.')
+                                } else {
+                                    false
+                                }
+                            })
+                        })
+                    });
+                    if !is_enum {
+                        body.push_str("case _ => ()\n");
                     }
                 }
                 Some(format!("match ({}) {{\n{}}}", s, indent(&body, 1)))

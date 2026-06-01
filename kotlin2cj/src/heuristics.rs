@@ -43,6 +43,10 @@ impl Engine {
                             return Some(t.clone());
                         }
                         if let Some(i) = init {
+                            // Recurse: if init is a NameRef, propagate its type
+                            if let Kind::NameRef { .. } = self.g.kind(*i) {
+                                return self.expr_type_name(*i);
+                            }
                             if let Kind::Call { callee, .. } = self.g.kind(*i) {
                                 if let Kind::NameRef { original, .. } = self.g.kind(*callee) {
                                     if self.is_class_name(original) {
@@ -66,6 +70,14 @@ impl Engine {
             }
         }
         None
+    }
+
+    /// 表达式是否为可空类型（类型以 `?` 开头）。
+    pub(crate) fn is_nullable_expr(&self, id: NodeId) -> bool {
+        if let Some(ty) = self.expr_type_name(id) {
+            return ty.starts_with('?');
+        }
+        false
     }
 
     /// 图中是否存在名为 `name` 的类声明。

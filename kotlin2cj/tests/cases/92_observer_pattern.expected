@@ -1,0 +1,9 @@
+Logger:
+  Click at (10, 20)
+  Key: Enter
+  Click at (30, 40)
+  Key: Escape
+  Click at (50, 60)
+Counter:
+  Clicks: 3, Keys: 2
+Total events: 5

@@ -1,0 +1,16 @@
+=== Running scheduler ===
+  t=5: completed Build
+  t=9: completed Review
+  t=12: completed Test
+  t=13: completed Lint
+  t=15: completed Deploy
+=== Report ===
+Total time: 15
+Tasks completed: 5
+Avg completion time: 10
+=== Batch 2 ===
+  t=1: completed B
+  t=11: completed A
+Total time: 11
+Tasks completed: 2
+Avg completion time: 6

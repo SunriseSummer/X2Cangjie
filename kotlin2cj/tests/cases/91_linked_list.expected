@@ -1,0 +1,8 @@
+List: 1 -> 2 -> 3 -> 4 -> 5
+Length: 5
+Sum: 15
+Reversed: 5 -> 4 -> 3 -> 2 -> 1
+Single: 42
+Single length: 1
+Empty length: 0
+Empty sum: 0

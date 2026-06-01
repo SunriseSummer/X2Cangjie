@@ -1,0 +1,6 @@
+Original: Alice(g=90,a=20), Bob(g=75,a=22), Carol(g=88,a=19), Dave(g=92,a=21), Eve(g=70,a=23)
+By grade: Dave(g=92,a=21), Alice(g=90,a=20), Carol(g=88,a=19), Bob(g=75,a=22), Eve(g=70,a=23)
+By age: Carol(g=88,a=19), Alice(g=90,a=20), Dave(g=92,a=21), Bob(g=75,a=22), Eve(g=70,a=23)
+Passing (>=80): Alice(g=90,a=20), Carol(g=88,a=19), Dave(g=92,a=21)
+Passing count: 3
+Average grade: 83
