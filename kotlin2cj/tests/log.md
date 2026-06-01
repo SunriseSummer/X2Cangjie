@@ -1,9 +1,9 @@
 # kotlin2cj 测试日志
 
-- 用例总数: 160
-- 翻译成功: 160/160
-- 仓颉编译通过: 160/160
-- 运行输出匹配: 160/160
+- 用例总数: 168
+- 翻译成功: 168/168
+- 仓颉编译通过: 168/168
+- 运行输出匹配: 168/168
 
 | 用例 | 翻译 | 编译 | 运行 | 备注 |
 |------|------|------|------|------|
@@ -83,6 +83,14 @@
 | 159_state_machine_lex | ✅ | ✅ | ✅ |  |
 | 15_class | ✅ | ✅ | ✅ |  |
 | 160_custom_iterator | ✅ | ✅ | ✅ |  |
+| 161_multireturn_logic | ✅ | ✅ | ✅ |  |
+| 162_collection_format | ✅ | ✅ | ✅ |  |
+| 163_polymorphism_deep | ✅ | ✅ | ✅ |  |
+| 164_recursive_algo | ✅ | ✅ | ✅ |  |
+| 165_enum_direction | ✅ | ✅ | ✅ |  |
+| 166_math_hash | ✅ | ✅ | ✅ |  |
+| 167_string_process | ✅ | ✅ | ✅ |  |
+| 168_game_of_life | ✅ | ✅ | ✅ |  |
 | 16_class_mut | ✅ | ✅ | ✅ |  |
 | 17_two_classes | ✅ | ✅ | ✅ |  |
 | 18_break_continue | ✅ | ✅ | ✅ |  |

@@ -1,0 +1,6 @@
+Position: (1, 1)
+UP -> DOWN
+DOWN -> UP
+LEFT -> RIGHT
+RIGHT -> LEFT
+(0,0)->(1,0)->(2,0)->(2,-1)->(1,-1)
