@@ -37,6 +37,8 @@ pub enum Kind {
         superclass: Option<String>,
         /// 是否可被继承（`open`/`abstract`/`sealed`）。
         is_open: bool,
+        /// 是否为 `data class`（生成 ToString 以对齐 Kotlin 自动 toString）。
+        is_data: bool,
     },
     /// 枚举类（仅简单具名常量项）。
     Enum {

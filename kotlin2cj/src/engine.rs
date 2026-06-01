@@ -433,7 +433,7 @@ impl Engine {
                     Some(format!("func {}({}){} {}", name, ps.join(", "), r, b))
                 }
             }
-            Kind::Class { name, ctor_params, members, superclass, is_open } => {
+            Kind::Class { name, ctor_params, members, superclass, is_open, is_data } => {
                 let mut body = String::new();
                 // 成员变量（来自主构造参数中带 val/var 的部分）
                 for p in &ctor_params {
@@ -467,10 +467,34 @@ impl Engine {
                     body.push_str(&indent(&mt, 1));
                     body.push('\n');
                 }
+                // data class：生成 toString，对齐 Kotlin 自动 `Name(f1=v1, f2=v2)` 文本表示。
+                // 若用户已自定义 toString 则不重复生成。
+                let has_user_tostring = members.iter().any(|m| {
+                    matches!(self.g.kind(*m), Kind::Func { name, .. } if name == "toString")
+                });
+                if is_data && !ctor_params.is_empty() && !has_user_tostring {
+                    let fields: Vec<String> = ctor_params
+                        .iter()
+                        .filter(|p| p.kind != CtorParamKind::Plain)
+                        .map(|p| format!("{}=${{this.{}}}", p.name, p.name))
+                        .collect();
+                    body.push_str(&format!(
+                        "{}public func toString(): String {{\n{}{}return \"{}({})\"\n{}}}\n",
+                        IND, IND, IND, name, fields.join(", "), IND
+                    ));
+                }
                 let kw = if is_open { "open class" } else { "class" };
-                let sup = match &superclass {
-                    Some(s) => format!(" <: {}", s),
-                    None => String::new(),
+                let mut ifaces: Vec<String> = Vec::new();
+                if let Some(s) = &superclass {
+                    ifaces.push(s.clone());
+                }
+                if is_data {
+                    ifaces.push("ToString".to_string());
+                }
+                let sup = if ifaces.is_empty() {
+                    String::new()
+                } else {
+                    format!(" <: {}", ifaces.join(" & "))
                 };
                 if body.is_empty() {
                     Some(format!("{} {}{} {{}}", kw, name, sup))

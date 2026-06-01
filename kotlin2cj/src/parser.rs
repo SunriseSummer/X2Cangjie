@@ -259,7 +259,6 @@ impl Parser {
     // ---- 类 ----
     fn parse_class(&mut self, mods: &[String]) -> PResult<NodeId> {
         let is_data = self.eat_kw("data");
-        let _ = is_data;
         let is_object = self.is_kw("object");
         self.bump(); // class / object
         let name = self.expect_ident()?;
@@ -351,7 +350,7 @@ impl Parser {
         }
         let _ = is_object;
         let is_open = mods.iter().any(|m| m == "open" || m == "abstract" || m == "sealed");
-        Ok(self.g.add(Kind::Class { name: safe_name(&name), ctor_params, members, superclass, is_open }))
+        Ok(self.g.add(Kind::Class { name: safe_name(&name), ctor_params, members, superclass, is_open, is_data }))
     }
 
     // ================= 语句 =================
