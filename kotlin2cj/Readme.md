@@ -121,14 +121,16 @@ main() {
 - 位运算中缀函数 `and / or / xor / shl / shr / ushr` → 仓颉 `& | ^ << >>`。
 - 字符串模板 `"$x"` / `"${expr}"`（含嵌套表达式）、字符与浮点字面量。
 - `if/else`（语句与表达式）、`when`（主语式 → `match`，支持 `Int`/`String`/枚举/逗号多值；
-  条件式 → `if/else` 链）。
+  含 `in 区间` / `!in 区间` / 关系分支时 → if-else 链；条件式 → `if/else` 链）。
 - `while`、`do/while`、`repeat(n)`、`for` + 区间（`..` / `until` / `downTo` / `step`）、
   `for` + 集合遍历（含 `(k, v)` 解构）、`break` / `continue`、嵌套循环。
 - 成员检查 `in` / `!in`：区间转比较，集合转 `.contains`。
 - `is` 类型判定与智能转换：`when (x) { is T -> ... }` → `case x: T =>`（复用主体名做 narrowing）；
   类继承（`sealed`/`open` → `open class`，子类 `<: Super`）。
 - 异常：`try / catch / finally`、`throw`。
-- 函数（块体 / 表达式体 `=` / 递归 / 嵌套局部函数 / `main`）；顶层全局 `val`；`maxOf` / `minOf`。
+- 函数（块体 / 表达式体 `=` / 递归 / 嵌套局部函数 / `main`）；顶层全局 `val`；`maxOf` / `minOf`；
+  **默认参数** `fun f(a, b: Int = 1)` → 仓颉具名可选形参 `b!: Int64 = 1` 并在调用端自动补名；
+  **函数类型** `(A,B)->R` 与高阶函数值（函数作实参）。
 - 高阶：`xs.forEach { ... }`（含隐式 `it`）→ `for` 循环；**返回集合的链式高阶**
   `map` / `filter` / `sorted` / `sortedBy` / `sortedDescending` / `reversed` / `toList`
   → `collectArrayList(xs.iterator()....)`；聚合 `sum` / `sumOf` / `fold` / `reduce` /
@@ -140,9 +142,12 @@ main() {
 - 解构：`val (a, b) = expr`、`Pair` / `Triple` → 元组。
 - 数字字面量：十进制、`0x` 十六进制、`0b` 二进制、下划线分隔（`1_000`）。
 - 集合 `List/Map/Set`：字面量、显式泛型、`ArrayList/HashMap/HashSet` 构造器、下标读写、`.size`、`.add`、
-  `.contains`、`.removeAt(i)` → `.remove(at: i)`、嵌套集合。
+  `.contains`、`.removeAt(i)` → `.remove(at: i)`、`.addAll` → `.add(all:)`、就地 `sort/sortDescending/sortBy`
+  → `std.sort` 全局 `sort(...)`、`withIndex`、`average`、`containsKey`/`getOrDefault`、嵌套集合。
 - 类：主构造器（`val/var/普通`参数）、成员变量与方法、对象创建、多类协作、继承、
-  把类实例放入集合；`data class`（按普通类处理）。
+  把类实例放入集合；`data class`（**自动生成 `toString` → `Name(f1=v1, ...)`**，对齐 Kotlin）。
+- 算术：混合 `Int`/`Float` 运算单侧自动 `Float64(...)` 提升；String 与非 String 的 `+` 拼接自动补 `.toString()`。
+- 可空智能转换：`if (x != null) { ...x... }`（含嵌套）→ `if (let Some(x) <- x) { ... }`（分支内再赋值则回退）。
 - 枚举：`enum class`（具名常量项）→ 仓颉 `enum` + `@Derive[Equatable]` + 自定义 `toString`，
   支持 `==` 比较、`when` 匹配与 `println(e)` 输出裸名。
 - 字符串方法映射：`length`→`size`、`toUpperCase/toLowerCase`→`toAsciiUpper/Lower`、
@@ -168,7 +173,7 @@ main() {
 - 仓颉浮点默认打印为 `3.140000` 这类格式。
 - 仓颉字符串下标 `s[i]` 取字节而非字符，避免对字符串做字符级下标。
 - 暂未覆盖：泛型函数、扩展函数、协程、惰性序列 `asSequence` 与 `groupBy`、
-  默认参数与命名参数调用、可空接收者的流敏感智能转换、带参枚举与枚举成员函数。
+  可空接收者的**早返式**流敏感智能转换（`if (x == null) return` 后再用 `x`）、带参枚举与枚举成员函数。
   详见 [`State.md`](./State.md) 的现状评估与下一步规划。
 
 ---
@@ -177,7 +182,7 @@ main() {
 
 - **学习语料** [`corpus/`](./corpus/)：Kotlin↔仓颉平行片段与规则归纳表
   （`pairs.md`），是局部规则的来源。
-- **测试数据集** [`tests/cases/`](./tests/cases/)：81 个端到端用例，每个含
+- **测试数据集** [`tests/cases/`](./tests/cases/)：84 个端到端用例，每个含
   `.kt` 输入与 `.expected` 期望标准输出，覆盖基础 / 控制流 / 函数 / 集合 / 类 /
   算法 / 多类协作 / 不同规模。
 
@@ -189,7 +194,7 @@ python3 tests/run_tests.py
 # 结果汇总写入 tests/log.md
 ```
 
-当前基线：**81/81 翻译、编译、运行输出全部通过**。
+当前基线：**84/84 翻译、编译、运行输出全部通过**。
 
 ---
 
@@ -206,7 +211,7 @@ kotlin2cj/
 │   └── main.rs      # CLI
 ├── corpus/          # 学习语料（平行片段 + 规则表）
 ├── tests/
-│   ├── cases/       # 81 个 .kt / .expected 用例
+│   ├── cases/       # 84 个 .kt / .expected 用例
 │   └── run_tests.py # 端到端测试驱动
 ├── Design.md        # 技术方案
 ├── Readme.md        # 本文档
