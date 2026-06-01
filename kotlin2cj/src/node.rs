@@ -53,6 +53,8 @@ pub enum Kind {
         interfaces: Vec<String>,
         /// 调用父类构造器的实参（继承列表中带 `(...)` 的超类型）。
         super_args: Vec<NodeId>,
+        /// 泛型形参名（`class Stack<T>`）。
+        generics: Vec<String>,
     },
     /// 枚举类（仅简单具名常量项）。
     Enum {

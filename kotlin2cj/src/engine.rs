@@ -472,7 +472,14 @@ impl Engine {
                 let vis = if is_override { "public " } else { "" };
                 Some(format!("{}func {} {}", vis, sig, b))
             }
-            Kind::Class { name, ctor_params, members, superclass, is_open, is_data, is_interface, is_abstract, interfaces, super_args } => {
+            Kind::Class { name, ctor_params, members, superclass, is_open, is_data, is_interface, is_abstract, interfaces, super_args, generics } => {
+                // 泛型形参后缀 `<T>`（类名后）。
+                let gen_suffix = if generics.is_empty() {
+                    String::new()
+                } else {
+                    format!("<{}>", generics.join(", "))
+                };
+                let name_gen = format!("{}{}", name, gen_suffix);
                 // 接口：仅渲染抽象方法签名（成员均无函数体）。
                 if is_interface {
                     let mut ibody = String::new();
@@ -496,9 +503,9 @@ impl Engine {
                         format!(" <: {}", interfaces.join(" & "))
                     };
                     if ibody.is_empty() {
-                        return Some(format!("interface {}{} {{}}", name, sup));
+                        return Some(format!("interface {}{} {{}}", name_gen, sup));
                     }
-                    return Some(format!("interface {}{} {{\n{}}}", name, sup, ibody));
+                    return Some(format!("interface {}{} {{\n{}}}", name_gen, sup, ibody));
                 }
                 let mut body = String::new();
                 // 成员变量（来自主构造参数中带 val/var 的部分）
@@ -580,9 +587,9 @@ impl Engine {
                     format!(" <: {}", ifaces.join(" & "))
                 };
                 if body.is_empty() {
-                    Some(format!("{} {}{} {{}}", kw, name, sup))
+                    Some(format!("{} {}{} {{}}", kw, name_gen, sup))
                 } else {
-                    Some(format!("{} {}{} {{\n{}}}", kw, name, sup, body))
+                    Some(format!("{} {}{} {{\n{}}}", kw, name_gen, sup, body))
                 }
             }
             Kind::Enum { name, entries } => {

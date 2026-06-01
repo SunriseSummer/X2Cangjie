@@ -302,22 +302,32 @@ impl Parser {
         let is_interface = self.is_kw("interface");
         self.bump(); // class / object / interface
         let name = self.expect_ident()?;
-        // 跳过泛型形参 `<T>`
+        // 泛型形参 `<T>` / `<K, V>`：捕获形参名（忽略上界约束），渲染为 `class Name<T>`。
+        let mut generics: Vec<String> = Vec::new();
         if self.is_sym("<") {
-            let mut depth = 0;
-            loop {
+            self.bump();
+            let mut depth = 1;
+            let mut expect_name = true;
+            while depth > 0 && !self.at_eof() {
                 if self.is_sym("<") {
                     depth += 1;
+                    self.bump();
                 } else if self.is_sym(">") {
                     depth -= 1;
-                    if depth == 0 {
-                        self.bump();
-                        break;
+                    self.bump();
+                } else if self.is_sym(",") {
+                    expect_name = depth == 1;
+                    self.bump();
+                } else if let Tok::Ident(id) = self.peek().clone() {
+                    if expect_name && depth == 1 {
+                        generics.push(id.clone());
+                        expect_name = false;
                     }
-                } else if self.at_eof() {
-                    break;
+                    self.bump();
+                } else {
+                    expect_name = false;
+                    self.bump();
                 }
-                self.bump();
             }
         }
         let mut ctor_params = Vec::new();
@@ -427,6 +437,7 @@ impl Parser {
             is_abstract,
             interfaces,
             super_args,
+            generics,
         }))
     }
 
@@ -968,6 +979,47 @@ impl Parser {
         }
     }
 
+    /// 探测 `Ident<类型实参...>(` 形态（用户泛型类构造，如 `Stack<Int>()`），
+    /// 以与比较运算 `a < b` 区分：需出现平衡的 `<...>` 且其后紧跟 `(`。
+    fn peek_is_generic_ctor(&self) -> bool {
+        if self.pos + 1 >= self.toks.len() {
+            return false;
+        }
+        if !matches!(&self.toks[self.pos + 1].tok, Tok::Sym(s) if s == "<") {
+            return false;
+        }
+        let mut depth = 0i32;
+        let mut i = self.pos + 1;
+        while i < self.toks.len() {
+            match &self.toks[i].tok {
+                Tok::Sym(s) if s == "<" => depth += 1,
+                Tok::Sym(s) if s == ">" => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return matches!(
+                            self.toks.get(i + 1).map(|t| &t.tok),
+                            Some(Tok::Sym(s)) if s == "("
+                        );
+                    }
+                }
+                Tok::Sym(s) if s == ">>" => {
+                    depth -= 2;
+                    if depth <= 0 {
+                        return matches!(
+                            self.toks.get(i + 1).map(|t| &t.tok),
+                            Some(Tok::Sym(s)) if s == "("
+                        );
+                    }
+                }
+                // 仅类型实参中可能出现的记号；遇到语句性记号即放弃。
+                Tok::Ident(_) | Tok::Sym(_) => {}
+                _ => return false,
+            }
+            i += 1;
+        }
+        false
+    }
+
     fn parse_args(&mut self) -> PResult<Vec<NodeId>> {
         self.expect_sym("(")?;
         self.skip_newlines();
@@ -1123,6 +1175,29 @@ impl Parser {
                         let args = self.parse_args()?;
                         return Ok(self.g.add(Kind::CollLit { ctor: ctor.to_string(), elem, args }));
                     }
+                }
+                // 用户泛型类构造：`Stack<Int>()` → 保留类型实参 `Stack<Int64>()`，
+                // 以便仓颉为泛型类推断类型参数（首字母大写以区分变量比较）。
+                if name.chars().next().is_some_and(|c| c.is_uppercase())
+                    && self.peek_is_generic_ctor()
+                {
+                    self.bump(); // 类名
+                    self.expect_sym("<")?;
+                    let mut tys = Vec::new();
+                    loop {
+                        tys.push(self.parse_type_raw()?);
+                        if !self.eat_sym(",") {
+                            break;
+                        }
+                    }
+                    self.expect_sym(">")?;
+                    let mapped: Vec<String> = tys.iter().map(|t| map_type(t)).collect();
+                    let callee = self.g.add(Kind::NameRef {
+                        original: format!("{}<{}>", safe_name(&name), mapped.join(", ")),
+                        decl: None,
+                    });
+                    let args = self.parse_args()?;
+                    return Ok(self.g.add(Kind::Call { callee, args }));
                 }
                 self.bump();
                 let decl = self.resolve(&name);
