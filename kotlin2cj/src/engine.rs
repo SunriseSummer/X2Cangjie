@@ -231,6 +231,10 @@ impl Engine {
                     "indices" if !safe => return Some(format!("(0..{}.size)", b)),
                     "lastIndex" if !safe => return Some(format!("({}.size - 1)", b)),
                     // Pair/Triple 的 first/second/third → 元组下标（仅当接收者可证明为元组）。
+                    // Kotlin Char.code → 字符的 Unicode 码点（Int）。仓颉用 Int64(UInt32(rune))。
+                    "code" if !safe && self.looks_char(base) => {
+                        return Some(format!("Int64(UInt32({}))", b));
+                    }
                     "first" if !safe && self.looks_tuple(base) => return Some(format!("{}[0]", b)),
                     "second" if !safe && self.looks_tuple(base) => return Some(format!("{}[1]", b)),
                     "third" if !safe && self.looks_tuple(base) => return Some(format!("{}[2]", b)),
@@ -805,6 +809,10 @@ impl Engine {
                         "({}.isAsciiLetter() || {}.isAsciiNumber())",
                         b, b
                     ));
+                }
+                // Kotlin Int.toChar() → 仓颉 Rune(UInt32(n))；Char.code 等已在属性处处理。
+                "toChar" if args.is_empty() => {
+                    return Some(format!("Rune(UInt32({}))", b));
                 }
                 // 字符串 indexOf：仓颉返回 Option<Int64>，Kotlin 返回 Int（缺省 -1）。
                 "indexOf" if args.len() == 1 && self.looks_string(*base) => {
@@ -1471,7 +1479,13 @@ impl Engine {
                             | "max" | "min" | "toInt" | "toLong" | "toDouble" | "toFloat"
                     )
                 } else if let Kind::NameRef { original, .. } = self.g.kind(*callee) {
-                    matches!(original.as_str(), "maxOf" | "minOf")
+                    if matches!(original.as_str(), "maxOf" | "minOf") {
+                        return true;
+                    }
+                    // 调用用户自定义函数：按其声明的返回类型判断是否数值。
+                    self.g.nodes.iter().any(|n| matches!(&n.kind,
+                        Kind::Func { name: fname, ret: Some(r), .. }
+                            if fname == original && (r == "Int64" || r == "Float64")))
                 } else {
                     false
                 }
