@@ -935,16 +935,16 @@ impl Engine {
                 // 就地排序：Kotlin 的 sort/sortDescending/sortBy/sortByDescending 改原集合，
                 // 映射到仓颉 std.sort 的全局 sort（成员版已弃用），保持就地语义。
                 "sort" if args.is_empty() && !self.provably_non_collection(*base) => {
-                    return Some(format!("sort({})", b));
+                    return Some(format!("sort({}, stable: true)", b));
                 }
                 "sortDescending" if args.is_empty() && !self.provably_non_collection(*base) => {
-                    return Some(format!("sort({}, descending: true)", b));
+                    return Some(format!("sort({}, stable: true, descending: true)", b));
                 }
                 "sortBy" if args.len() == 1 && !self.provably_non_collection(*base) => {
-                    return Some(format!("sort({}, key: {})", b, self.t(args[0])?));
+                    return Some(format!("sort({}, key: {}, stable: true)", b, self.t(args[0])?));
                 }
                 "sortByDescending" if args.len() == 1 && !self.provably_non_collection(*base) => {
-                    return Some(format!("sort({}, key: {}, descending: true)", b, self.t(args[0])?));
+                    return Some(format!("sort({}, key: {}, stable: true, descending: true)", b, self.t(args[0])?));
                 }
                 // xs.withIndex() → xs.iterator().enumerate()（产出 (index, value) 元组）。
                 "withIndex" if args.is_empty() && !self.provably_non_collection(*base) => {
@@ -1019,25 +1019,25 @@ impl Engine {
                 // 用立即调用闭包先拷贝再就地排序，整体作为表达式产出新 ArrayList。
                 "sorted" if args.is_empty() && !self.provably_non_collection(*base) => {
                     return Some(format!(
-                        "({{ => let _s = collectArrayList({}); sort(_s); _s }})()",
+                        "({{ => let _s = collectArrayList({}); sort(_s, stable: true); _s }})()",
                         self.as_iter(*base)?
                     ));
                 }
                 "sortedDescending" if args.is_empty() && !self.provably_non_collection(*base) => {
                     return Some(format!(
-                        "({{ => let _s = collectArrayList({}); sort(_s, descending: true); _s }})()",
+                        "({{ => let _s = collectArrayList({}); sort(_s, stable: true, descending: true); _s }})()",
                         self.as_iter(*base)?
                     ));
                 }
                 "sortedBy" if args.len() == 1 && !self.provably_non_collection(*base) => {
                     return Some(format!(
-                        "({{ => let _s = collectArrayList({}); sort(_s, key: {}); _s }})()",
+                        "({{ => let _s = collectArrayList({}); sort(_s, key: {}, stable: true); _s }})()",
                         self.as_iter(*base)?, self.t(args[0])?
                     ));
                 }
                 "sortedByDescending" if args.len() == 1 && !self.provably_non_collection(*base) => {
                     return Some(format!(
-                        "({{ => let _s = collectArrayList({}); sort(_s, key: {}, descending: true); _s }})()",
+                        "({{ => let _s = collectArrayList({}); sort(_s, key: {}, stable: true, descending: true); _s }})()",
                         self.as_iter(*base)?, self.t(args[0])?
                     ));
                 }
