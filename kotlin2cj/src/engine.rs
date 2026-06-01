@@ -421,7 +421,16 @@ impl Engine {
                     Some(format!("enum {} {{ | {} }}", name, name))
                 } else {
                     let body = entries.join(" | ");
-                    Some(format!("@Derive[Equatable]\nenum {} {{\n{}| {}\n}}", name, IND, body))
+                    // 派生 Equatable 支持 `==`/`match`；自定义 toString 使枚举项在字符串
+                    // 插值中打印裸名字（与 Kotlin 一致），而非 `Enum.Item` 限定名。
+                    let mut arms = String::new();
+                    for e in &entries {
+                        arms.push_str(&format!("{}{}{}case {} => \"{}\"\n", IND, IND, IND, e, e));
+                    }
+                    Some(format!(
+                        "@Derive[Equatable]\nenum {} <: ToString {{\n{}| {}\n{}public func toString(): String {{\n{}return match (this) {{\n{}{}}}\n{}}}\n}}",
+                        name, IND, body, IND, IND, IND, arms, IND
+                    ))
                 }
             }
             Kind::Program { items } => self.render_program(&items),
@@ -572,7 +581,7 @@ impl Engine {
                 // List<String>.joinToString(sep?) { transform? }
                 //   → String.join(xs.toArray(), delimiter: sep)
                 //   带 transform 时先 map 成字符串再收集为数组。
-                "joinToString" => {
+                "joinToString" if self.looks_collection(*base) => {
                     let has_lambda = args
                         .last()
                         .map(|a| matches!(self.g.kind(*a), Kind::Lambda { .. }))
@@ -590,35 +599,74 @@ impl Engine {
                             sep
                         ));
                     }
-                    return Some(format!("String.join({}.toArray(), delimiter: {})", b, sep));
+                    return Some(format!(
+                        "String.join(collectArray<String>({}.map({{e => e.toString()}})), delimiter: {})",
+                        self.as_iter(*base)?, sep
+                    ));
+                }
+                // 排序：Kotlin 的 sorted*/reversed 返回新列表（不改原集合），
+                // 用立即调用闭包先拷贝再就地排序，整体作为表达式产出新 ArrayList。
+                "sorted" if args.is_empty() && self.looks_collection(*base) => {
+                    return Some(format!(
+                        "({{ => let _s = collectArrayList({}); sort(_s); _s }})()",
+                        self.as_iter(*base)?
+                    ));
+                }
+                "sortedDescending" if args.is_empty() && self.looks_collection(*base) => {
+                    return Some(format!(
+                        "({{ => let _s = collectArrayList({}); sort(_s, descending: true); _s }})()",
+                        self.as_iter(*base)?
+                    ));
+                }
+                "sortedBy" if args.len() == 1 && self.looks_collection(*base) => {
+                    return Some(format!(
+                        "({{ => let _s = collectArrayList({}); sort(_s, key: {}); _s }})()",
+                        self.as_iter(*base)?, self.t(args[0])?
+                    ));
+                }
+                "sortedByDescending" if args.len() == 1 && self.looks_collection(*base) => {
+                    return Some(format!(
+                        "({{ => let _s = collectArrayList({}); sort(_s, key: {}, descending: true); _s }})()",
+                        self.as_iter(*base)?, self.t(args[0])?
+                    ));
+                }
+                "reversed" if args.is_empty() && self.looks_collection(*base) => {
+                    return Some(format!(
+                        "({{ => let _s = collectArrayList({}); _s.reverse(); _s }})()",
+                        self.as_iter(*base)?
+                    ));
+                }
+                // xs.toList()/toMutableList() / (a..b).toList() → 收集为 ArrayList。
+                "toList" | "toMutableList" if args.is_empty() && self.looks_collection(*base) => {
+                    return Some(format!("collectArrayList({})", self.atom(*base)?));
                 }
                 // 返回集合的链式高阶：map/filter 急切收集为 ArrayList，
                 // 既可继续链接、在 for 中遍历，也可存入变量后多次复用 / 取 size / 索引。
-                "map" | "filter" if args.len() == 1 => {
+                "map" | "filter" if args.len() == 1 && self.looks_collection(*base) => {
                     return Some(format!(
                         "collectArrayList({}.{}({}))",
                         self.as_iter(*base)?, name, self.t(args[0])?
                     ));
                 }
                 // 布尔终结操作。
-                "any" | "all" if args.len() == 1 => {
+                "any" | "all" if args.len() == 1 && self.looks_collection(*base) => {
                     return Some(format!("{}.{}({})", self.as_iter(*base)?, name, self.t(args[0])?));
                 }
-                "none" if args.len() == 1 => {
+                "none" if args.len() == 1 && self.looks_collection(*base) => {
                     return Some(format!("!{}.any({})", self.as_iter(*base)?, self.t(args[0])?));
                 }
                 // 计数：带谓词时先 filter，再 count；无参时即 size。
-                "count" if args.len() == 1 => {
+                "count" if args.len() == 1 && self.looks_collection(*base) => {
                     return Some(format!("{}.filter({}).count()", self.as_iter(*base)?, self.t(args[0])?));
                 }
-                "count" if args.is_empty() => {
+                "count" if args.is_empty() && self.looks_collection(*base) => {
                     return Some(format!("{}.size", b));
                 }
                 // 求和：sum() 直接折叠；sumOf { } 先 map 再折叠（按 Int64 处理）。
-                "sum" if args.is_empty() => {
+                "sum" if args.is_empty() && self.looks_collection(*base) => {
                     return Some(format!("{}.fold<Int64>(0, {{acc, x => acc + x}})", self.as_iter(*base)?));
                 }
-                "sumOf" if args.len() == 1 => {
+                "sumOf" if args.len() == 1 && self.looks_collection(*base) => {
                     return Some(format!(
                         "{}.map({}).fold<Int64>(0, {{acc, x => acc + x}})",
                         self.as_iter(*base)?,
@@ -626,7 +674,7 @@ impl Engine {
                     ));
                 }
                 // fold(init) { acc, x -> } → iterator().fold<T>(init, lambda)，T 由 init 字面量推断。
-                "fold" if args.len() == 2 => {
+                "fold" if args.len() == 2 && self.looks_collection(*base) => {
                     let ty = self.lit_type(args[0]);
                     return Some(format!(
                         "{}.fold<{}>({}, {})",
@@ -637,18 +685,18 @@ impl Engine {
                     ));
                 }
                 // reduce { a, b -> } → iterator().reduce(...).getOrThrow()（Kotlin reduce 返回非空 T）。
-                "reduce" if args.len() == 1 => {
+                "reduce" if args.len() == 1 && self.looks_collection(*base) => {
                     return Some(format!("{}.reduce({}).getOrThrow()", self.as_iter(*base)?, self.t(args[0])?));
                 }
                 // max()/min()：折叠取极值并解包；maxOrNull()/minOrNull() 保留 Option 以便 `?:` 级联。
-                "max" | "min" if args.is_empty() => {
+                "max" | "min" if args.is_empty() && self.looks_collection(*base) => {
                     let cmp = if name == "max" { ">" } else { "<" };
                     return Some(format!(
                         "{}.reduce({{a, b => if (a {} b) {{ a }} else {{ b }}}}).getOrThrow()",
                         self.as_iter(*base)?, cmp
                     ));
                 }
-                "maxOrNull" | "minOrNull" if args.is_empty() => {
+                "maxOrNull" | "minOrNull" if args.is_empty() && self.looks_collection(*base) => {
                     let cmp = if name == "maxOrNull" { ">" } else { "<" };
                     return Some(format!(
                         "{}.reduce({{a, b => if (a {} b) {{ a }} else {{ b }}}})",
@@ -689,6 +737,146 @@ impl Engine {
             Kind::BoolLit(_) => "Bool".to_string(),
             Kind::StrTemplate { .. } => "String".to_string(),
             _ => "Int64".to_string(),
+        }
+    }
+
+    /// 映射后的类型字符串是否为集合类型（用于判断能否套用集合高阶/聚合操作）。
+    fn is_coll_type(t: &str) -> bool {
+        let t = t.trim_start_matches('?');
+        t.starts_with("ArrayList")
+            || t.starts_with("HashSet")
+            || t.starts_with("HashMap")
+            || t.starts_with("Array<")
+            || t == "Array"
+    }
+
+    /// 名为 `name` 的成员函数（自由函数或类方法）的返回类型是否为集合。
+    fn func_ret_is_coll(&self, name: &str) -> bool {
+        for node in &self.g.nodes {
+            if let Kind::Func { name: fname, ret: Some(r), .. } = &node.kind {
+                if fname == name {
+                    return Self::is_coll_type(r);
+                }
+            }
+        }
+        false
+    }
+
+    /// 解析表达式的静态类名（对带声明类型的标识符，或由构造器初始化的变量有效）。
+    fn expr_type_name(&self, id: NodeId) -> Option<String> {
+        if let Kind::NameRef { decl: Some(d), .. } = self.g.kind(id) {
+            for node in &self.g.nodes {
+                match &node.kind {
+                    Kind::VarDecl { name_node, ty, init, .. } if name_node == d => {
+                        if let Some(t) = ty {
+                            return Some(t.clone());
+                        }
+                        // `let v = ClassName(...)` → 由构造器调用回填类名。
+                        if let Some(i) = init {
+                            if let Kind::Call { callee, .. } = self.g.kind(*i) {
+                                if let Kind::NameRef { original, .. } = self.g.kind(*callee) {
+                                    if self.is_class_name(original) {
+                                        return Some(original.clone());
+                                    }
+                                }
+                            }
+                        }
+                        return None;
+                    }
+                    Kind::Param { name_node, ty } if name_node == d => {
+                        return Some(ty.clone());
+                    }
+                    _ => {}
+                }
+            }
+        }
+        None
+    }
+
+    /// 图中是否存在名为 `name` 的类声明。
+    fn is_class_name(&self, name: &str) -> bool {
+        self.g.nodes.iter().any(|n| matches!(&n.kind, Kind::Class { name: cn, .. } if cn == name))
+    }
+
+    /// 成员字段 `base.field` 是否为集合类型（解析 base 的类与字段声明）。
+    fn member_is_collection(&self, base: NodeId, field: &str) -> bool {
+        let cn = match self.expr_type_name(base) {
+            Some(t) => t.trim_start_matches('?').to_string(),
+            None => return false,
+        };
+        for node in &self.g.nodes {
+            if let Kind::Class { name, ctor_params, members, .. } = &node.kind {
+                if *name != cn {
+                    continue;
+                }
+                for p in ctor_params {
+                    if p.name == field {
+                        return Self::is_coll_type(&p.ty);
+                    }
+                }
+                for m in members {
+                    if let Kind::VarDecl { name_node, ty, init, .. } = self.g.kind(*m) {
+                        if let Kind::Name { original } = self.g.kind(*name_node) {
+                            if original == field {
+                                if let Some(t) = ty {
+                                    return Self::is_coll_type(t);
+                                }
+                                if let Some(i) = init {
+                                    return self.looks_collection(*i);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// 启发式判断表达式是否求值为集合（列表/数组/区间），用于安全地套用
+    /// 集合专属的高阶与聚合方法，避免误改用户自定义同名方法（如 `count()`）。
+    fn looks_collection(&self, id: NodeId) -> bool {
+        match self.g.kind(id) {
+            Kind::CollLit { .. } | Kind::Range { .. } => true,
+            Kind::Call { callee, .. } => {
+                if let Kind::Member { base, name, .. } = self.g.kind(*callee) {
+                    if matches!(
+                        name.as_str(),
+                        "map" | "filter" | "sorted" | "sortedBy" | "sortedDescending"
+                            | "sortedByDescending" | "reversed" | "toList" | "toMutableList"
+                            | "split" | "keys" | "values" | "toCharArray"
+                    ) {
+                        return true;
+                    }
+                    return self.func_ret_is_coll(name) || self.member_is_collection(*base, name);
+                }
+                if let Kind::NameRef { original, .. } = self.g.kind(*callee) {
+                    return self.func_ret_is_coll(original);
+                }
+                false
+            }
+            Kind::NameRef { decl: Some(d), .. } => {
+                for node in &self.g.nodes {
+                    match &node.kind {
+                        Kind::VarDecl { name_node, ty, init, .. } if name_node == d => {
+                            if let Some(t) = ty {
+                                return Self::is_coll_type(t);
+                            }
+                            if let Some(i) = init {
+                                return self.looks_collection(*i);
+                            }
+                            return false;
+                        }
+                        Kind::Param { name_node, ty } if name_node == d => {
+                            return Self::is_coll_type(ty);
+                        }
+                        _ => {}
+                    }
+                }
+                false
+            }
+            Kind::Member { base, name, .. } => self.member_is_collection(*base, name),
+            _ => false,
         }
     }
 
@@ -809,6 +997,9 @@ impl Engine {
         }
         if body.contains("Int64.parse") || body.contains("Float64.parse") {
             header.push_str("import std.convert.*\n");
+        }
+        if body.contains("sort(_s") {
+            header.push_str("import std.sort.*\n");
         }
         if !header.is_empty() {
             header.push('\n');
