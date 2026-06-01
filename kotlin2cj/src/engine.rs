@@ -163,6 +163,17 @@ impl Engine {
                     let rc = if self.looks_string(rhs) { ra.clone() } else { format!("{}.toString()", ra) };
                     return Some(format!("{} + {}", lc, rc));
                 }
+                // Kotlin 的 Char 算术：`c - '0'`（Char-Char）得 Int。仓颉 Rune 不支持
+                // 算术运算，改为按 Unicode 码点相减/相加 `Int64(UInt32(c)) ± Int64(UInt32(r'0'))`。
+                if matches!(op.as_str(), "-" | "+")
+                    && self.looks_char(lhs)
+                    && self.looks_char(rhs)
+                {
+                    return Some(format!(
+                        "(Int64(UInt32({})) {} Int64(UInt32({})))",
+                        la, op, ra
+                    ));
+                }
                 // 整型数值，则把整型侧显式包裹 Float64(...)，对齐 Kotlin 的自动提升语义。
                 if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%") {
                     let lf = self.looks_float(lhs);
@@ -194,6 +205,12 @@ impl Engine {
             Kind::Index { base, index } => {
                 let b = self.atom(base)?;
                 let i = self.t(index)?;
+                // 字符串按下标取「字符」：仓颉 `s[i]` 取字节(UInt8)，与 Kotlin 的
+                // Char 语义不符（拼接/比较 char 字面量都会错）。改用 `toRuneArray()[i]`
+                // 得到 Rune，使逐字符访问、与 'a' 比较、追加到 StringBuilder 均正确。
+                if self.looks_string(base) {
+                    return Some(format!("{}.toRuneArray()[{}]", b, i));
+                }
                 Some(format!("{}[{}]", b, i))
             }
             Kind::Member { base, name, safe } => {
@@ -707,6 +724,29 @@ impl Engine {
         if let Kind::Member { base, name, .. } = self.g.kind(callee) {
             let b = self.atom(*base)?;
             match name.as_str() {
+                // Char 判定方法（接收者为 Rune）：Kotlin → 仓颉 Rune 的 isAscii* 方法。
+                "isDigit" | "isLetter" | "isWhitespace" | "isUpperCase" | "isLowerCase"
+                    if args.is_empty() && self.looks_char(*base) =>
+                {
+                    let m = match name.as_str() {
+                        "isDigit" => "isAsciiNumber",
+                        "isLetter" => "isAsciiLetter",
+                        "isWhitespace" => "isAsciiWhiteSpace",
+                        "isUpperCase" => "isAsciiUpperCase",
+                        _ => "isAsciiLowerCase",
+                    };
+                    return Some(format!("{}.{}()", b, m));
+                }
+                "isLetterOrDigit" if args.is_empty() && self.looks_char(*base) => {
+                    return Some(format!(
+                        "({}.isAsciiLetter() || {}.isAsciiNumber())",
+                        b, b
+                    ));
+                }
+                // 字符串 indexOf：仓颉返回 Option<Int64>，Kotlin 返回 Int（缺省 -1）。
+                "indexOf" if args.len() == 1 && self.looks_string(*base) => {
+                    return Some(format!("({}.indexOf({}) ?? -1)", b, self.t(args[0])?));
+                }
                 // recv.removeAt(i) → recv.remove(at: i)
                 "removeAt" if args.len() == 1 => {
                     return Some(format!("{}.remove(at: {})", b, self.t(args[0])?));
@@ -1248,6 +1288,39 @@ impl Engine {
     }
 
     /// 启发式判断表达式是否为字符串（用于把 `for (c in s)` 改写为遍历 `s.runes()`）。
+    /// 粗略判断表达式是否为字符（Rune）类型：字符字面量、字符串下标、或遍历字符串的循环变量。
+    fn looks_char(&self, id: NodeId) -> bool {
+        match self.g.kind(id) {
+            Kind::CharLit(_) => true,
+            Kind::Index { base, .. } => self.looks_string(*base),
+            Kind::NameRef { decl: Some(d), .. } => {
+                let d = *d;
+                for node in &self.g.nodes {
+                    if let Kind::ForEach { var, iter, .. } = &node.kind {
+                        if let Kind::VarDecl { name_node, .. } = self.g.kind(*var) {
+                            if *name_node == d && self.looks_string(*iter) {
+                                return true;
+                            }
+                        }
+                    }
+                    // `val ch = 'A'` 之类初始化为字符字面量的不可变绑定。
+                    if let Kind::VarDecl { name_node, ty, init, .. } = &node.kind {
+                        if *name_node == d {
+                            if let Some(t) = ty {
+                                return t == "Char" || t == "Rune";
+                            }
+                            if let Some(i) = init {
+                                return matches!(self.g.kind(*i), Kind::CharLit(_));
+                            }
+                        }
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
     fn looks_string(&self, id: NodeId) -> bool {
         match self.g.kind(id) {
             Kind::StrTemplate { .. } => true,
