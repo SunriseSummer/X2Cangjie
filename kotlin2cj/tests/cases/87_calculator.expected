@@ -1,0 +1,111 @@
+=== Tokenizer ===
+Tokens: 7
+NUM '3'
+OP '+'
+NUM '4'
+OP '*'
+NUM '2'
+OP '-'
+NUM '1'
+=== RPN ===
+3 4 2 * + 1 -
+=== Eval ===
+1 + 2 + 3 = 6
+2 * 3 + 4 = 10
+2 + 3 * 4 = 14
+( 1 + 2 ) * 3 = 9
+2 ^ 3 ^ 2 = 512
+10 - 2 - 3 = 5
+100 / 5 / 2 = 10
+7 % 3 + 1 = 2
+=== Script ===
+x = 5  -> 5
+y = x * 2  -> 10
+z = x + y  -> 15
+w = z ^ 2 - x  -> 220
+x + y + z + w  -> 250
+=== Variables ===
+w = 220
+x = 5
+y = 10
+z = 15
+=== Stats ===
+Count: 4
+Sum: 250
+Max: 220
+Min: 5
+Evens: 2
+=== Batch Eval ===
+1 * 1 + 1 = 2
+2 * 2 + 2 = 6
+3 * 3 + 3 = 12
+4 * 4 + 4 = 20
+5 * 5 + 5 = 30
+Grand total: 70
+=== Precedence Table ===
++ -> 1 rightAssoc=false
+- -> 1 rightAssoc=false
+* -> 2 rightAssoc=false
+/ -> 2 rightAssoc=false
+% -> 2 rightAssoc=false
+^ -> 3 rightAssoc=true
+=== Histogram of Results ===
+0: ***
+1: ****
+2: ***
+=== Number Formats ===
+0 -> bin=0 hex=0 roman=
+5 -> bin=101 hex=5 roman=V
+10 -> bin=1010 hex=a roman=X
+42 -> bin=101010 hex=2a roman=XLII
+255 -> bin=11111111 hex=ff roman=CCLV
+1000 -> bin=1111101000 hex=3e8 roman=M
+=== Series Stats ===
+name=temps n=8
+total=172 mean=21 variance=5 range=7
+=== Unary Functions ===
+neg: 2, 0, -3, -5
+sqr: 4, 0, 9, 25
+dbl: -4, 0, 6, 10
+abs: 2, 0, 3, 5
+inc: -1, 1, 4, 6
+=== Multiplication Table ===
+1 2 3 4 5
+2 4 6 8 10
+3 6 9 12 15
+4 8 12 16 20
+5 10 15 20 25
+=== Expression Matrix ===
+a + b = 11
+a * b = 28
+b - a = 3
+a ^ 2 + b = 23
+=== Word Frequencies ===
+cat: 2
+mat: 1
+on: 1
+ran: 1
+sat: 1
+the: 3
+=== Digit Sums ===
+123 -> 6
+4567 -> 22
+89 -> 17
+100000 -> 1
+=== Prime Sieve ===
+Primes up to 30: 2, 3, 5, 7, 11, 13, 17, 19, 23, 29
+Count: 10, Sum: 129
+=== Fibonacci ===
+0 1 1 2 3 5 8 13 21 34 55 89 144 233 377 610
+=== Matrix Transpose ===
+1 4
+2 5
+3 6
+=== Running Totals ===
+3, 4, 8, 9, 14, 23, 25, 31
+=== Bracket Check ===
+(()) -> true
+(() -> false
+()() -> true
+)( -> false
+((())) -> true

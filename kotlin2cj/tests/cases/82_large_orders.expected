@@ -1,0 +1,30 @@
+=== Catalog ===
+1. Kotlin in Action [Books] $45.00
+2. Apple [Groceries] $0.50
+3. Lego Set [Toys] $80.00
+4. Headphones [Electronics] $120.00
+5. Cookbook [Books] $30.00
+6. Bread [Groceries] $2.50
+7. Puzzle [Toys] $15.00
+8. Mouse [Electronics] $25.00
+Cheapest: Apple
+Priciest: Headphones
+=== Books ===
+- Kotlin in Action
+- Cookbook
+=== Orders ===
+Order #1 (Alice): items=3 sub=$285.00 disc=$28.50 net=$256.50
+Order #2 (Bob): items=14 sub=$27.50 disc=$2.75 net=$24.75
+Order #3 (Carol): items=4 sub=$160.00 disc=$16.00 net=$144.00
+=== Report ===
+  Books: 2
+  Electronics: 2
+  Groceries: 1
+  Toys: 2
+  revenue: 42525
+Grand total: $425.25
+Avg catalog price: $39.75
+Expensive count: 5
+Doubled sum: 63600
+Sorted prices: [50, 250, 1500, 2500, 3000, 4500, 8000, 12000]
+Min: 50 Max: 12000

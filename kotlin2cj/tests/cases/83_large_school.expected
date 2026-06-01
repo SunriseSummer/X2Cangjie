@@ -1,0 +1,30 @@
+Student #1 Alice (grade 10)
+Student #2 Bob (grade 11)
+Student #3 Carol (grade 10)
+Student(id=1, name=Alice, grade=10)
+Total scores recorded: 8
+Alice avg=85 -> B
+Bob avg=77 -> C
+Carol avg=71 -> C
+Alice => Mathematics:95, Science:88, History:73
+Bob => Mathematics:64, Art:91
+Carol => Music:55, Mathematics:82, Science:77
+Top: Alice 95
+doubled=10 6 18 2 14 4 16
+sum=35
+max=9
+sorted=1 2 3 5 7 8 9
+desc=9 8 7 5 3 2 1
+math entries=3 total=241
+45 -> F
+65 -> D
+72 -> C
+88 -> B
+91 -> A
+100 -> A
+130 -> ?
+Art has 1 score(s)
+History has 1 score(s)
+Mathematics has 3 score(s)
+Music has 1 score(s)
+Science has 2 score(s)

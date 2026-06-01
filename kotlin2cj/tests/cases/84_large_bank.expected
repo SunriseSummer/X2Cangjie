@@ -1,0 +1,34 @@
+Opened 3 accounts
+Alice balance: 650
+Bob balance: 1200
+Transfer ok=true
+Alice balance: 950
+Bob balance: 900
+Overdraw ok=false
+Total assets: 1930
+Richest: Alice
+Alice txns=3 deposited=950
+  DEP 500 [medium] salary
+  DEP 150 [medium] gift
+  DEP 300 [medium] from 2
+Bob txns=2 deposited=1200
+  DEP 1200 [large] salary
+  WD 300 [medium] to 1
+Carol txns=1 deposited=80
+  DEP 80 [small] allowance
+Inventory value: 322
+Low stock: bread, milk
+Price of milk: 4
+brown: 1
+dog: 1
+fox: 2
+lazy: 1
+quick: 1
+the: 3
+Reversed: fox the dog lazy the fox brown quick the
+Vowels: 10
+Fib: 0 1 1 2 3 5 8 13 21 34 55 89
+gcd(48,36)=12
+Primes<=30: 2 3 5 7 11 13 17 19 23 29
+Sorted: 1 2 3 4 5 6 7 8 9
+Sum: 45 Avg: 5

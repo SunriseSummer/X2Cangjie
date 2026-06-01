@@ -1,0 +1,18 @@
+Expr: ((3 * 4) + -5)
+Eval: 7
+Depth: 3
+=== Batch eval ===
+7 = 7
+(1 + 2) = 3
+((2 + 3) * 4) = 20
+-(10 + 5) = -15
+Sum of all: 15
+Sorted values: -15, 3, 7, 20
+Max: 20
+=== Generic Stack ===
+Drained (LIFO): 25 16 9 4 1
+Top: gamma, remaining: 2
+=== Counting by depth ===
+depth 1: 1 expr(s)
+depth 2: 1 expr(s)
+depth 3: 2 expr(s)

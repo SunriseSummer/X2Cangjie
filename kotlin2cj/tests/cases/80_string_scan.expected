@@ -1,0 +1,4 @@
+length=13
+upper=HELLO, WORLD!
+vowels=3
+contains World=true

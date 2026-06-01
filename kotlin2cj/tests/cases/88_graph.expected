@@ -1,0 +1,77 @@
+=== Build Graph ===
+Nodes: 8
+Edges: 7
+=== Degrees ===
+node 0: degree 2
+node 1: degree 2
+node 2: degree 2
+node 3: degree 3
+node 4: degree 1
+node 5: degree 1
+node 6: degree 2
+node 7: degree 1
+=== BFS from 0 ===
+0 -> 1 -> 2 -> 3 -> 4
+=== DFS from 0 ===
+0 -> 1 -> 3 -> 2 -> 4
+=== Connected Components ===
+Count: 2
+=== Shortest (unweighted) ===
+0 -> 3: 2 hops
+0 -> 4: 3 hops
+0 -> 7: unreachable
+=== Neighbor Lists ===
+0: 1, 2
+1: 0, 3
+2: 0, 3
+3: 1, 2, 4
+4: 3
+5: 6
+6: 5, 7
+7: 6
+=== Degree Histogram ===
+degree 1: *** (3)
+degree 2: **** (4)
+degree 3: * (1)
+=== Weighted Graph ===
+dist[0][0] = 0
+dist[0][1] = 7
+dist[0][2] = 9
+dist[0][3] = 20
+dist[0][4] = 20
+dist[0][5] = 11
+=== Path Costs Sorted ===
+Sorted: 7, 9, 11, 20, 20
+Max cost: 20
+Total: 67
+=== Reachability Matrix ===
+11111000
+11111000
+11111000
+11111000
+11111000
+00000111
+00000111
+00000111
+=== Even-degree nodes ===
+Nodes: 0, 1, 2, 6
+Count: 4
+=== Triangle Count ===
+Triangle paths (x6): 0
+=== Minimum Spanning Tree (Kruskal) ===
+MST total weight: 11
+Groups after 2 unions: 3
+Groups after 3 unions: 2
+=== Topological Sort ===
+Order: 4 -> 5 -> 2 -> 0 -> 3 -> 1
+Has cycle: false
+=== Cyclic Directed Graph ===
+Has cycle: true
+Topo size (partial if cyclic): 0
+=== Indegree Report ===
+node 0: indegree 2, out 0
+node 1: indegree 2, out 0
+node 2: indegree 1, out 1
+node 3: indegree 1, out 1
+node 4: indegree 0, out 2
+node 5: indegree 0, out 2
