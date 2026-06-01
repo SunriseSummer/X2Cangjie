@@ -204,6 +204,13 @@ impl Engine {
                 };
                 let mapped = match name.as_str() {
                     "length" => "size",
+                    // 集合索引视图：indices → 0..size，lastIndex → size-1。
+                    "indices" if !safe => return Some(format!("(0..{}.size)", b)),
+                    "lastIndex" if !safe => return Some(format!("({}.size - 1)", b)),
+                    // Pair/Triple 的 first/second/third → 元组下标（仅当接收者可证明为元组）。
+                    "first" if !safe && self.looks_tuple(base) => return Some(format!("{}[0]", b)),
+                    "second" if !safe && self.looks_tuple(base) => return Some(format!("{}[1]", b)),
+                    "third" if !safe && self.looks_tuple(base) => return Some(format!("{}[2]", b)),
                     "toUpperCase" | "uppercase" => "toAsciiUpper",
                     "toLowerCase" | "lowercase" => "toAsciiLower",
                     "trim" => "trimAscii",
@@ -569,12 +576,20 @@ impl Engine {
                 let a: Vec<String> = args.iter().map(|x| self.t(*x)).collect::<Option<_>>()?;
                 return Some(format!("({})", a.join(", ")));
             }
-            // maxOf(a, b) / minOf(a, b) → 内联条件表达式（不依赖标准库符号）。
-            if (original == "maxOf" || original == "minOf") && args.len() == 2 {
+            // maxOf(a, b) / minOf(a, b) / kotlin.math 的 max/min → 内联条件表达式（不依赖标准库符号）。
+            if (original == "maxOf" || original == "minOf"
+                || ((original == "max" || original == "min") && !self.is_user_func(original)))
+                && args.len() == 2
+            {
                 let a = self.t(args[0])?;
                 let b = self.t(args[1])?;
-                let cmp = if original == "maxOf" { ">" } else { "<" };
+                let cmp = if original == "maxOf" || original == "max" { ">" } else { "<" };
                 return Some(format!("(if ({} {} {}) {{ {} }} else {{ {} }})", a, cmp, b, a, b));
+            }
+            // kotlin.math 的 abs(x) → 内联条件（避免标准库重载与整/浮点歧义）。
+            if original == "abs" && args.len() == 1 && !self.is_user_func(original) {
+                let a = self.atom(args[0])?;
+                return Some(format!("(if ({} < 0) {{ -({}) }} else {{ {} }})", a, a, a));
             }
         }
         // 成员方法的特殊映射。
@@ -635,6 +650,13 @@ impl Engine {
                 }
                 "last" if args.is_empty() => {
                     return Some(format!("{}[{}.size - 1]", b, b));
+                }
+                // firstOrNull()/lastOrNull() → .get(i)（返回 Option，便于 `?:` 级联）。
+                "firstOrNull" if args.is_empty() && !self.provably_non_collection(*base) => {
+                    return Some(format!("{}.get(0)", b));
+                }
+                "lastOrNull" if args.is_empty() && !self.provably_non_collection(*base) => {
+                    return Some(format!("{}.get({}.size - 1)", b, b));
                 }
                 // List<String>.joinToString(sep?) { transform? }
                 //   → String.join(xs.toArray(), delimiter: sep)
@@ -854,6 +876,11 @@ impl Engine {
     /// 图中是否存在名为 `name` 的类声明。
     fn is_class_name(&self, name: &str) -> bool {
         self.g.nodes.iter().any(|n| matches!(&n.kind, Kind::Class { name: cn, .. } if cn == name))
+    }
+
+    /// 图中是否存在名为 `name` 的用户函数声明（用于避免覆盖同名自定义函数）。
+    fn is_user_func(&self, name: &str) -> bool {
+        self.g.nodes.iter().any(|n| matches!(&n.kind, Kind::Func { name: fname, .. } if fname == name))
     }
 
     /// 成员字段 `base.field` 是否为集合类型（解析 base 的类与字段声明）。
@@ -1100,9 +1127,39 @@ impl Engine {
         }
     }
 
-    /// 启发式判断表达式是否求值为浮点数（用于补显式 Int64→Float64 提升）。
-    fn looks_float(&self, id: NodeId) -> bool {
+    /// 启发式判断表达式是否求值为元组（Kotlin 的 Pair/Triple / `a to b`）。
+    fn looks_tuple(&self, id: NodeId) -> bool {
         match self.g.kind(id) {
+            Kind::Binary { op, .. } => op == "to",
+            Kind::Call { callee, .. } => {
+                matches!(self.g.kind(*callee), Kind::NameRef { original, .. } if original == "Pair" || original == "Triple")
+            }
+            Kind::NameRef { decl: Some(d), .. } => {
+                for node in &self.g.nodes {
+                    match &node.kind {
+                        Kind::VarDecl { name_node, ty, init, .. } if name_node == d => {
+                            if let Some(t) = ty {
+                                return t.trim_start_matches('?').starts_with('(');
+                            }
+                            if let Some(i) = init {
+                                return self.looks_tuple(*i);
+                            }
+                            return false;
+                        }
+                        Kind::Param { name_node, ty } if name_node == d => {
+                            return ty.trim_start_matches('?').starts_with('(');
+                        }
+                        _ => {}
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// 启发式判断表达式是否求值为浮点数（用于补显式 Int64→Float64 提升）。
+    fn looks_float(&self, id: NodeId) -> bool {        match self.g.kind(id) {
             Kind::FloatLit(_) => true,
             Kind::Unary { expr, .. } => self.looks_float(*expr),
             Kind::Binary { op, lhs, rhs } => {

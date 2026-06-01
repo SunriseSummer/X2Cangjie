@@ -103,6 +103,14 @@ impl Parser {
         let mut items = Vec::new();
         self.skip_seps();
         while !self.at_eof() {
+            // 跳过 Kotlin 的 package / import 行（仓颉侧自管导入）。
+            if matches!(self.peek(), Tok::Ident(x) if x == "import" || x == "package") {
+                while !matches!(self.peek(), Tok::Newline | Tok::Eof) {
+                    self.bump();
+                }
+                self.skip_seps();
+                continue;
+            }
             let item = self.parse_top_level()?;
             items.push(item);
             self.skip_seps();
