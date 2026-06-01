@@ -148,20 +148,20 @@ fn run_soc_analysis(src: &str) {
     eprintln!("SOC_NODES:{}", eng.g.nodes.len());
     eprintln!("SOC_TOTAL_UPDATES:{}", eng.total_updates);
 
-    // Timing: 比较批量模式 vs SOC 模式
-    let start_bulk = std::time::Instant::now();
-    let toks2 = lexer::Lexer::new(src).tokenize().unwrap();
+    // Timing: 比较批量模式 vs SOC 模式（此处源码已通过 Phase 1 验证）
+    let Ok(toks2) = lexer::Lexer::new(src).tokenize() else { return };
     let mut p2 = parser::Parser::new(toks2);
-    p2.parse_program().unwrap();
+    if p2.parse_program().is_err() { return }
+    let start = std::time::Instant::now();
     let mut eng2 = engine::Engine::new(p2.g);
     eng2.relax();
-    let bulk_time = start_bulk.elapsed();
+    let bulk_time = start.elapsed();
     let bulk_output = eng2.output();
 
-    let start_soc = std::time::Instant::now();
-    let toks3 = lexer::Lexer::new(src).tokenize().unwrap();
+    let Ok(toks3) = lexer::Lexer::new(src).tokenize() else { return };
     let mut p3 = parser::Parser::new(toks3);
-    p3.parse_program().unwrap();
+    if p3.parse_program().is_err() { return }
+    let start_soc = std::time::Instant::now();
     let mut eng3 = engine::Engine::new(p3.g);
     eng3.relax_soc();
     let soc_time = start_soc.elapsed();
