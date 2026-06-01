@@ -255,7 +255,12 @@ impl Engine {
                     }
                 } else {
                     let a: Vec<String> = args.iter().map(|x| self.t(*x)).collect::<Option<_>>()?;
-                    Some(format!("{}([{}])", ctor, a.join(", ")))
+                    // 显式元素类型（如 `listOf<Shape>(...)`）保留为 `ArrayList<Shape>([...])`，
+                    // 以便仓颉对异构子类型元素推断出共同超类型。
+                    match elem {
+                        Some(e) => Some(format!("{}<{}>([{}])", ctor, e, a.join(", "))),
+                        None => Some(format!("{}([{}])", ctor, a.join(", "))),
+                    }
                 }
             }
             Kind::Lambda { params, body } => {
@@ -450,17 +455,51 @@ impl Engine {
                 Some(d) => Some(format!("{}!: {} = {}", self.t(name_node)?, ty, self.t(d)?)),
                 None => Some(format!("{}: {}", self.t(name_node)?, ty)),
             },
-            Kind::Func { name, params, ret, body, is_main } => {
+            Kind::Func { name, params, ret, body, is_main, is_abstract, is_override } => {
                 let ps: Vec<String> = params.iter().map(|p| self.t(*p)).collect::<Option<_>>()?;
-                let b = self.render_block(body)?;
                 if is_main {
-                    Some(format!("main() {}", b))
-                } else {
-                    let r = ret.map(|r| format!(": {}", r)).unwrap_or_default();
-                    Some(format!("func {}({}){} {}", name, ps.join(", "), r, b))
+                    let b = self.render_block(body)?;
+                    return Some(format!("main() {}", b));
                 }
+                let r = ret.map(|r| format!(": {}", r)).unwrap_or_default();
+                let sig = format!("{}({}){}", name, ps.join(", "), r);
+                // 抽象方法（接口/抽象类）：仅签名，无函数体。仓颉抽象方法须 public。
+                if is_abstract {
+                    return Some(format!("public func {}", sig));
+                }
+                let b = self.render_block(body)?;
+                // override：实现接口/抽象方法，仓颉要求 `public func`。
+                let vis = if is_override { "public " } else { "" };
+                Some(format!("{}func {} {}", vis, sig, b))
             }
-            Kind::Class { name, ctor_params, members, superclass, is_open, is_data } => {
+            Kind::Class { name, ctor_params, members, superclass, is_open, is_data, is_interface, is_abstract, interfaces, super_args } => {
+                // 接口：仅渲染抽象方法签名（成员均无函数体）。
+                if is_interface {
+                    let mut ibody = String::new();
+                    for m in &members {
+                        if let Kind::Func { name: fname, params, ret, .. } = self.g.kind(*m) {
+                            let ps: Vec<String> =
+                                params.iter().map(|p| self.t(*p)).collect::<Option<_>>()?;
+                            let r = ret.clone().map(|r| format!(": {}", r)).unwrap_or_default();
+                            ibody.push_str(&format!(
+                                "{}func {}({}){}\n",
+                                IND,
+                                fname,
+                                ps.join(", "),
+                                r
+                            ));
+                        }
+                    }
+                    let sup = if interfaces.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" <: {}", interfaces.join(" & "))
+                    };
+                    if ibody.is_empty() {
+                        return Some(format!("interface {}{} {{}}", name, sup));
+                    }
+                    return Some(format!("interface {}{} {{\n{}}}", name, sup, ibody));
+                }
                 let mut body = String::new();
                 // 成员变量（来自主构造参数中带 val/var 的部分）
                 for p in &ctor_params {
@@ -474,13 +513,23 @@ impl Engine {
                         CtorParamKind::Plain => {}
                     }
                 }
-                // 构造函数
-                if !ctor_params.is_empty() {
+                // 构造函数：当有构造参数或需调用父类构造器时生成。
+                let super_call: Option<String> = if super_args.is_empty() {
+                    None
+                } else {
+                    let a: Vec<String> =
+                        super_args.iter().map(|x| self.t(*x)).collect::<Option<_>>()?;
+                    Some(format!("super({})", a.join(", ")))
+                };
+                if !ctor_params.is_empty() || super_call.is_some() {
                     let ps: Vec<String> = ctor_params
                         .iter()
                         .map(|p| format!("{}: {}", p.name, p.ty))
                         .collect();
                     body.push_str(&format!("{}init({}) {{\n", IND, ps.join(", ")));
+                    if let Some(sc) = &super_call {
+                        body.push_str(&format!("{}{}{}\n", IND, IND, sc));
+                    }
                     for p in &ctor_params {
                         if p.kind != CtorParamKind::Plain {
                             body.push_str(&format!("{}{}this.{} = {}\n", IND, IND, p.name, p.name));
@@ -510,11 +559,18 @@ impl Engine {
                         IND, IND, IND, name, fields.join(", "), IND
                     ));
                 }
-                let kw = if is_open { "open class" } else { "class" };
+                let kw = if is_abstract {
+                    "abstract class"
+                } else if is_open {
+                    "open class"
+                } else {
+                    "class"
+                };
                 let mut ifaces: Vec<String> = Vec::new();
                 if let Some(s) = &superclass {
                     ifaces.push(s.clone());
                 }
+                ifaces.extend(interfaces.iter().cloned());
                 if is_data {
                     ifaces.push("ToString".to_string());
                 }

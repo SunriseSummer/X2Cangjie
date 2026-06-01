@@ -124,10 +124,12 @@ impl Parser {
         // 跳过可见性 / 修饰符
         let mods = self.skip_modifiers();
         if self.is_kw("fun") {
-            self.parse_fun()
+            self.parse_fun(&mods)
         } else if self.is_kw("enum") {
             self.parse_enum()
-        } else if self.is_kw("class") || self.is_kw("data") || self.is_kw("object") {
+        } else if self.is_kw("class") || self.is_kw("data") || self.is_kw("object")
+            || self.is_kw("interface")
+        {
             self.parse_class(&mods)
         } else {
             // 顶层语句（少见）——并入隐式块
@@ -158,9 +160,27 @@ impl Parser {
     }
 
     // ---- 函数 ----
-    fn parse_fun(&mut self) -> PResult<NodeId> {
+    fn parse_fun(&mut self, mods: &[String]) -> PResult<NodeId> {
         self.eat_kw("fun");
         let name = self.expect_ident()?;
+        // 跳过泛型形参 `<T>`（声明端，不影响渲染）。
+        if self.is_sym("<") {
+            let mut depth = 0;
+            loop {
+                if self.is_sym("<") {
+                    depth += 1;
+                } else if self.is_sym(">") {
+                    depth -= 1;
+                    if depth == 0 {
+                        self.bump();
+                        break;
+                    }
+                } else if self.at_eof() {
+                    break;
+                }
+                self.bump();
+            }
+        }
         self.push_scope();
         let mut params = Vec::new();
         self.expect_sym("(")?;
@@ -189,20 +209,34 @@ impl Parser {
         if self.eat_sym(":") {
             ret = Some(self.parse_type()?);
         }
-        // 函数体：块 或 `= expr`
+        // 函数体：块 / `= expr` / 无（接口/抽象方法）。
         let body;
+        let mut is_abstract = false;
         if self.eat_sym("=") {
             self.skip_newlines();
             let e = self.parse_expr()?;
             let r = self.g.add(Kind::Return { value: Some(e) });
             body = self.g.add(Kind::Block { stmts: vec![r] });
-        } else {
+        } else if self.is_sym("{") {
             body = self.parse_block()?;
+        } else {
+            // 无函数体：抽象/接口方法声明。
+            is_abstract = true;
+            body = self.g.add(Kind::Block { stmts: vec![] });
         }
         self.pop_scope();
         let is_main = name == "main";
         let ret = if is_main { None } else { ret };
-        Ok(self.g.add(Kind::Func { name: safe_name(&name), params, ret, body, is_main }))
+        let is_override = mods.iter().any(|m| m == "override");
+        Ok(self.g.add(Kind::Func {
+            name: safe_name(&name),
+            params,
+            ret,
+            body,
+            is_main,
+            is_abstract,
+            is_override,
+        }))
     }
 
     // ---- 枚举 ----
@@ -265,7 +299,8 @@ impl Parser {
     fn parse_class(&mut self, mods: &[String]) -> PResult<NodeId> {
         let is_data = self.eat_kw("data");
         let is_object = self.is_kw("object");
-        self.bump(); // class / object
+        let is_interface = self.is_kw("interface");
+        self.bump(); // class / object / interface
         let name = self.expect_ident()?;
         // 跳过泛型形参 `<T>`
         if self.is_sym("<") {
@@ -313,15 +348,40 @@ impl Parser {
             }
             self.expect_sym(")")?;
         }
-        // 继承列表：捕获首个父类名（忽略接口/构造实参）。
+        // 继承列表：带 `(...)` 实参的超类型视为父类（生成 `super(...)`），
+        // 其余无实参的视为接口。
         let mut superclass = None;
+        let mut interfaces = Vec::new();
+        let mut super_args = Vec::new();
         if self.eat_sym(":") {
-            if let Tok::Ident(sup) = self.peek().clone() {
-                self.bump();
-                superclass = Some(safe_name(&sup));
-            }
-            while !self.is_sym("{") && !matches!(self.peek(), Tok::Newline | Tok::Eof) {
-                self.bump();
+            loop {
+                self.skip_newlines();
+                let sup = match self.peek().clone() {
+                    Tok::Ident(s) => {
+                        self.bump();
+                        s
+                    }
+                    _ => break,
+                };
+                if self.is_sym("(") {
+                    self.bump();
+                    self.skip_newlines();
+                    while !self.is_sym(")") {
+                        super_args.push(self.parse_expr()?);
+                        self.skip_newlines();
+                        if !self.eat_sym(",") {
+                            break;
+                        }
+                        self.skip_newlines();
+                    }
+                    self.expect_sym(")")?;
+                    superclass = Some(safe_name(&sup));
+                } else {
+                    interfaces.push(safe_name(&sup));
+                }
+                if !self.eat_sym(",") {
+                    break;
+                }
             }
         }
         let mut members = Vec::new();
@@ -331,9 +391,9 @@ impl Parser {
             // 让构造参数在成员体内可见
             self.skip_seps();
             while !self.is_sym("}") && !self.at_eof() {
-                self.skip_modifiers();
+                let mmods = self.skip_modifiers();
                 if self.is_kw("fun") {
-                    members.push(self.parse_fun()?);
+                    members.push(self.parse_fun(&mmods)?);
                 } else if self.is_kw("val") || self.is_kw("var") {
                     members.push(self.parse_var_decl()?);
                 } else if self.is_kw("init") {
@@ -354,8 +414,20 @@ impl Parser {
             self.pop_scope();
         }
         let _ = is_object;
+        let is_abstract = mods.iter().any(|m| m == "abstract");
         let is_open = mods.iter().any(|m| m == "open" || m == "abstract" || m == "sealed");
-        Ok(self.g.add(Kind::Class { name: safe_name(&name), ctor_params, members, superclass, is_open, is_data }))
+        Ok(self.g.add(Kind::Class {
+            name: safe_name(&name),
+            ctor_params,
+            members,
+            superclass,
+            is_open,
+            is_data,
+            is_interface,
+            is_abstract,
+            interfaces,
+            super_args,
+        }))
     }
 
     // ================= 语句 =================
@@ -413,7 +485,7 @@ impl Parser {
             return Ok(self.g.add(Kind::Raw("continue".into())));
         }
         if self.is_kw("fun") {
-            return self.parse_fun();
+            return self.parse_fun(&[]);
         }
         // 表达式语句 / 赋值
         let e = self.parse_expr()?;

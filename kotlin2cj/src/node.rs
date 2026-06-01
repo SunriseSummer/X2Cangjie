@@ -24,6 +24,10 @@ pub enum Kind {
         ret: Option<String>, // 已映射的仓颉返回类型
         body: NodeId,
         is_main: bool,
+        /// 抽象方法（接口/抽象类中无函数体的声明）。
+        is_abstract: bool,
+        /// `override` 修饰：实现接口/抽象方法，仓颉需 `public func`。
+        is_override: bool,
     },
     Param {
         name_node: NodeId,
@@ -41,6 +45,14 @@ pub enum Kind {
         is_open: bool,
         /// 是否为 `data class`（生成 ToString 以对齐 Kotlin 自动 toString）。
         is_data: bool,
+        /// 是否为 `interface`。
+        is_interface: bool,
+        /// 是否为 `abstract class`（抽象方法须 `public func`）。
+        is_abstract: bool,
+        /// 额外实现的接口（继承列表中不带构造实参的超类型）。
+        interfaces: Vec<String>,
+        /// 调用父类构造器的实参（继承列表中带 `(...)` 的超类型）。
+        super_args: Vec<NodeId>,
     },
     /// 枚举类（仅简单具名常量项）。
     Enum {
@@ -225,7 +237,10 @@ impl Graph {
                     v.push(*d);
                 }
             }
-            Kind::Class { members, .. } => v.extend(members),
+            Kind::Class { members, super_args, .. } => {
+                v.extend(members);
+                v.extend(super_args);
+            }
             Kind::Enum { .. } => {}
             Kind::VarDecl { name_node, init, .. } => {
                 v.push(*name_node);
