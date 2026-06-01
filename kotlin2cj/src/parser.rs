@@ -114,31 +114,30 @@ impl Parser {
 
     fn parse_top_level(&mut self) -> PResult<NodeId> {
         // 跳过可见性 / 修饰符
-        self.skip_modifiers();
+        let mods = self.skip_modifiers();
         if self.is_kw("fun") {
             self.parse_fun()
         } else if self.is_kw("enum") {
             self.parse_enum()
         } else if self.is_kw("class") || self.is_kw("data") || self.is_kw("object") {
-            self.parse_class()
+            self.parse_class(&mods)
         } else {
             // 顶层语句（少见）——并入隐式块
             self.parse_statement()
         }
     }
 
-    fn skip_modifiers(&mut self) {
+    fn skip_modifiers(&mut self) -> Vec<String> {
         const MODS: &[&str] = &[
             "public", "private", "internal", "protected", "open", "final", "abstract",
             "override", "inline", "data", "sealed", "const", "lateinit", "companion",
         ];
+        let mut seen = Vec::new();
         loop {
             let mut matched = false;
             if let Tok::Ident(x) = self.peek() {
-                if MODS.contains(&x.as_str()) && !(x == "data" && self.peek_is_class_after()) {
-                    // 保留 data 给 class 处理
-                }
                 if MODS.contains(&x.as_str()) && x != "data" && x != "const" {
+                    seen.push(x.clone());
                     self.bump();
                     matched = true;
                 }
@@ -147,14 +146,7 @@ impl Parser {
                 break;
             }
         }
-    }
-
-    fn peek_is_class_after(&self) -> bool {
-        if self.pos + 1 < self.toks.len() {
-            matches!(&self.toks[self.pos + 1].tok, Tok::Ident(x) if x == "class")
-        } else {
-            false
-        }
+        seen
     }
 
     // ---- 函数 ----
@@ -257,12 +249,30 @@ impl Parser {
     }
 
     // ---- 类 ----
-    fn parse_class(&mut self) -> PResult<NodeId> {
+    fn parse_class(&mut self, mods: &[String]) -> PResult<NodeId> {
         let is_data = self.eat_kw("data");
         let _ = is_data;
         let is_object = self.is_kw("object");
         self.bump(); // class / object
         let name = self.expect_ident()?;
+        // 跳过泛型形参 `<T>`
+        if self.is_sym("<") {
+            let mut depth = 0;
+            loop {
+                if self.is_sym("<") {
+                    depth += 1;
+                } else if self.is_sym(">") {
+                    depth -= 1;
+                    if depth == 0 {
+                        self.bump();
+                        break;
+                    }
+                } else if self.at_eof() {
+                    break;
+                }
+                self.bump();
+            }
+        }
         let mut ctor_params = Vec::new();
         if self.eat_sym("(") {
             self.skip_newlines();
@@ -291,8 +301,13 @@ impl Parser {
             }
             self.expect_sym(")")?;
         }
-        // 跳过继承列表
+        // 继承列表：捕获首个父类名（忽略接口/构造实参）。
+        let mut superclass = None;
         if self.eat_sym(":") {
+            if let Tok::Ident(sup) = self.peek().clone() {
+                self.bump();
+                superclass = Some(safe_name(&sup));
+            }
             while !self.is_sym("{") && !matches!(self.peek(), Tok::Newline | Tok::Eof) {
                 self.bump();
             }
@@ -327,7 +342,8 @@ impl Parser {
             self.pop_scope();
         }
         let _ = is_object;
-        Ok(self.g.add(Kind::Class { name: safe_name(&name), ctor_params, members }))
+        let is_open = mods.iter().any(|m| m == "open" || m == "abstract" || m == "sealed");
+        Ok(self.g.add(Kind::Class { name: safe_name(&name), ctor_params, members, superclass, is_open }))
     }
 
     // ================= 语句 =================
@@ -413,6 +429,33 @@ impl Parser {
             self.eat_kw("val");
             false
         };
+        // 解构声明 `val (a, b) = expr`
+        if self.is_sym("(") {
+            self.bump();
+            let mut name_nodes = Vec::new();
+            loop {
+                let nm = self.expect_ident()?;
+                // 跳过可选类型标注 `a: T`
+                if self.eat_sym(":") {
+                    self.parse_type()?;
+                }
+                let nn = self.g.add(Kind::Name { original: nm.clone() });
+                name_nodes.push((nm, nn));
+                if !self.eat_sym(",") {
+                    break;
+                }
+                self.skip_newlines();
+            }
+            self.expect_sym(")")?;
+            self.expect_sym("=")?;
+            self.skip_newlines();
+            let init = self.parse_expr()?;
+            for (nm, nn) in &name_nodes {
+                self.declare(nm, *nn);
+            }
+            let names: Vec<NodeId> = name_nodes.into_iter().map(|(_, nn)| nn).collect();
+            return Ok(self.g.add(Kind::DestructureDecl { mutable, names, init }));
+        }
         let name = self.expect_ident()?;
         let mut ty = None;
         if self.eat_sym(":") {
@@ -596,10 +639,25 @@ impl Parser {
     fn parse_comparison(&mut self) -> PResult<NodeId> {
         self.parse_binary_level(&["<", "<=", ">", ">="], Self::parse_named_checks)
     }
-    /// Kotlin 的 `in` / `!in` 成员检查（优先级介于比较与 elvis 之间）。
+    /// Kotlin 的 `in` / `!in` 成员检查与 `is` / `!is` 类型判定
+    /// （优先级介于比较与 elvis 之间）。
     fn parse_named_checks(&mut self) -> PResult<NodeId> {
         let mut lhs = self.parse_elvis()?;
         loop {
+            // `is T` / `!is T` 类型判定
+            if self.is_kw("is") {
+                self.bump();
+                let ty = self.parse_type()?;
+                lhs = self.g.add(Kind::IsCheck { expr: lhs, ty, negate: false });
+                continue;
+            }
+            if self.is_sym("!") && self.peek_next_is_kw("is") {
+                self.bump(); // !
+                self.bump(); // is
+                let ty = self.parse_type()?;
+                lhs = self.g.add(Kind::IsCheck { expr: lhs, ty, negate: true });
+                continue;
+            }
             let negate = if self.is_sym("!") && self.peek_next_is_kw("in") {
                 self.bump(); // !
                 true
@@ -730,6 +788,9 @@ impl Parser {
                     let lam = self.parse_lambda()?;
                     if name == "forEach" {
                         e = self.build_for_each(e, lam);
+                    } else if name == "let" {
+                        // recv?.let { it -> ... } / recv.let { ... }
+                        e = self.build_safe_let(e, lam);
                     } else {
                         let m = self.g.add(Kind::Member { base: e, name });
                         e = self.g.add(Kind::Call { callee: m, args: vec![lam] });
@@ -771,6 +832,16 @@ impl Parser {
             init: None,
         });
         self.g.add(Kind::ForEach { var, iter: recv, body })
+    }
+
+    fn build_safe_let(&mut self, recv: NodeId, lam: NodeId) -> NodeId {
+        let (params, body) = if let Kind::Lambda { params, body } = self.g.kind(lam) {
+            (params.clone(), *body)
+        } else {
+            (Vec::new(), lam)
+        };
+        let var = params.first().cloned().unwrap_or_else(|| "it".to_string());
+        self.g.add(Kind::SafeLet { recv, var, body })
     }
 
     fn peek_next_is_bang(&self) -> bool {
@@ -1038,8 +1109,15 @@ impl Parser {
             } else {
                 let mut pats = Vec::new();
                 loop {
-                    let p = self.parse_expr()?;
-                    pats.push(p);
+                    // `is T` 类型分支模式
+                    if self.is_kw("is") {
+                        self.bump();
+                        let ty = self.parse_type()?;
+                        pats.push(self.g.add(Kind::TypePat { ty }));
+                    } else {
+                        let p = self.parse_expr()?;
+                        pats.push(p);
+                    }
                     if !self.eat_sym(",") {
                         break;
                     }

@@ -187,6 +187,9 @@ impl Engine {
                     "trim" => "trimAscii",
                     "trimStart" => "trimAsciiStart",
                     "trimEnd" => "trimAsciiEnd",
+                    // Kotlin 的 `map.keys` / `map.values` 属性 → 仓颉方法。
+                    "keys" => return Some(format!("{}.keys()", b)),
+                    "values" => return Some(format!("{}.values()", b)),
                     other => other,
                 };
                 Some(format!("{}.{}", b, mapped))
@@ -222,6 +225,16 @@ impl Engine {
                 } else {
                     Some(format!("{{ {}\n{}\n}}", head, indent(&inner, 1)))
                 }
+            }
+            Kind::SafeLet { recv, var, body } => {
+                // recv 为下标读取时改用 .get(index) 以得到 Option。
+                let r = if let Kind::Index { base, index } = self.g.kind(recv) {
+                    format!("{}.get({})", self.atom(*base)?, self.t(*index)?)
+                } else {
+                    self.atom(recv)?
+                };
+                let blk = self.render_block(body)?;
+                Some(format!("if (let Some({}) <- {}) {}", crate::parser::safe_name(&var), r, blk))
             }
             Kind::StrTemplate { parts } => {
                 let mut s = String::from("\"");
@@ -296,6 +309,11 @@ impl Engine {
                 let ns: Vec<String> = names.iter().map(|n| self.t(*n)).collect::<Option<_>>()?;
                 Some(format!("({})", ns.join(", ")))
             }
+            Kind::DestructureDecl { mutable, names, init } => {
+                let ns: Vec<String> = names.iter().map(|n| self.t(*n)).collect::<Option<_>>()?;
+                let kw = if mutable { "var" } else { "let" };
+                Some(format!("{} ({}) = {}", kw, ns.join(", "), self.t(init)?))
+            }
             Kind::ForRange { var, range, body } => {
                 let vn = self.loop_var_name(var)?;
                 Some(format!("for ({} in {}) {}", vn, self.t(range)?, self.render_block(body)?))
@@ -321,6 +339,15 @@ impl Engine {
             }
             Kind::When { subject, arms } => self.render_when(subject, &arms),
             Kind::Block { .. } => self.render_block(id),
+            Kind::IsCheck { expr, ty, negate } => {
+                let e = self.atom(expr)?;
+                if negate {
+                    Some(format!("!({} is {})", e, ty))
+                } else {
+                    Some(format!("({} is {})", e, ty))
+                }
+            }
+            Kind::TypePat { ty } => Some(format!("_: {}", ty)),
 
             // ---- 声明 ----
             Kind::Param { name_node, ty } => Some(format!("{}: {}", self.t(name_node)?, ty)),
@@ -334,7 +361,7 @@ impl Engine {
                     Some(format!("func {}({}){} {}", name, ps.join(", "), r, b))
                 }
             }
-            Kind::Class { name, ctor_params, members } => {
+            Kind::Class { name, ctor_params, members, superclass, is_open } => {
                 let mut body = String::new();
                 // 成员变量（来自主构造参数中带 val/var 的部分）
                 for p in &ctor_params {
@@ -368,10 +395,15 @@ impl Engine {
                     body.push_str(&indent(&mt, 1));
                     body.push('\n');
                 }
+                let kw = if is_open { "open class" } else { "class" };
+                let sup = match &superclass {
+                    Some(s) => format!(" <: {}", s),
+                    None => String::new(),
+                };
                 if body.is_empty() {
-                    Some(format!("class {} {{}}", name))
+                    Some(format!("{} {}{} {{}}", kw, name, sup))
                 } else {
-                    Some(format!("class {} {{\n{}}}", name, body))
+                    Some(format!("{} {}{} {{\n{}}}", kw, name, sup, body))
                 }
             }
             Kind::Enum { name, entries } => {
@@ -420,12 +452,31 @@ impl Engine {
         match subject {
             Some(subj) => {
                 let s = self.t(subj)?;
+                // 主语为简单标识符时，类型分支可复用该名字绑定，获得「智能转换」语义。
+                let bind = if let Kind::NameRef { original, .. } = self.g.kind(subj) {
+                    crate::parser::safe_name(original)
+                } else {
+                    "_".to_string()
+                };
                 let mut body = String::new();
                 for a in arms {
                     let arm_body = self.render_arm_body(a.body)?;
                     match &a.patterns {
                         Some(ps) => {
-                            let pts: Vec<String> = ps.iter().map(|p| self.t(*p)).collect::<Option<_>>()?;
+                            // 单一类型分支 `is T` → `case bind: T =>`（智能转换）。
+                            if ps.len() == 1 {
+                                if let Kind::TypePat { ty } = self.g.kind(ps[0]) {
+                                    body.push_str(&format!("case {}: {} => {}\n", bind, ty, arm_body));
+                                    continue;
+                                }
+                            }
+                            let pts: Vec<String> = ps
+                                .iter()
+                                .map(|p| match self.g.kind(*p) {
+                                    Kind::TypePat { ty } => Some(format!("_: {}", ty)),
+                                    _ => self.t(*p),
+                                })
+                                .collect::<Option<_>>()?;
                             body.push_str(&format!("case {} => {}\n", pts.join(" | "), arm_body));
                         }
                         None => {
@@ -468,12 +519,41 @@ impl Engine {
     }
 
     fn render_call(&self, callee: NodeId, args: &[NodeId]) -> Option<String> {
-        // recv.removeAt(i) → recv.remove(at: i)
+        // 成员方法的特殊映射。
         if let Kind::Member { base, name } = self.g.kind(callee) {
-            if name == "removeAt" && args.len() == 1 {
-                let b = self.atom(*base)?;
-                let i = self.t(args[0])?;
-                return Some(format!("{}.remove(at: {})", b, i));
+            let b = self.atom(*base)?;
+            match name.as_str() {
+                // recv.removeAt(i) → recv.remove(at: i)
+                "removeAt" if args.len() == 1 => {
+                    return Some(format!("{}.remove(at: {})", b, self.t(args[0])?));
+                }
+                // s.substring(a, b) → s[a..b]；s.substring(a) → s[a..]
+                "substring" if args.len() == 2 => {
+                    return Some(format!("{}[{}..{}]", b, self.t(args[0])?, self.t(args[1])?));
+                }
+                "substring" if args.len() == 1 => {
+                    return Some(format!("{}[{}..]", b, self.t(args[0])?));
+                }
+                // xs.isNotEmpty() → !(xs.isEmpty())
+                "isNotEmpty" if args.is_empty() => {
+                    return Some(format!("!({}.isEmpty())", b));
+                }
+                // xs.first() → xs[0]；xs.last() → xs[xs.size - 1]
+                "first" if args.is_empty() => {
+                    return Some(format!("{}[0]", b));
+                }
+                "last" if args.is_empty() => {
+                    return Some(format!("{}[{}.size - 1]", b, b));
+                }
+                // List<String>.joinToString(sep?) → String.join(xs.toArray(), delimiter: sep)
+                "joinToString" => {
+                    let sep = match args.first() {
+                        Some(a) => self.t(*a)?,
+                        None => "\", \"".to_string(),
+                    };
+                    return Some(format!("String.join({}.toArray(), delimiter: {})", b, sep));
+                }
+                _ => {}
             }
         }
         let c = self.atom(callee)?;

@@ -129,8 +129,26 @@ impl<'a> Lexer<'a> {
 
     fn lex_number(&mut self) -> Tok {
         let start = self.pos;
+        // 十六进制 / 二进制字面量：`0x..` / `0b..`（仓颉同样支持，原样保留，仅去后缀）。
+        if self.peek() == b'0' && matches!(self.peek2(), b'x' | b'X' | b'b' | b'B') {
+            self.bump(); // 0
+            self.bump(); // x / b
+            while self.peek().is_ascii_alphanumeric() || self.peek() == b'_' {
+                self.bump();
+            }
+            // 去掉整型后缀 L/u/U
+            while matches!(self.peek(), b'L' | b'u' | b'U') {
+                self.bump();
+            }
+            let raw = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
+            let s: String = raw
+                .chars()
+                .filter(|c| !matches!(c, 'L' | 'u' | 'U'))
+                .collect();
+            return Tok::Int(s);
+        }
         let mut is_float = false;
-        while self.peek().is_ascii_digit() {
+        while self.peek().is_ascii_digit() || self.peek() == b'_' {
             self.bump();
         }
         if self.peek() == b'.' && self.peek2().is_ascii_digit() {
@@ -159,8 +177,8 @@ impl<'a> Lexer<'a> {
             self.bump();
         }
         let s = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
-        // 去掉后缀
-        let s: String = s.chars().filter(|c| c.is_ascii_digit() || *c == '.' || *c == 'e' || *c == 'E' || *c == '+' || *c == '-').collect();
+        // 去掉后缀，保留下划线分隔符（仓颉支持 `1_000`）。
+        let s: String = s.chars().filter(|c| c.is_ascii_digit() || *c == '.' || *c == 'e' || *c == 'E' || *c == '+' || *c == '-' || *c == '_').collect();
         if is_float || suffix_float {
             Tok::Float(s)
         } else {

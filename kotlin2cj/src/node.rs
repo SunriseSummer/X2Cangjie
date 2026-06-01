@@ -33,6 +33,10 @@ pub enum Kind {
         name: String,
         ctor_params: Vec<CtorParam>,
         members: Vec<NodeId>,
+        /// 父类名（已映射），用于 `class C <: Super`。
+        superclass: Option<String>,
+        /// 是否可被继承（`open`/`abstract`/`sealed`）。
+        is_open: bool,
     },
     /// 枚举类（仅简单具名常量项）。
     Enum {
@@ -69,6 +73,8 @@ pub enum Kind {
     Repeat { count: NodeId, body: NodeId },
     /// 解构循环变量 `(k, v)`，其名字节点用于在作用域内建立引用依赖。
     Destructure { names: Vec<NodeId> },
+    /// 解构声明 `val (a, b) = expr` → 仓颉 `let (a, b) = expr`。
+    DestructureDecl { mutable: bool, names: Vec<NodeId>, init: NodeId },
     When { subject: Option<NodeId>, arms: Vec<WhenArm> },
 
     // ---- 表达式 ----
@@ -88,6 +94,12 @@ pub enum Kind {
     Index { base: NodeId, index: NodeId },
     Member { base: NodeId, name: String },
     Lambda { params: Vec<String>, body: NodeId },
+    /// `recv?.let { it -> ... }` → `if (let Some(it) <- recv) { ... }`。
+    SafeLet { recv: NodeId, var: String, body: NodeId },
+    /// `expr is T` / `expr !is T` 类型判定。
+    IsCheck { expr: NodeId, ty: String, negate: bool },
+    /// `when` 的类型分支模式 `is T`（仅出现在 when 臂的 patterns 中）。
+    TypePat { ty: String },
     /// 已经渲染好的原子片段（如简单标识符）。
     Raw(String),
 }
@@ -262,6 +274,10 @@ impl Graph {
                 v.push(*body);
             }
             Kind::Destructure { names } => v.extend(names),
+            Kind::DestructureDecl { names, init, .. } => {
+                v.extend(names);
+                v.push(*init);
+            }
             Kind::When { subject, arms } => {
                 if let Some(s) = subject {
                     v.push(*s);
@@ -296,6 +312,12 @@ impl Graph {
             }
             Kind::Member { base, .. } => v.push(*base),
             Kind::Lambda { body, .. } => v.push(*body),
+            Kind::SafeLet { recv, body, .. } => {
+                v.push(*recv);
+                v.push(*body);
+            }
+            Kind::IsCheck { expr, .. } => v.push(*expr),
+            Kind::TypePat { .. } => {}
             Kind::StrTemplate { parts } => {
                 for p in parts {
                     if let TemplatePart::Expr(e) = p {
