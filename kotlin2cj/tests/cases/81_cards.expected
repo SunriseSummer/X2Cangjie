@@ -1,0 +1,13 @@
+cards=26
+total=170
+hearts=13
+5 -> small
+-3 -> neg
+0 -> zero
+42 -> big
+7 -> small
+sum=51 max=42 min=-3
+fibs=0,1,1,2,3,5,8,13,21,34,55
+byLen=date apple banana cherry
+long=apple,banana,cherry
+s=4 i=4

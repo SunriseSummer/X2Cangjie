@@ -129,7 +129,11 @@ main() {
   类继承（`sealed`/`open` → `open class`，子类 `<: Super`）。
 - 异常：`try / catch / finally`、`throw`。
 - 函数（块体 / 表达式体 `=` / 递归 / 嵌套局部函数 / `main`）；顶层全局 `val`；`maxOf` / `minOf`。
-- 高阶：`xs.forEach { ... }`（含隐式 `it`）→ `for` 循环。
+- 高阶：`xs.forEach { ... }`（含隐式 `it`）→ `for` 循环；**返回集合的链式高阶**
+  `map` / `filter` / `sorted` / `sortedBy` / `sortedDescending` / `reversed` / `toList`
+  → `collectArrayList(xs.iterator()....)`；聚合 `sum` / `sumOf` / `fold` / `reduce` /
+  `count` / `any` / `all` / `none` / `max` / `min` / `maxOrNull` / `minOrNull`、
+  `joinToString { it -> ... }`（带 transform）。
 - 空安全：可空类型 `T?` → `?T`、Elvis `?:` → `??`、`!!` 剥离、
   `map[k] ?: d` → `map.get(k) ?? d`、`?.let { }` → `if (let Some(it) <- ...)`、
   `?.` 安全成员调用（下标 `m[k]?.x` → `m.get(k)?.x`，可级联 `?? d`）。
@@ -139,11 +143,12 @@ main() {
   `.contains`、`.removeAt(i)` → `.remove(at: i)`、嵌套集合。
 - 类：主构造器（`val/var/普通`参数）、成员变量与方法、对象创建、多类协作、继承、
   把类实例放入集合；`data class`（按普通类处理）。
-- 枚举：`enum class`（具名常量项）→ 仓颉 `enum` + `@Derive[Equatable]`，
-  支持 `==` 比较与 `when` 匹配。
+- 枚举：`enum class`（具名常量项）→ 仓颉 `enum` + `@Derive[Equatable]` + 自定义 `toString`，
+  支持 `==` 比较、`when` 匹配与 `println(e)` 输出裸名。
 - 字符串方法映射：`length`→`size`、`toUpperCase/toLowerCase`→`toAsciiUpper/Lower`、
   `trim`→`trimAscii`、`substring`→区间下标、`isNotEmpty`→`!isEmpty()`、`first/last`、
-  `joinToString`→`String.join`、`startsWith/endsWith/contains/isEmpty` 等直通。
+  `joinToString`→`String.join`、`startsWith/endsWith/contains/isEmpty` 等直通；
+  `for (c in s)` 逐字符遍历改写为 `s.runes()`（产出 `Rune` 而非字节）。
 
 类型映射速览：
 
@@ -162,7 +167,7 @@ main() {
 - 仓颉**不自动**把 `Int64` 隐式转 `Float64`，混合数值运算需在源端显式统一类型。
 - 仓颉浮点默认打印为 `3.140000` 这类格式。
 - 仓颉字符串下标 `s[i]` 取字节而非字符，避免对字符串做字符级下标。
-- 暂未覆盖：泛型函数、扩展函数、协程、`map/filter/reduce` 等返回集合的链式高阶调用、
+- 暂未覆盖：泛型函数、扩展函数、协程、惰性序列 `asSequence` 与 `groupBy`、
   默认参数与命名参数调用、可空接收者的流敏感智能转换、带参枚举与枚举成员函数。
   详见 [`State.md`](./State.md) 的现状评估与下一步规划。
 
@@ -172,7 +177,7 @@ main() {
 
 - **学习语料** [`corpus/`](./corpus/)：Kotlin↔仓颉平行片段与规则归纳表
   （`pairs.md`），是局部规则的来源。
-- **测试数据集** [`tests/cases/`](./tests/cases/)：69 个端到端用例，每个含
+- **测试数据集** [`tests/cases/`](./tests/cases/)：81 个端到端用例，每个含
   `.kt` 输入与 `.expected` 期望标准输出，覆盖基础 / 控制流 / 函数 / 集合 / 类 /
   算法 / 多类协作 / 不同规模。
 
@@ -184,7 +189,7 @@ python3 tests/run_tests.py
 # 结果汇总写入 tests/log.md
 ```
 
-当前基线：**69/69 翻译、编译、运行输出全部通过**。
+当前基线：**81/81 翻译、编译、运行输出全部通过**。
 
 ---
 
@@ -201,7 +206,7 @@ kotlin2cj/
 │   └── main.rs      # CLI
 ├── corpus/          # 学习语料（平行片段 + 规则表）
 ├── tests/
-│   ├── cases/       # 69 个 .kt / .expected 用例
+│   ├── cases/       # 81 个 .kt / .expected 用例
 │   └── run_tests.py # 端到端测试驱动
 ├── Design.md        # 技术方案
 ├── Readme.md        # 本文档
