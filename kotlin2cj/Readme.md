@@ -143,14 +143,16 @@ main() {
 - 数字字面量：十进制、`0x` 十六进制、`0b` 二进制、下划线分隔（`1_000`）。
 - 集合 `List/Map/Set`：字面量、显式泛型、`ArrayList/HashMap/HashSet` 构造器、下标读写、`.size`、`.add`、
   `.contains`、`.removeAt(i)` → `.remove(at: i)`、`.addAll` → `.add(all:)`、就地 `sort/sortDescending/sortBy`
-  → `std.sort` 全局 `sort(...)`、`withIndex`、`average`、`containsKey`/`getOrDefault`、嵌套集合。
-- 类：主构造器（`val/var/普通`参数）、成员变量与方法、对象创建、多类协作、继承、
+  → `std.sort` 全局 `sort(...)`（稳定排序 `stable: true`）、`withIndex`、`average`、`containsKey`/`getOrDefault`、嵌套集合。
+- 类：主构造器（`val/var/普通`参数）、成员变量与方法、对象创建、多类协作、继承、`init {}` 初始化块（并入构造器）、
   把类实例放入集合；`data class`（**自动生成 `toString` → `Name(f1=v1, ...)`**，对齐 Kotlin）；
   **接口 `interface`**、**抽象类 `abstract class` + `super(...)`**、**用户泛型容器类 `class Stack<T> { ... }`**。
-- 算术：混合 `Int`/`Float` 运算单侧自动 `Float64(...)` 提升；String 与非 String 的 `+` 拼接自动补 `.toString()`。
-- 可空智能转换：`if (x != null) { ...x... }`（含嵌套）→ `if (let Some(x) <- x) { ... }`（分支内再赋值则回退）。
+- 算术：混合 `Int`/`Float` 运算单侧自动 `Float64(...)` 提升；String 与非 String 的 `+` 拼接自动补 `.toString()`；
+  `Char ± Int` 码点运算。
+- 可空智能转换：`if (x != null) { ...x... }`（含嵌套）→ `if (let Some(x) <- x) { ... }`（分支内再赋值则回退）；
+  `x == null`/`x != null` 作为值表达式 → `x.isNone()`/`x.isSome()`。
 - 枚举：`enum class`（具名常量项）→ 仓颉 `enum` + `@Derive[Equatable]` + 自定义 `toString`，
-  支持 `==` 比较、`when` 匹配与 `println(e)` 输出裸名。
+  支持 `==` 比较、`when` 匹配、`println(e)` 输出裸名与 `Enum.values()` 遍历。
 - 字符串方法映射：`length`→`size`、`toUpperCase/toLowerCase`→`toAsciiUpper/Lower`、
   `trim`→`trimAscii`、`substring`→区间下标、`isNotEmpty`→`!isEmpty()`、`first/last`、
   `joinToString`→`String.join`、`startsWith/endsWith/contains/isEmpty` 等直通；
@@ -175,6 +177,7 @@ main() {
 ### 已知边界
 - 仓颉**不自动**把 `Int64` 隐式转 `Float64`，混合数值运算需在源端显式统一类型。
 - 仓颉浮点默认打印为 `3.140000` 这类格式。
+- 仓颉 `HashMap`/`HashSet` 的遍历顺序与 Kotlin 不一致；若输出依赖该序，需源端先 `sortedBy` 再遍历。
 - 仓颉字符串下标 `s[i]` 取字节而非字符；接收者可证明为字符串时已自动改 `s.toRuneArray()[i]` 取 `Rune`。
 - 暂未覆盖：泛型**函数**（泛型**类**已支持）、扩展函数、协程、惰性序列 `asSequence` 与 `groupBy`、
   可空接收者的**早返式**流敏感智能转换（`if (x == null) return` 后再用 `x`）、带参枚举与枚举成员函数。
@@ -186,7 +189,7 @@ main() {
 
 - **学习语料** [`corpus/`](./corpus/)：Kotlin↔仓颉平行片段与规则归纳表
   （`pairs.md`），是局部规则的来源。
-- **测试数据集** [`tests/cases/`](./tests/cases/)：85 个端到端用例（含 1 个 1068 行综合工具箱），每个含
+- **测试数据集** [`tests/cases/`](./tests/cases/)：90 个端到端用例（含 1 个 1068 行综合工具箱与 4 个 500+ 行实战程序），每个含
   `.kt` 输入与 `.expected` 期望标准输出，覆盖基础 / 控制流 / 函数 / 集合 / 类 /
   算法 / 多类协作 / 不同规模。
 
@@ -198,7 +201,7 @@ python3 tests/run_tests.py
 # 结果汇总写入 tests/log.md
 ```
 
-当前基线：**85/85 翻译、编译、运行输出全部通过**。
+当前基线：**90/90 翻译、编译、运行输出全部通过**。
 
 ---
 
@@ -215,7 +218,7 @@ kotlin2cj/
 │   └── main.rs      # CLI
 ├── corpus/          # 学习语料（平行片段 + 规则表）
 ├── tests/
-│   ├── cases/       # 85 个 .kt / .expected 用例
+│   ├── cases/       # 90 个 .kt / .expected 用例
 │   └── run_tests.py # 端到端测试驱动
 ├── Design.md        # 技术方案
 ├── Readme.md        # 本文档
