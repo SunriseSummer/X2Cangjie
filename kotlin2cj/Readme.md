@@ -44,21 +44,42 @@ cargo build --release
 ./target/release/kotlin2cj input.kt -o output.cj
 ```
 
-### 3.2 编译并运行翻译结果
+### 3.2 翻译整个 Kotlin 项目（→ cjpm 项目）
+```bash
+# 输入目录路径，输出到指定目录
+./target/release/kotlin2cj my_project/ -o my_project_cj/
+
+# 不指定输出目录时，默认输出到 my_project_cj/
+./target/release/kotlin2cj my_project/
+```
+
+项目级转换会：
+- 扫描目录中的所有 `.kt` 文件（递归）
+- 将所有源码合并为单一翻译单元（保证跨文件类型推断的正确性）
+- 自动生成 `cjpm.toml`、`src/main.cj`
+- 自动映射 Kotlin import → 仓颉 import
+
+### 3.3 编译并运行翻译结果
 ```bash
 source /tmp/cangjie/envsetup.sh
+
+# 单文件模式
 ./target/release/kotlin2cj input.kt -o output.cj
 cjc output.cj -o output
 ./output
+
+# 项目模式
+./target/release/kotlin2cj my_project/ -o my_project_cj/
+cd my_project_cj && cjpm build && cjpm run
 ```
 
-### 3.3 查看自组织统计
+### 3.4 查看自组织统计
 ```bash
 ./target/release/kotlin2cj input.kt --stats
 # 节点数 / 初始雪崩规模 / 状态更新总数 / 累计触发次数
 ```
 
-### 3.4 演示「重命名雪崩」与自动修复
+### 3.5 演示「重命名雪崩」与自动修复
 ```bash
 ./target/release/kotlin2cj input.kt --demo-avalanche
 # 选取一个被引用的局部声明改名，沿依赖边级联更新所有引用，
@@ -69,8 +90,9 @@ cjc output.cj -o output
 
 | 选项 | 说明 |
 |------|------|
-| `<input.kt>` | 输入的 Kotlin 文件（必填） |
-| `-o, --output <file>` | 输出文件，缺省打印到 stdout |
+| `<input.kt>` | 输入的 Kotlin 文件（单文件模式） |
+| `<project_dir>` | 输入的 Kotlin 项目目录（项目模式） |
+| `-o, --output <file\|dir>` | 输出文件/目录，缺省单文件模式打印到 stdout，项目模式默认 `<name>_cj/` |
 | `--stats` | 打印自组织 / 雪崩统计（写入 stderr） |
 | `--demo-avalanche` | 演示重命名引发的引用雪崩 |
 
@@ -190,12 +212,13 @@ main() {
 
 - **学习语料** [`corpus/`](./corpus/)：Kotlin↔仓颉平行片段与规则归纳表
   （`pairs.md`），是局部规则的来源。
-- **测试数据集** [`tests/cases/`](./tests/cases/)：178 个端到端用例（含 1 个 1068 行综合工具箱、4 个 500+ 行实战程序、
-  26 个经典算法题、34 个高挑战性边界用例、18 个新增特性验证用例），每个含
-  `.kt` 输入与 `.expected` 期望标准输出，覆盖基础 / 控制流 / 函数 / 集合 / 类 /
-  算法 / 多类协作 / 不同规模 / 带参枚举 / companion object / 扩展函数 / 集合操作。
+- **单文件测试** [`tests/cases/*.kt`](./tests/cases/)：186 个端到端用例（含经典算法、多类协作、
+  高挑战性边界用例等），每个含 `.kt` 输入与 `.expected` 期望标准输出。
+- **项目级测试** [`tests/cases/proj_*`](./tests/cases/)：7 个多文件 Kotlin 项目用例
+  （calculator, shapes, todolist, bank, inventory, linkedlist, statistics），
+  每个目录含多个 `.kt` 文件和 `expected_output`，验证项目级转换的完整流程。
 
-运行全部测试（构建 → 翻译 → `cjc` 编译 → 运行 → 比对输出）：
+运行全部单文件测试：
 ```bash
 source /tmp/cangjie/envsetup.sh
 cd kotlin2cj
@@ -203,7 +226,15 @@ python3 tests/run_tests.py
 # 结果汇总写入 tests/log.md
 ```
 
-当前基线：**90/90 翻译、编译、运行输出全部通过**。
+运行项目级测试：
+```bash
+source /tmp/cangjie/envsetup.sh
+cd kotlin2cj
+python3 tests/run_project_tests.py
+# 结果汇总写入 tests/project_log.md
+```
+
+当前基线：**186/186 单文件测试通过，7/7 项目级测试通过**。
 
 ---
 
@@ -213,18 +244,26 @@ python3 tests/run_tests.py
 kotlin2cj/
 ├── Cargo.toml
 ├── src/
-│   ├── lexer.rs     # 词法分析（含字符串模板拆分）
-│   ├── node.rs      # 翻译图：节点种类 / SOC 状态 / 边
-│   ├── parser.rs    # 递归下降解析 + 类型映射 + 作用域解析
-│   ├── engine.rs    # 自组织 worklist 引擎 + 局部渲染规则 + 装配
-│   └── main.rs      # CLI
-├── corpus/          # 学习语料（平行片段 + 规则表）
+│   ├── lexer.rs        # 词法分析（含字符串模板拆分）
+│   ├── node.rs         # 翻译图：节点种类 / SOC 状态 / 边
+│   ├── parser.rs       # 递归下降解析 + 类型映射 + 作用域解析
+│   ├── engine.rs       # 自组织 worklist 引擎 + 局部渲染规则 + 装配
+│   ├── render.rs       # 核心渲染规则
+│   ├── render_calls.rs # 调用渲染：成员方法映射与 API 翻译
+│   ├── heuristics.rs   # 类型启发式推断
+│   ├── stdlib_map.rs   # 标准库接口映射表（解耦于语言特性转换）
+│   ├── project.rs      # 项目级转换：目录→cjpm 项目
+│   └── main.rs         # CLI（支持文件和目录输入）
+├── corpus/             # 学习语料（平行片段 + 规则表）
 ├── tests/
-│   ├── cases/       # 90 个 .kt / .expected 用例
-│   └── run_tests.py # 端到端测试驱动
-├── Design.md        # 技术方案
-├── Readme.md        # 本文档
-└── idea.md          # 灵感来源
+│   ├── cases/          # 186 个单文件 .kt/.expected 用例
+│   ├── cases/proj_*/   # 7 个多文件项目用例
+│   ├── cangjie/        # 项目级测试生成的 cjpm 项目
+│   ├── run_tests.py    # 单文件端到端测试驱动
+│   └── run_project_tests.py  # 项目级端到端测试驱动
+├── Design.md           # 技术方案
+├── Readme.md           # 本文档
+└── idea.md             # 灵感来源
 ```
 
 ---

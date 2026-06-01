@@ -148,6 +148,13 @@ impl Engine {
                 if op == "+=" && self.looks_string(target) && !self.looks_string(value) {
                     return Some(format!("{} += {}.toString()", tt, v));
                 }
+                // Float64 += / -= / *= / /= Int64: promote RHS to Float64
+                if matches!(op.as_str(), "+=" | "-=" | "*=" | "/=")
+                    && self.looks_float(target) && !self.looks_float(value)
+                    && self.looks_numeric(value)
+                {
+                    return Some(format!("{} {} Float64({})", tt, op, v));
+                }
                 Some(format!("{} {} {}", tt, op, v))
             }
             Kind::Return { value } => match value {
