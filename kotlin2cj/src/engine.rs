@@ -569,13 +569,91 @@ impl Engine {
                 "last" if args.is_empty() => {
                     return Some(format!("{}[{}.size - 1]", b, b));
                 }
-                // List<String>.joinToString(sep?) → String.join(xs.toArray(), delimiter: sep)
+                // List<String>.joinToString(sep?) { transform? }
+                //   → String.join(xs.toArray(), delimiter: sep)
+                //   带 transform 时先 map 成字符串再收集为数组。
                 "joinToString" => {
+                    let has_lambda = args
+                        .last()
+                        .map(|a| matches!(self.g.kind(*a), Kind::Lambda { .. }))
+                        .unwrap_or(false);
                     let sep = match args.first() {
-                        Some(a) => self.t(*a)?,
-                        None => "\", \"".to_string(),
+                        Some(a) if !(args.len() == 1 && has_lambda) => self.t(*a)?,
+                        _ => "\", \"".to_string(),
                     };
+                    if has_lambda {
+                        let lam = self.t(*args.last().unwrap())?;
+                        return Some(format!(
+                            "String.join(collectArray<String>({}.map({})), delimiter: {})",
+                            self.as_iter(*base)?,
+                            lam,
+                            sep
+                        ));
+                    }
                     return Some(format!("String.join({}.toArray(), delimiter: {})", b, sep));
+                }
+                // 返回集合的链式高阶：map/filter 急切收集为 ArrayList，
+                // 既可继续链接、在 for 中遍历，也可存入变量后多次复用 / 取 size / 索引。
+                "map" | "filter" if args.len() == 1 => {
+                    return Some(format!(
+                        "collectArrayList({}.{}({}))",
+                        self.as_iter(*base)?, name, self.t(args[0])?
+                    ));
+                }
+                // 布尔终结操作。
+                "any" | "all" if args.len() == 1 => {
+                    return Some(format!("{}.{}({})", self.as_iter(*base)?, name, self.t(args[0])?));
+                }
+                "none" if args.len() == 1 => {
+                    return Some(format!("!{}.any({})", self.as_iter(*base)?, self.t(args[0])?));
+                }
+                // 计数：带谓词时先 filter，再 count；无参时即 size。
+                "count" if args.len() == 1 => {
+                    return Some(format!("{}.filter({}).count()", self.as_iter(*base)?, self.t(args[0])?));
+                }
+                "count" if args.is_empty() => {
+                    return Some(format!("{}.size", b));
+                }
+                // 求和：sum() 直接折叠；sumOf { } 先 map 再折叠（按 Int64 处理）。
+                "sum" if args.is_empty() => {
+                    return Some(format!("{}.fold<Int64>(0, {{acc, x => acc + x}})", self.as_iter(*base)?));
+                }
+                "sumOf" if args.len() == 1 => {
+                    return Some(format!(
+                        "{}.map({}).fold<Int64>(0, {{acc, x => acc + x}})",
+                        self.as_iter(*base)?,
+                        self.t(args[0])?
+                    ));
+                }
+                // fold(init) { acc, x -> } → iterator().fold<T>(init, lambda)，T 由 init 字面量推断。
+                "fold" if args.len() == 2 => {
+                    let ty = self.lit_type(args[0]);
+                    return Some(format!(
+                        "{}.fold<{}>({}, {})",
+                        self.as_iter(*base)?,
+                        ty,
+                        self.t(args[0])?,
+                        self.t(args[1])?
+                    ));
+                }
+                // reduce { a, b -> } → iterator().reduce(...).getOrThrow()（Kotlin reduce 返回非空 T）。
+                "reduce" if args.len() == 1 => {
+                    return Some(format!("{}.reduce({}).getOrThrow()", self.as_iter(*base)?, self.t(args[0])?));
+                }
+                // max()/min()：折叠取极值并解包；maxOrNull()/minOrNull() 保留 Option 以便 `?:` 级联。
+                "max" | "min" if args.is_empty() => {
+                    let cmp = if name == "max" { ">" } else { "<" };
+                    return Some(format!(
+                        "{}.reduce({{a, b => if (a {} b) {{ a }} else {{ b }}}}).getOrThrow()",
+                        self.as_iter(*base)?, cmp
+                    ));
+                }
+                "maxOrNull" | "minOrNull" if args.is_empty() => {
+                    let cmp = if name == "maxOrNull" { ">" } else { "<" };
+                    return Some(format!(
+                        "{}.reduce({{a, b => if (a {} b) {{ a }} else {{ b }}}})",
+                        self.as_iter(*base)?, cmp
+                    ));
                 }
                 // 数值/字符串转换：数值接收者用类型构造转换，字符串用 parse。
                 "toInt" | "toLong" if args.is_empty() => {
@@ -596,6 +674,22 @@ impl Engine {
         let c = self.atom(callee)?;
         let a: Vec<String> = args.iter().map(|x| self.t(*x)).collect::<Option<_>>()?;
         Some(format!("{}({})", c, a.join(", ")))
+    }
+
+    /// 把接收者渲染为「产生迭代器」的表达式（`recv.iterator()`）。map/filter 已急切收集为
+    /// ArrayList，因此一律追加 `.iterator()` 即可继续链式调用。
+    fn as_iter(&self, base: NodeId) -> Option<String> {
+        Some(format!("{}.iterator()", self.atom(base)?))
+    }
+
+    /// 由字面量初值粗略推断 `fold` 的累加器类型实参。
+    fn lit_type(&self, id: NodeId) -> String {
+        match self.g.kind(id) {
+            Kind::FloatLit(_) => "Float64".to_string(),
+            Kind::BoolLit(_) => "Bool".to_string(),
+            Kind::StrTemplate { .. } => "String".to_string(),
+            _ => "Int64".to_string(),
+        }
     }
 
     /// 成员检查 `x in rhs`：区间转比较，集合转 contains。
@@ -705,7 +799,9 @@ impl Engine {
         }
         // 按需注入导入
         let mut header = String::new();
-        if body.contains("ArrayList") || body.contains("HashMap") || body.contains("HashSet") {
+        if body.contains("ArrayList") || body.contains("HashMap") || body.contains("HashSet")
+            || body.contains(".iterator()") || body.contains("collectArray")
+        {
             header.push_str("import std.collection.*\n");
         }
         if has_enum {
