@@ -1,9 +1,9 @@
 # kotlin2cj 测试日志
 
-- 用例总数: 168
-- 翻译成功: 168/168
-- 仓颉编译通过: 168/168
-- 运行输出匹配: 168/168
+- 用例总数: 186
+- 翻译成功: 186/186
+- 仓颉编译通过: 186/186
+- 运行输出匹配: 186/186
 
 | 用例 | 翻译 | 编译 | 运行 | 备注 |
 |------|------|------|------|------|
@@ -91,8 +91,26 @@
 | 166_math_hash | ✅ | ✅ | ✅ |  |
 | 167_string_process | ✅ | ✅ | ✅ |  |
 | 168_game_of_life | ✅ | ✅ | ✅ |  |
+| 169_enum_ctor_params | ✅ | ✅ | ✅ |  |
 | 16_class_mut | ✅ | ✅ | ✅ |  |
+| 170_hashmap_entry | ✅ | ✅ | ✅ |  |
+| 171_while_true_return | ✅ | ✅ | ✅ |  |
+| 172_companion_object | ✅ | ✅ | ✅ |  |
+| 173_extension_func | ✅ | ✅ | ✅ |  |
+| 174_destructure_enhanced | ✅ | ✅ | ✅ |  |
+| 175_collection_ops | ✅ | ✅ | ✅ |  |
+| 176_string_ops | ✅ | ✅ | ✅ |  |
+| 177_enum_methods | ✅ | ✅ | ✅ |  |
+| 178_combined_features | ✅ | ✅ | ✅ |  |
+| 179_by_lazy | ✅ | ✅ | ✅ |  |
 | 17_two_classes | ✅ | ✅ | ✅ |  |
+| 180_vararg | ✅ | ✅ | ✅ |  |
+| 181_object_singleton | ✅ | ✅ | ✅ |  |
+| 182_generic_func | ✅ | ✅ | ✅ |  |
+| 183_typealias | ✅ | ✅ | ✅ |  |
+| 184_scope_also | ✅ | ✅ | ✅ |  |
+| 185_string_ops | ✅ | ✅ | ✅ |  |
+| 186_combined_p1p2 | ✅ | ✅ | ✅ |  |
 | 18_break_continue | ✅ | ✅ | ✅ |  |
 | 19_string_ops | ✅ | ✅ | ✅ |  |
 | 20_char | ✅ | ✅ | ✅ |  |

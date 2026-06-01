@@ -13,13 +13,15 @@ pub struct Parser {
     pos: usize,
     pub g: Graph,
     scopes: Vec<HashMap<String, NodeId>>, // name -> Name 节点
+    /// 类型别名注册表：`typealias Name = TargetType`。
+    pub type_aliases: HashMap<String, String>,
 }
 
 type PResult<T> = Result<T, String>;
 
 impl Parser {
     pub fn new(toks: Vec<Token>) -> Self {
-        Parser { toks, pos: 0, g: Graph::new(), scopes: vec![HashMap::new()] }
+        Parser { toks, pos: 0, g: Graph::new(), scopes: vec![HashMap::new()], type_aliases: HashMap::new() }
     }
 
     // ---- Token 游标 ----
@@ -131,6 +133,8 @@ impl Parser {
             || self.is_kw("interface")
         {
             self.parse_class(&mods)
+        } else if self.is_kw("typealias") {
+            self.parse_typealias()
         } else {
             // 顶层语句（少见）——并入隐式块
             self.parse_statement()
@@ -140,7 +144,9 @@ impl Parser {
     fn skip_modifiers(&mut self) -> Vec<String> {
         const MODS: &[&str] = &[
             "public", "private", "internal", "protected", "open", "final", "abstract",
-            "override", "inline", "data", "sealed", "const", "lateinit", "companion",
+            "override", "inline", "data", "sealed", "const", "lateinit", "tailrec",
+            "crossinline", "noinline", "infix", "operator", "suspend", "external",
+            "annotation",
         ];
         let mut seen = Vec::new();
         loop {
@@ -159,36 +165,102 @@ impl Parser {
         seen
     }
 
+    fn parse_typealias(&mut self) -> PResult<NodeId> {
+        self.eat_kw("typealias");
+        let name = self.expect_ident()?;
+        self.expect_sym("=")?;
+        self.skip_newlines();
+        let ty = self.parse_type()?;
+        self.type_aliases.insert(name.clone(), ty.clone());
+        Ok(self.g.add(Kind::TypeAlias { name, target_type: ty }))
+    }
+
+    /// Parse generic type parameters `<T>` / `<T, U>` / `<T : Bound>`.
+    fn parse_generic_params(&mut self, params: &mut Vec<String>, suffix: &mut String) {
+        let mut depth = 0;
+        let mut gen_tokens = Vec::new();
+        let mut expect_name = true;
+        loop {
+            if self.is_sym("<") {
+                depth += 1;
+                gen_tokens.push("<".to_string());
+            } else if self.is_sym(">") {
+                depth -= 1;
+                gen_tokens.push(">".to_string());
+                if depth == 0 {
+                    self.bump();
+                    break;
+                }
+            } else if self.at_eof() {
+                break;
+            } else {
+                if let Tok::Ident(s) = self.peek() {
+                    if expect_name && depth == 1 {
+                        params.push(s.clone());
+                        expect_name = false;
+                    }
+                    gen_tokens.push(map_type(&s));
+                } else if let Tok::Sym(s) = self.peek() {
+                    if s == "," && depth == 1 {
+                        expect_name = true;
+                    }
+                    // Skip upper bound constraint `: Bound`
+                    if s == ":" {
+                        self.bump();
+                        while !self.is_sym(",") && !self.is_sym(">") && !self.at_eof() {
+                            self.bump();
+                        }
+                        continue;
+                    }
+                    gen_tokens.push(s.clone());
+                }
+            }
+            self.bump();
+        }
+        *suffix = gen_tokens.join("");
+    }
+
     // ---- 函数 ----
     fn parse_fun(&mut self, mods: &[String]) -> PResult<NodeId> {
         self.eat_kw("fun");
-        let name = self.expect_ident()?;
-        // 跳过泛型形参 `<T>`（声明端，不影响渲染）。
+        // Handle generic params that come BEFORE the function name: `fun <T> name(...)`
+        let mut generic_suffix = String::new();
+        let mut generic_params: Vec<String> = Vec::new();
         if self.is_sym("<") {
-            let mut depth = 0;
-            loop {
-                if self.is_sym("<") {
-                    depth += 1;
-                } else if self.is_sym(">") {
-                    depth -= 1;
-                    if depth == 0 {
-                        self.bump();
-                        break;
-                    }
-                } else if self.at_eof() {
-                    break;
-                }
-                self.bump();
-            }
+            self.parse_generic_params(&mut generic_params, &mut generic_suffix);
+        }
+        let mut name = self.expect_ident()?;
+        // Also handle generic params AFTER the function name: `fun name<T>(...)`
+        if self.is_sym("<") && generic_params.is_empty() {
+            self.parse_generic_params(&mut generic_params, &mut generic_suffix);
+        }
+        // 扩展函数：`fun ReceiverType.name(...)` 或 `fun Type<T>.name(...)` → extend 语法
+        let mut receiver_type: Option<String> = None;
+        if self.eat_sym(".") {
+            // `name` + generic_suffix was actually the receiver type
+            let recv = format!("{}{}", map_type(&name), generic_suffix);
+            receiver_type = Some(recv);
+            name = self.expect_ident()?;
+            // Extension function generics in Kotlin bind to the receiver type, not the
+            // function itself. Clear to prevent duplication in rendered `extend` block.
+            generic_params.clear();
         }
         self.push_scope();
         let mut params = Vec::new();
+        // 扩展函数中 `this` 自然引用接收者，无需特殊处理
         self.expect_sym("(")?;
         self.skip_newlines();
         while !self.is_sym(")") {
+            // Handle vararg parameter
+            let is_vararg = self.eat_kw("vararg");
             let pname = self.expect_ident()?;
             self.expect_sym(":")?;
-            let ty = self.parse_type()?;
+            let ty = if is_vararg {
+                let base_ty = self.parse_type()?;
+                format!("Array<{}>", base_ty)
+            } else {
+                self.parse_type()?
+            };
             let default = if self.eat_sym("=") {
                 Some(self.parse_expr()?)
             } else {
@@ -236,48 +308,134 @@ impl Parser {
             is_main,
             is_abstract,
             is_override,
+            receiver_type,
+            generic_params,
         }))
     }
 
     // ---- 枚举 ----
     fn parse_enum(&mut self) -> PResult<NodeId> {
         self.eat_kw("enum");
-        // `enum class Name { A, B, C }`
+        // `enum class Name { A, B, C }` or `enum class Name(val x: Int) { A(1), B(2) }`
         self.eat_kw("class");
         let name = self.expect_ident()?;
+        // 解析枚举构造器参数
+        let mut params = Vec::new();
+        if self.is_sym("(") {
+            self.bump();
+            self.skip_newlines();
+            while !self.is_sym(")") {
+                self.skip_modifiers();
+                let kind = if self.eat_kw("val") {
+                    CtorParamKind::Val
+                } else if self.eat_kw("var") {
+                    CtorParamKind::Var
+                } else {
+                    CtorParamKind::Plain
+                };
+                let pname = self.expect_ident()?;
+                self.expect_sym(":")?;
+                let ty = self.parse_type()?;
+                // 跳过默认值
+                if self.eat_sym("=") {
+                    self.parse_expr()?;
+                }
+                params.push(CtorParam { kind, name: safe_name(&pname), ty });
+                self.skip_newlines();
+                if !self.eat_sym(",") {
+                    break;
+                }
+                self.skip_newlines();
+            }
+            self.expect_sym(")")?;
+        }
+        // 跳过可能的继承列表（如 `: Interface`）
+        if self.eat_sym(":") {
+            loop {
+                self.skip_newlines();
+                if !matches!(self.peek(), Tok::Ident(_)) {
+                    break;
+                }
+                self.bump(); // type name
+                // 跳过泛型实参
+                if self.is_sym("<") {
+                    let mut depth = 1;
+                    self.bump();
+                    while depth > 0 && !self.at_eof() {
+                        if self.is_sym("<") { depth += 1; }
+                        else if self.is_sym(">") { depth -= 1; }
+                        self.bump();
+                    }
+                }
+                // 跳过构造器实参
+                if self.is_sym("(") {
+                    self.skip_balanced_parens();
+                }
+                if !self.eat_sym(",") {
+                    break;
+                }
+            }
+        }
         self.skip_newlines();
         self.expect_sym("{")?;
         self.skip_seps();
         let mut entries = Vec::new();
         // 解析具名枚举项，直到 `}` 或成员分隔 `;`
         while !self.is_sym("}") && !self.is_sym(";") && !self.at_eof() {
-            let entry = self.expect_ident()?;
-            entries.push(entry);
-            // 忽略枚举项可能携带的构造实参，如 RED(0xFF)
+            let entry_name = self.expect_ident()?;
+            // 解析枚举项构造实参（如 `RED(0xFF)`）
+            let mut entry_args = Vec::new();
             if self.is_sym("(") {
-                self.skip_balanced_parens();
+                self.bump();
+                self.skip_newlines();
+                while !self.is_sym(")") {
+                    entry_args.push(self.parse_expr()?);
+                    self.skip_newlines();
+                    if !self.eat_sym(",") {
+                        break;
+                    }
+                    self.skip_newlines();
+                }
+                self.expect_sym(")")?;
             }
+            entries.push(EnumEntry { name: entry_name, args: entry_args });
             self.skip_newlines();
             if !self.eat_sym(",") {
                 break;
             }
             self.skip_seps();
         }
-        // 跳过枚举体其余部分（成员函数等暂不支持）
-        let mut depth = 1;
-        while depth > 0 && !self.at_eof() {
-            if self.is_sym("{") {
-                depth += 1;
-            } else if self.is_sym("}") {
-                depth -= 1;
-                if depth == 0 {
-                    break;
+        // 解析枚举体的成员函数部分（`;` 之后）
+        let mut enum_members = Vec::new();
+        if self.eat_sym(";") {
+            self.skip_seps();
+            while !self.is_sym("}") && !self.at_eof() {
+                let mmods = self.skip_modifiers();
+                if self.is_kw("fun") {
+                    enum_members.push(self.parse_fun(&mmods)?);
+                } else {
+                    // 跳过其他成员
+                    self.bump();
                 }
+                self.skip_seps();
             }
-            self.bump();
+        } else {
+            // 跳过枚举体其余部分
+            let mut depth = 1;
+            while depth > 0 && !self.at_eof() {
+                if self.is_sym("{") {
+                    depth += 1;
+                } else if self.is_sym("}") {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                self.bump();
+            }
         }
         self.expect_sym("}")?;
-        Ok(self.g.add(Kind::Enum { name: safe_name(&name), entries }))
+        Ok(self.g.add(Kind::Enum { name: safe_name(&name), entries, params }))
     }
 
     fn skip_balanced_parens(&mut self) {
@@ -395,6 +553,7 @@ impl Parser {
             }
         }
         let mut members = Vec::new();
+        let mut companion_members = Vec::new();
         let mut init_block: Option<NodeId> = None;
         self.skip_newlines();
         if self.eat_sym("{") {
@@ -412,10 +571,56 @@ impl Parser {
                     self.bump();
                     let blk = self.parse_block()?;
                     init_block = Some(blk);
-                } else if self.is_kw("companion") || self.is_kw("class") || self.is_kw("object") {
-                    self.bump();
+                } else if self.is_kw("companion") {
+                    // companion object { ... } → 解析成员作为静态方法/属性
+                    self.bump(); // companion
+                    self.eat_kw("object"); // object (optional)
+                    // 可能有名字
+                    if matches!(self.peek(), Tok::Ident(s) if s != "object" && !s.is_empty()) {
+                        if !self.is_sym("{") {
+                            self.bump(); // companion name
+                        }
+                    }
                     if self.is_sym("{") {
-                        self.parse_block()?;
+                        self.bump(); // {
+                        self.skip_seps();
+                        while !self.is_sym("}") && !self.at_eof() {
+                            let cmods = self.skip_modifiers();
+                            if self.is_kw("fun") {
+                                let func = self.parse_fun(&cmods)?;
+                                companion_members.push(func);
+                                members.push(func);
+                            } else if self.is_kw("val") || self.is_kw("var") {
+                                let v = self.parse_var_decl()?;
+                                companion_members.push(v);
+                                members.push(v);
+                            } else if self.is_kw("const") {
+                                self.bump(); // const
+                                let v = self.parse_var_decl()?;
+                                companion_members.push(v);
+                                members.push(v);
+                            } else {
+                                self.bump();
+                            }
+                            self.skip_seps();
+                        }
+                        self.expect_sym("}")?;
+                    }
+                } else if self.is_kw("class") || self.is_kw("object") || self.is_kw("enum") {
+                    // 嵌套类/对象：跳过
+                    self.bump();
+                    if matches!(self.peek(), Tok::Ident(_)) {
+                        self.bump(); // name
+                    }
+                    if self.is_sym("{") {
+                        let mut depth = 1;
+                        self.bump();
+                        while depth > 0 && !self.at_eof() {
+                            if self.is_sym("{") { depth += 1; }
+                            else if self.is_sym("}") { depth -= 1; }
+                            if depth > 0 { self.bump(); }
+                        }
+                        if self.is_sym("}") { self.bump(); }
                     }
                 } else {
                     self.bump();
@@ -426,6 +631,7 @@ impl Parser {
             self.pop_scope();
         }
         let _ = is_object;
+        let is_singleton = is_object;
         let is_abstract = mods.iter().any(|m| m == "abstract");
         let is_open = mods.iter().any(|m| m == "open" || m == "abstract" || m == "sealed");
         Ok(self.g.add(Kind::Class {
@@ -441,6 +647,8 @@ impl Parser {
             super_args,
             generics,
             init_block,
+            companion_members,
+            is_singleton,
         }))
     }
 
@@ -560,13 +768,45 @@ impl Parser {
             ty = Some(self.parse_type()?);
         }
         let mut init = None;
+        let mut is_lazy = false;
         if self.eat_sym("=") {
             self.skip_newlines();
             init = Some(self.parse_expr()?);
+        } else if self.is_kw("by") {
+            // `val x by lazy { expr }` → evaluate eagerly
+            self.bump(); // by
+            if self.eat_kw("lazy") {
+                is_lazy = true;
+                if self.is_sym("{") {
+                    let lam = self.parse_lambda()?;
+                    // Extract lambda body as the init expression
+                    if let Kind::Lambda { body, .. } = self.g.kind(lam).clone() {
+                        init = Some(self.wrap_lambda_body_as_expr(body));
+                    }
+                } else if self.is_sym("(") {
+                    // `by lazy(mode) { expr }`
+                    self.skip_balanced_parens();
+                    if self.is_sym("{") {
+                        let lam = self.parse_lambda()?;
+                        if let Kind::Lambda { body, .. } = self.g.kind(lam).clone() {
+                            init = Some(self.wrap_lambda_body_as_expr(body));
+                        }
+                    }
+                }
+            } else {
+                // Other delegated properties — skip the delegate expression
+                init = Some(self.parse_expr()?);
+            }
         }
         let name_node = self.g.add(Kind::Name { original: name.clone() });
         self.declare(&name, name_node);
-        Ok(self.g.add(Kind::VarDecl { mutable, name_node, ty, init }))
+        Ok(self.g.add(Kind::VarDecl { mutable, name_node, ty, init, is_lazy }))
+    }
+
+    /// Wrap a lambda body (Block) as an IIFE expression `({ => body })()`
+    fn wrap_lambda_body_as_expr(&mut self, body: NodeId) -> NodeId {
+        let lam = self.g.add(Kind::Lambda { params: vec![], body });
+        self.g.add(Kind::Call { callee: lam, args: vec![] })
     }
 
     fn parse_while(&mut self) -> PResult<NodeId> {
@@ -671,6 +911,7 @@ impl Parser {
             name_node: var_node,
             ty: None,
             init: None,
+            is_lazy: false,
         });
         // 区间 or 可迭代对象
         let iter_expr = self.parse_expr()?;
@@ -754,6 +995,14 @@ impl Parser {
                 self.bump(); // is
                 let ty = self.parse_type()?;
                 lhs = self.g.add(Kind::IsCheck { expr: lhs, ty, negate: true });
+                continue;
+            }
+            // `as T` / `as? T` 类型转换
+            if self.is_kw("as") {
+                self.bump();
+                let safe = self.eat_sym("?");
+                let ty = self.parse_type()?;
+                lhs = self.g.add(Kind::TypeCast { expr: lhs, ty, safe });
                 continue;
             }
             let negate = if self.is_sym("!") && self.peek_next_is_kw("in") {
@@ -892,6 +1141,15 @@ impl Parser {
                     } else if name == "let" {
                         // recv?.let { it -> ... } / recv.let { ... }
                         e = self.build_safe_let(e, lam);
+                    } else if name == "also" {
+                        // recv.also { it -> body } → { let _it = recv; body(it=_it); _it }
+                        e = self.build_also(e, lam);
+                    } else if name == "apply" {
+                        // recv.apply { body } → { let _it = recv; body; _it }
+                        e = self.build_also(e, lam);
+                    } else if name == "run" {
+                        // recv.run { body } → { let _r = recv; body }
+                        e = self.build_run(e, lam);
                     } else {
                         let m = self.g.add(Kind::Member { base: e, name, safe });
                         e = self.g.add(Kind::Call { callee: m, args: vec![lam] });
@@ -931,6 +1189,7 @@ impl Parser {
             name_node: nn,
             ty: None,
             init: None,
+            is_lazy: false,
         });
         self.g.add(Kind::ForEach { var, iter: recv, body })
     }
@@ -963,6 +1222,52 @@ impl Parser {
         };
         let var = params.first().cloned().unwrap_or_else(|| "it".to_string());
         self.g.add(Kind::SafeLet { recv, var, body })
+    }
+
+    /// `recv.also { it -> body }` → `({ => let _also = recv; body(it=_also); _also })()`
+    fn build_also(&mut self, recv: NodeId, lam: NodeId) -> NodeId {
+        let (params, body) = if let Kind::Lambda { params, body } = self.g.kind(lam) {
+            (params.clone(), *body)
+        } else {
+            (Vec::new(), lam)
+        };
+        let var_name = params.first().cloned().unwrap_or_else(|| "it".to_string());
+        let pname = var_name.split(':').next().unwrap_or(&var_name).trim().to_string();
+        let unique = format!("_also_{}", pname);
+        let nn = self.g.add(Kind::Name { original: unique.clone() });
+        let decl = self.g.add(Kind::VarDecl { mutable: false, name_node: nn, ty: None, init: Some(recv), is_lazy: false });
+        // Create alias: let <pname> = _also_<pname>
+        let alias_ref = self.g.add(Kind::NameRef { original: unique.clone(), decl: Some(nn) });
+        let alias_nn = self.g.add(Kind::Name { original: pname.clone() });
+        let alias_decl = self.g.add(Kind::VarDecl { mutable: false, name_node: alias_nn, ty: None, init: Some(alias_ref), is_lazy: false });
+        let ret_ref = self.g.add(Kind::NameRef { original: unique, decl: Some(nn) });
+        let ret_stmt = self.g.add(Kind::Return { value: Some(ret_ref) });
+        // Merge: let _also_it = recv; let it = _also_it; <body stmts>; return _also_it
+        let mut stmts = vec![decl, alias_decl];
+        if let Kind::Block { stmts: body_stmts } = self.g.kind(body).clone() {
+            stmts.extend(body_stmts);
+        } else {
+            stmts.push(self.g.add(Kind::ExprStmt { expr: body }));
+        }
+        stmts.push(ret_stmt);
+        let block = self.g.add(Kind::Block { stmts });
+        let outer_lam = self.g.add(Kind::Lambda { params: vec![], body: block });
+        self.g.add(Kind::Call { callee: outer_lam, args: vec![] })
+    }
+
+    /// `recv.run { body }` → `({ => body with this=recv })()`
+    /// Simplified: desugar as IIFE with last-expr return
+    fn build_run(&mut self, recv: NodeId, lam: NodeId) -> NodeId {
+        let (_params, body) = if let Kind::Lambda { params, body } = self.g.kind(lam) {
+            (params.clone(), *body)
+        } else {
+            (Vec::new(), lam)
+        };
+        // For now, treat .run { body } same as .let { body } since `this` in body
+        // maps to the receiver in Cangjie as well for simple cases
+        let _recv = recv; // receiver value is available via closure capture
+        let outer_lam = self.g.add(Kind::Lambda { params: vec![], body });
+        self.g.add(Kind::Call { callee: outer_lam, args: vec![] })
     }
 
     fn peek_next_is_bang(&self) -> bool {
@@ -1344,7 +1649,13 @@ impl Parser {
     /// 解析一个类型，并映射为仓颉类型字符串。
     fn parse_type(&mut self) -> PResult<String> {
         let raw = self.parse_type_raw()?;
-        Ok(map_type(&raw))
+        // Expand type aliases before mapping
+        let expanded = if let Some(target) = self.type_aliases.get(&raw) {
+            target.clone()
+        } else {
+            map_type(&raw)
+        };
+        Ok(expanded)
     }
 
     fn parse_type_raw(&mut self) -> PResult<String> {

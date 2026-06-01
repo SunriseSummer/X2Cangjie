@@ -10,6 +10,7 @@ mod heuristics;
 mod lexer;
 mod node;
 mod render;
+mod render_calls;
 mod parser;
 
 use std::process::ExitCode;

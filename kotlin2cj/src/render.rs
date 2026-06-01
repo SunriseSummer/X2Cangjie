@@ -155,7 +155,7 @@ impl Engine {
                 None => Some("return".to_string()),
             },
             Kind::Throw { value } => Some(format!("throw {}", self.t(value)?)),
-            Kind::VarDecl { mutable, name_node, ty, init } => {
+            Kind::VarDecl { mutable, name_node, ty, init, is_lazy: _ } => {
                 let name = self.t(name_node)?;
                 if init.is_none() && ty.is_none() {
                     return Some(name);
@@ -198,6 +198,8 @@ impl Engine {
                 } else {
                     self.t(iter)?
                 };
+                // HashMap 解构遍历: for ((k, v) in map) → for ((k, v) in map)
+                // 仓颉的 HashMap 遍历直接解构为 (key, value) 元组
                 Some(format!("for ({} in {}) {}", vn, it, self.render_block(body)?))
             }
             Kind::Try { body, catches, finally } => {
@@ -232,13 +234,27 @@ impl Engine {
                 Some(d) => Some(format!("{}!: {} = {}", self.t(name_node)?, ty, self.t(d)?)),
                 None => Some(format!("{}: {}", self.t(name_node)?, ty)),
             },
-            Kind::Func { name, params, ret, body, is_main, is_abstract, is_override } => {
-                self.render_func(id, &name, &params, ret, body, is_main, is_abstract, is_override)
+            Kind::Func { name, params, ret, body, is_main, is_abstract, is_override, receiver_type, generic_params } => {
+                self.render_func(id, &name, &params, ret, body, is_main, is_abstract, is_override, receiver_type.as_deref(), &generic_params)
             }
-            Kind::Class { name, ctor_params, members, superclass, is_open, is_data, is_interface, is_abstract, interfaces, super_args, generics, init_block } => {
-                self.render_class(&name, &ctor_params, &members, superclass, is_open, is_data, is_interface, is_abstract, &interfaces, &super_args, &generics, init_block)
+            Kind::Class { name, ctor_params, members, superclass, is_open, is_data, is_interface, is_abstract, interfaces, super_args, generics, init_block, companion_members, is_singleton } => {
+                self.render_class(&name, &ctor_params, &members, superclass, is_open, is_data, is_interface, is_abstract, &interfaces, &super_args, &generics, init_block, &companion_members, is_singleton)
             }
-            Kind::Enum { name, entries } => self.render_enum(&name, &entries),
+            Kind::Enum { name, entries, params } => self.render_enum(&name, &entries, &params),
+            Kind::TypeAlias { name, target_type } => {
+                // Alias is expanded at parse time (parse_type); keep original as documentation comment
+                Some(format!("// typealias {} = {}", name, target_type))
+            }
+            Kind::TypeCast { expr, ty, safe } => {
+                let e = self.atom(expr)?;
+                if safe {
+                    // `as?` → try cast, return Option
+                    Some(format!("(if ({} is {}) {{ {} as {} }} else {{ None }})", e, ty, e, ty))
+                } else {
+                    // `as` → direct cast
+                    Some(format!("({} as {})", e, ty))
+                }
+            }
             Kind::Program { items } => self.render_program(&items),
             Kind::ForceUnwrap { expr } => {
                 let e = self.t(expr)?;
@@ -342,6 +358,16 @@ impl Engine {
     // ============ 成员访问 ============
 
     fn render_member(&self, base: NodeId, name: &str, safe: bool) -> Option<String> {
+        // Singleton object member access: `ObjectName.member` → `ObjectName.INSTANCE.member`
+        if let Kind::NameRef { original, .. } = self.g.kind(base) {
+            if self.is_singleton_object(original) {
+                let mapped = match name {
+                    "length" => "size",
+                    other => other,
+                };
+                return Some(format!("{}.INSTANCE.{}", original, crate::parser::safe_name(mapped)));
+            }
+        }
         let (b, dot) = if safe {
             let bs = if let Kind::Index { base: ib, index } = self.g.kind(base) {
                 format!("{}.get({})", self.atom(*ib)?, self.t(*index)?)
@@ -431,23 +457,58 @@ impl Engine {
 
     // ============ 函数渲染 ============
 
-    fn render_func(&self, id: NodeId, name: &str, params: &[NodeId], ret: Option<String>, body: NodeId, is_main: bool, is_abstract: bool, is_override: bool) -> Option<String> {
+    fn render_func(&self, id: NodeId, name: &str, params: &[NodeId], ret: Option<String>, body: NodeId, is_main: bool, is_abstract: bool, is_override: bool, receiver_type: Option<&str>, generic_params: &[String]) -> Option<String> {
         let ps: Vec<String> = params.iter().map(|p| self.t(*p)).collect::<Option<_>>()?;
+        let gen_suffix = if generic_params.is_empty() {
+            String::new()
+        } else {
+            format!("<{}>", generic_params.join(", "))
+        };
         if is_main {
             let b = self.render_block(body)?;
             return Some(format!("main() {}", b));
         }
-        let r = match ret {
+        // 扩展函数渲染为 extend ReceiverType { func name(...) { ... } }
+        if let Some(recv_ty) = receiver_type {
+            let r = match &ret {
+                Some(r) => format!(": {}", r),
+                None => String::new(),
+            };
+            let sig = format!("{}{}({}){}", name, gen_suffix, ps.join(", "), r);
+            let b = self.render_block(body)?;
+            let func_str = format!("func {} {}", sig, b);
+            return Some(format!("extend {} {{\n{}\n}}", recv_ty, indent(&func_str, 1)));
+        }
+        let r = match &ret {
             Some(r) => format!(": {}", r),
             None if self.refers_name(body, name) => ": Unit".to_string(),
             None if is_abstract => ": Unit".to_string(),
+            None if self.has_while_true_return(body) => ": Unit".to_string(),
             None => String::new(),
         };
-        let sig = format!("{}({}){}", name, ps.join(", "), r);
+        let sig = format!("{}{}({}){}", name, gen_suffix, ps.join(", "), r);
         if is_abstract {
             return Some(format!("public func {}", sig));
         }
-        let b = self.render_block(body)?;
+        let mut b = self.render_block(body)?;
+        // while(true) 返回修复：在 while(true) 后添加不可达默认返回以满足仓颉类型检查
+        if self.has_while_true_return(body) && ret.is_some() {
+            let ret_str = ret.as_ref().unwrap();
+            let default_val = match ret_str.as_str() {
+                "Int64" => "0",
+                "Float64" => "0.0",
+                "Bool" => "false",
+                "String" => "\"\"",
+                _ => "throw Exception(\"unreachable\")",
+            };
+            // Insert before the closing brace
+            if b.ends_with('}') {
+                b = format!("{}\n{}{}",
+                    &b[..b.len()-1],
+                    crate::render::IND,
+                    format!("{}\n}}", default_val));
+            }
+        }
         // Determine visibility/open modifiers based on parent class context
         let in_open_class = self.func_in_open_class(id);
         let vis = if is_override && in_open_class {
@@ -465,7 +526,7 @@ impl Engine {
     // ============ 类渲染 ============
 
     #[allow(clippy::too_many_arguments)]
-    fn render_class(&self, name: &str, ctor_params: &[CtorParam], members: &[NodeId], superclass: Option<String>, is_open: bool, is_data: bool, is_interface: bool, is_abstract: bool, interfaces: &[String], super_args: &[NodeId], generics: &[String], init_block: Option<NodeId>) -> Option<String> {
+    fn render_class(&self, name: &str, ctor_params: &[CtorParam], members: &[NodeId], superclass: Option<String>, is_open: bool, is_data: bool, is_interface: bool, is_abstract: bool, interfaces: &[String], super_args: &[NodeId], generics: &[String], init_block: Option<NodeId>, companion_members: &[NodeId], is_singleton: bool) -> Option<String> {
         let gen_suffix = if generics.is_empty() {
             String::new()
         } else {
@@ -497,6 +558,41 @@ impl Engine {
                 return Some(format!("interface {}{} {{}}", name_gen, sup));
             }
             return Some(format!("interface {}{} {{\n{}}}", name_gen, sup, ibody));
+        }
+        // object 单例 → class with private init + static instance
+        if is_singleton {
+            let mut sbody = String::new();
+            sbody.push_str(&format!("{}private init() {{}}\n", IND));
+            sbody.push_str(&format!("{}public static let INSTANCE = {}()\n", IND, name));
+            for m in members {
+                let mt = self.t(*m)?;
+                sbody.push_str(&indent(&mt, 1));
+                sbody.push('\n');
+            }
+            let mut ifaces: Vec<String> = Vec::new();
+            if let Some(s) = &superclass {
+                ifaces.push(s.clone());
+            }
+            ifaces.extend(interfaces.iter().cloned());
+            // Auto-add ToString interface if object has a toString() method
+            if !ifaces.contains(&"ToString".to_string()) {
+                let has_to_string = members.iter().any(|&m| {
+                    if let Kind::Func { name: fn_name, is_override, .. } = self.g.kind(m) {
+                        fn_name == "toString" && *is_override
+                    } else {
+                        false
+                    }
+                });
+                if has_to_string {
+                    ifaces.push("ToString".to_string());
+                }
+            }
+            let sup = if ifaces.is_empty() {
+                String::new()
+            } else {
+                format!(" <: {}", ifaces.join(" & "))
+            };
+            return Some(format!("class {}{} {{\n{}}}", name_gen, sup, sbody));
         }
         let mut body = String::new();
         for p in ctor_params {
@@ -544,7 +640,24 @@ impl Engine {
         }
         for m in members {
             let mt = self.t(*m)?;
-            body.push_str(&indent(&mt, 1));
+            // companion object 成员渲染为 static
+            let is_companion = companion_members.contains(m);
+            if is_companion {
+                // 在函数声明前添加 static 修饰符
+                let static_mt = if mt.starts_with("func ") {
+                    format!("static {}", mt)
+                } else if mt.starts_with("public ") || mt.starts_with("open ") {
+                    // 如果已有修饰符，在 func 前插入 static
+                    mt.replacen("func ", "static func ", 1)
+                } else if mt.contains(" = ") || mt.starts_with("let ") || mt.starts_with("var ") {
+                    format!("static {}", mt)
+                } else {
+                    format!("static {}", mt)
+                };
+                body.push_str(&indent(&static_mt, 1));
+            } else {
+                body.push_str(&indent(&mt, 1));
+            }
             body.push('\n');
         }
         let has_user_tostring = members.iter().any(|m| {
@@ -603,20 +716,79 @@ impl Engine {
 
     // ============ 枚举渲染 ============
 
-    fn render_enum(&self, name: &str, entries: &[String]) -> Option<String> {
+    fn render_enum(&self, name: &str, entries: &[EnumEntry], params: &[CtorParam]) -> Option<String> {
         if entries.is_empty() {
-            Some(format!("enum {} {{ | {} }}", name, name))
-        } else {
-            let body = entries.join(" | ");
+            return Some(format!("enum {} {{ | {} }}", name, name));
+        }
+
+        // 无构造器参数的简单枚举
+        if params.is_empty() {
+            let body = entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>().join(" | ");
             let mut arms = String::new();
             for e in entries {
-                arms.push_str(&format!("{}{}{}case {} => \"{}\"\n", IND, IND, IND, e, e));
+                arms.push_str(&format!("{}{}{}case {} => \"{}\"\n", IND, IND, IND, e.name, e.name));
             }
-            Some(format!(
+            return Some(format!(
                 "@Derive[Equatable]\nenum {} <: ToString {{\n{}| {}\n{}public func toString(): String {{\n{}return match (this) {{\n{}{}}}\n{}}}\n}}",
                 name, IND, body, IND, IND, IND, arms, IND
-            ))
+            ));
         }
+
+        // 有构造器参数的枚举 → 仓颉: class + static let 模式
+        // 使用 _ordinal 字段区分枚举项（即使构造参数值相同也能正确比较）
+        let mut out = String::new();
+        // 类声明
+        out.push_str(&format!("class {} <: ToString & Equatable<{}> {{\n", name, name));
+        // _ordinal 字段用于区分不同枚举项
+        out.push_str(&format!("{}let _ordinal: Int64\n", IND));
+        // 字段
+        for p in params {
+            let kw = if p.kind == CtorParamKind::Var { "var" } else { "let" };
+            out.push_str(&format!("{}public {} {}: {}\n", IND, kw, p.name, p.ty));
+        }
+        // 构造器（增加 _ordinal 参数作为首个无名参数）
+        let mut ps: Vec<String> = vec!["_ordinal: Int64".to_string()];
+        ps.extend(params.iter().map(|p| format!("{}: {}", p.name, p.ty)));
+        out.push_str(&format!("{}init({}) {{\n", IND, ps.join(", ")));
+        out.push_str(&format!("{}{}this._ordinal = _ordinal\n", IND, IND));
+        for p in params {
+            out.push_str(&format!("{}{}this.{} = {}\n", IND, IND, p.name, p.name));
+        }
+        out.push_str(&format!("{}}}\n", IND));
+        // 静态枚举常量（传入序号）
+        for (i, e) in entries.iter().enumerate() {
+            let args: Vec<String> = e.args.iter().map(|a| self.t(*a)).collect::<Option<_>>()?;
+            out.push_str(&format!("{}public static let {} = {}({}, {})\n",
+                IND, e.name, name, i, args.join(", ")));
+        }
+        // toString
+        let mut arms = String::new();
+        for e in entries {
+            arms.push_str(&format!(
+                "{}{}{}if (this == {}.{}) {{ return \"{}\" }}\n",
+                IND, IND, IND, name, e.name, e.name
+            ));
+        }
+        out.push_str(&format!(
+            "{}public func toString(): String {{\n{}return \"{}(?)\"\n{}}}\n",
+            IND, arms, name, IND
+        ));
+        // == operator（仅比较 _ordinal）
+        out.push_str(&format!(
+            "{}public operator func ==(rhs: {}): Bool {{\n",
+            IND, name
+        ));
+        out.push_str(&format!("{}{}return this._ordinal == rhs._ordinal\n", IND, IND));
+        out.push_str(&format!("{}}}\n", IND));
+        // != operator
+        out.push_str(&format!(
+            "{}public operator func !=(rhs: {}): Bool {{\n",
+            IND, name
+        ));
+        out.push_str(&format!("{}{}return !(this == rhs)\n", IND, IND));
+        out.push_str(&format!("{}}}\n", IND));
+        out.push_str("}");
+        Some(out)
     }
 
     // ============ 块渲染 ============
@@ -804,352 +976,7 @@ impl Engine {
     }
 
     // ============ 调用渲染 ============
-
-    pub(crate) fn render_call(&self, callee: NodeId, args: &[NodeId]) -> Option<String> {
-        if let Kind::NameRef { original, .. } = self.g.kind(callee) {
-            if (original == "Pair" || original == "Triple") && args.len() >= 2 {
-                let a: Vec<String> = args.iter().map(|x| self.t(*x)).collect::<Option<_>>()?;
-                return Some(format!("({})", a.join(", ")));
-            }
-            if (original == "maxOf" || original == "minOf"
-                || ((original == "max" || original == "min") && !self.is_user_func(original)))
-                && args.len() == 2
-            {
-                let a = self.t(args[0])?;
-                let b = self.t(args[1])?;
-                let cmp = if original == "maxOf" || original == "max" { ">" } else { "<" };
-                return Some(format!("(if ({} {} {}) {{ {} }} else {{ {} }})", a, cmp, b, a, b));
-            }
-            if original == "abs" && args.len() == 1 && !self.is_user_func(original) {
-                let a = self.atom(args[0])?;
-                return Some(format!("(if ({} < 0) {{ -({}) }} else {{ {} }})", a, a, a));
-            }
-            if (original == "Array" || original == "IntArray" || original == "BooleanArray"
-                || original == "DoubleArray" || original == "LongArray")
-                && args.len() == 2
-            {
-                if let Kind::Lambda { params, body } = self.g.kind(args[1]) {
-                    let n = self.t(args[0])?;
-                    let inner = self.render_block_inner(*body, 0)?;
-                    let pname = if let Some(p) = params.first() {
-                        crate::parser::safe_name(p.split(':').next().unwrap_or(p).trim())
-                    } else if self.uses_it(*body) {
-                        "it".to_string()
-                    } else {
-                        "_idx".to_string()
-                    };
-                    let body_str = if inner.lines().count() <= 1 {
-                        inner.trim().to_string()
-                    } else {
-                        format!("\n{}\n", indent(&inner, 1))
-                    };
-                    return Some(format!("Array({}, {{ {} => {} }})", n, pname, body_str));
-                }
-            }
-        }
-        if let Kind::Member { base, name, .. } = self.g.kind(callee) {
-            if let Some(result) = self.render_member_call(*base, name, args) {
-                return Some(result);
-            }
-        }
-        let c = self.atom(callee)?;
-        if let Kind::NameRef { original, .. } = self.g.kind(callee) {
-            if let Some(named) = self.fn_named_params(original) {
-                let mut a = Vec::with_capacity(args.len());
-                for (i, x) in args.iter().enumerate() {
-                    let s = self.t(*x)?;
-                    match named.get(i) {
-                        Some((pname, true)) => a.push(format!("{}: {}", pname, s)),
-                        _ => a.push(s),
-                    }
-                }
-                return Some(format!("{}({})", c, a.join(", ")));
-            }
-        }
-        let a: Vec<String> = args.iter().map(|x| self.t(*x)).collect::<Option<_>>()?;
-        Some(format!("{}({})", c, a.join(", ")))
-    }
-
-    /// 成员方法调用的特殊映射，返回 None 表示无特殊处理。
-    fn render_member_call(&self, base: NodeId, name: &str, args: &[NodeId]) -> Option<String> {
-        // 枚举 values()
-        if name == "values" && args.is_empty() {
-            if let Kind::NameRef { original, .. } = self.g.kind(base) {
-                if let Some(entries) = self.enum_entries(original) {
-                    let items: Vec<String> = entries
-                        .iter()
-                        .map(|e| format!("{}.{}", original, e))
-                        .collect();
-                    return Some(format!("[{}]", items.join(", ")));
-                }
-            }
-        }
-        let b = self.atom(base)?;
-        match name {
-            "isDigit" | "isLetter" | "isWhitespace" | "isUpperCase" | "isLowerCase"
-                if args.is_empty() && self.looks_char(base) =>
-            {
-                let m = match name {
-                    "isDigit" => "isAsciiNumber",
-                    "isLetter" => "isAsciiLetter",
-                    "isWhitespace" => "isAsciiWhiteSpace",
-                    "isUpperCase" => "isAsciiUpperCase",
-                    _ => "isAsciiLowerCase",
-                };
-                Some(format!("{}.{}()", b, m))
-            }
-            "isLetterOrDigit" if args.is_empty() && self.looks_char(base) => {
-                Some(format!(
-                    "({}.isAsciiLetter() || {}.isAsciiNumber())",
-                    b, b
-                ))
-            }
-            "toChar" if args.is_empty() => {
-                Some(format!("Rune(UInt32({}))", b))
-            }
-            "padStart" | "padEnd" if self.looks_string(base) && (args.len() == 1 || args.len() == 2) => {
-                let width = self.t(args[0])?;
-                let pad = if args.len() == 2 {
-                    if let Kind::CharLit(c) = self.g.kind(args[1]) {
-                        format!("\"{}\"", c)
-                    } else {
-                        format!("({}).toString()", self.t(args[1])?)
-                    }
-                } else {
-                    "\" \"".to_string()
-                };
-                Some(format!("{}.{}({}, padding: {})", b, name, width, pad))
-            }
-            "indexOf" if args.len() == 1 && self.looks_string(base) => {
-                let needle = if let Kind::CharLit(c) = self.g.kind(args[0]) {
-                    format!("\"{}\"", c)
-                } else {
-                    self.t(args[0])?
-                };
-                Some(format!("({}.indexOf({}) ?? -1)", b, needle))
-            }
-            "removeAt" if args.len() == 1 => {
-                Some(format!("{}.remove(at: {})", b, self.t(args[0])?))
-            }
-            "addAll" if args.len() == 1 && !self.provably_non_collection(base) => {
-                Some(format!("{}.add(all: {})", b, self.t(args[0])?))
-            }
-            "containsKey" if args.len() == 1 => {
-                Some(format!("{}.contains({})", b, self.t(args[0])?))
-            }
-            "clear" if args.is_empty() => {
-                Some(format!("{}.reset()", b))
-            }
-            "getOrDefault" if args.len() == 2 => {
-                Some(format!("({}.get({}) ?? {})", b, self.t(args[0])?, self.t(args[1])?))
-            }
-            "sort" if args.is_empty() && !self.provably_non_collection(base) => {
-                Some(format!("sort({}, stable: true)", b))
-            }
-            "sortDescending" if args.is_empty() && !self.provably_non_collection(base) => {
-                Some(format!("sort({}, stable: true, descending: true)", b))
-            }
-            "sortBy" if args.len() == 1 && !self.provably_non_collection(base) => {
-                Some(format!("sort({}, key: {}, stable: true)", b, self.t(args[0])?))
-            }
-            "sortByDescending" if args.len() == 1 && !self.provably_non_collection(base) => {
-                Some(format!("sort({}, key: {}, stable: true, descending: true)", b, self.t(args[0])?))
-            }
-            "withIndex" if args.is_empty() && !self.provably_non_collection(base) => {
-                Some(format!("{}.iterator().enumerate()", b))
-            }
-            "average" if args.is_empty() && !self.provably_non_collection(base) => {
-                Some(format!(
-                    "(Float64({}.fold<Int64>(0, {{acc, x => acc + x}})) / Float64({}.count()))",
-                    self.as_iter(base)?, self.as_iter(base)?
-                ))
-            }
-            "substring" if args.len() == 2 => {
-                Some(format!("{}[{}..{}]", b, self.t(args[0])?, self.t(args[1])?))
-            }
-            "substring" if args.len() == 1 => {
-                Some(format!("{}[{}..]", b, self.t(args[0])?))
-            }
-            "isNotEmpty" if args.is_empty() => {
-                Some(format!("!({}.isEmpty())", b))
-            }
-            "first" if args.is_empty() => {
-                Some(format!("{}[0]", b))
-            }
-            "last" if args.is_empty() => {
-                Some(format!("{}[{}.size - 1]", b, b))
-            }
-            "firstOrNull" if args.is_empty() && !self.provably_non_collection(base) => {
-                Some(format!("{}.get(0)", b))
-            }
-            "lastOrNull" if args.is_empty() && !self.provably_non_collection(base) => {
-                Some(format!("{}.get({}.size - 1)", b, b))
-            }
-            "joinToString" if !self.provably_non_collection(base) => {
-                self.render_join_to_string(base, &b, args)
-            }
-            "sorted" if args.is_empty() && !self.provably_non_collection(base) => {
-                Some(format!(
-                    "({{ => let _s = collectArrayList({}); sort(_s, stable: true); _s }})()",
-                    self.as_iter(base)?
-                ))
-            }
-            "sortedDescending" if args.is_empty() && !self.provably_non_collection(base) => {
-                Some(format!(
-                    "({{ => let _s = collectArrayList({}); sort(_s, stable: true, descending: true); _s }})()",
-                    self.as_iter(base)?
-                ))
-            }
-            "sortedBy" if args.len() == 1 && !self.provably_non_collection(base) => {
-                Some(format!(
-                    "({{ => let _s = collectArrayList({}); sort(_s, key: {}, stable: true); _s }})()",
-                    self.as_iter(base)?, self.t(args[0])?
-                ))
-            }
-            "sortedByDescending" if args.len() == 1 && !self.provably_non_collection(base) => {
-                Some(format!(
-                    "({{ => let _s = collectArrayList({}); sort(_s, key: {}, stable: true, descending: true); _s }})()",
-                    self.as_iter(base)?, self.t(args[0])?
-                ))
-            }
-            "reversed" if args.is_empty() && self.looks_string(base) => {
-                Some(format!(
-                    "({{ => let _r = {}.toRuneArray(); String(Array<Rune>(_r.size, {{j => _r[_r.size - 1 - j]}})) }})()",
-                    b
-                ))
-            }
-            "reversed" if args.is_empty() && !self.provably_non_collection(base) => {
-                Some(format!(
-                    "({{ => let _s = collectArrayList({}); _s.reverse(); _s }})()",
-                    self.as_iter(base)?
-                ))
-            }
-            "repeat" if args.len() == 1 && self.looks_string(base) => {
-                Some(format!("({} * {})", b, self.atom(args[0])?))
-            }
-            "take" if args.len() == 1 && self.looks_string(base) => {
-                Some(format!("{}[0..{}]", b, self.t(args[0])?))
-            }
-            "drop" if args.len() == 1 && self.looks_string(base) => {
-                Some(format!("{}[{}..{}.size]", b, self.t(args[0])?, b))
-            }
-            "take" if args.len() == 1 && !self.provably_non_collection(base) => {
-                Some(format!(
-                    "collectArrayList({}.take({}))",
-                    self.as_iter(base)?, self.t(args[0])?
-                ))
-            }
-            "drop" if args.len() == 1 && !self.provably_non_collection(base) => {
-                Some(format!(
-                    "collectArrayList({}.skip({}))",
-                    self.as_iter(base)?, self.t(args[0])?
-                ))
-            }
-            "toList" | "toMutableList" if args.is_empty() && !self.provably_non_collection(base) => {
-                Some(format!("collectArrayList({})", self.atom(base)?))
-            }
-            "map" | "filter" if args.len() == 1 && !self.provably_non_collection(base) => {
-                Some(format!(
-                    "collectArrayList({}.{}({}))",
-                    self.as_iter(base)?, name, self.t(args[0])?
-                ))
-            }
-            "any" | "all" if args.len() == 1 && !self.provably_non_collection(base) => {
-                Some(format!("{}.{}({})", self.as_iter(base)?, name, self.t(args[0])?))
-            }
-            "none" if args.len() == 1 && !self.provably_non_collection(base) => {
-                Some(format!("!{}.any({})", self.as_iter(base)?, self.t(args[0])?))
-            }
-            "count" if args.len() == 1 && !self.provably_non_collection(base) => {
-                Some(format!("{}.filter({}).count()", self.as_iter(base)?, self.t(args[0])?))
-            }
-            "count" if args.is_empty() && !self.provably_non_collection(base) => {
-                Some(format!("{}.size", b))
-            }
-            "sum" if args.is_empty() && !self.provably_non_collection(base) => {
-                Some(format!("{}.fold<Int64>(0, {{acc, x => acc + x}})", self.as_iter(base)?))
-            }
-            "sumOf" if args.len() == 1 && !self.provably_non_collection(base) => {
-                Some(format!(
-                    "{}.map({}).fold<Int64>(0, {{acc, x => acc + x}})",
-                    self.as_iter(base)?,
-                    self.t(args[0])?
-                ))
-            }
-            "fold" if args.len() == 2 && !self.provably_non_collection(base) => {
-                let ty = self.lit_type(args[0]);
-                Some(format!(
-                    "{}.fold<{}>({}, {})",
-                    self.as_iter(base)?,
-                    ty,
-                    self.t(args[0])?,
-                    self.t(args[1])?
-                ))
-            }
-            "reduce" if args.len() == 1 && !self.provably_non_collection(base) => {
-                Some(format!("{}.reduce({}).getOrThrow()", self.as_iter(base)?, self.t(args[0])?))
-            }
-            "max" | "min" if args.is_empty() && !self.provably_non_collection(base) => {
-                let cmp = if name == "max" { ">" } else { "<" };
-                Some(format!(
-                    "{}.reduce({{a, b => if (a {} b) {{ a }} else {{ b }}}}).getOrThrow()",
-                    self.as_iter(base)?, cmp
-                ))
-            }
-            "maxOrNull" | "minOrNull" if args.is_empty() && !self.provably_non_collection(base) => {
-                let cmp = if name == "maxOrNull" { ">" } else { "<" };
-                Some(format!(
-                    "{}.reduce({{a, b => if (a {} b) {{ a }} else {{ b }}}})",
-                    self.as_iter(base)?, cmp
-                ))
-            }
-            "toInt" | "toLong" if args.is_empty() => {
-                if self.looks_numeric(base) {
-                    Some(format!("Int64({})", b))
-                } else {
-                    Some(format!("Int64.parse({})", b))
-                }
-            }
-            "toDouble" | "toFloat" if args.is_empty() => {
-                if self.looks_numeric(base) {
-                    Some(format!("Float64({})", b))
-                } else {
-                    Some(format!("Float64.parse({})", b))
-                }
-            }
-            _ => None,
-        }
-    }
-
-    fn render_join_to_string(&self, base: NodeId, _b: &str, args: &[NodeId]) -> Option<String> {
-        let has_lambda = args
-            .last()
-            .map(|a| matches!(self.g.kind(*a), Kind::Lambda { .. }))
-            .unwrap_or(false);
-        let sep = match args.first() {
-            Some(a) if !(args.len() == 1 && has_lambda) => self.t(*a)?,
-            _ => "\", \"".to_string(),
-        };
-        if has_lambda {
-            let lam = self.t(*args.last().unwrap())?;
-            return Some(format!(
-                "String.join(collectArray<String>({}.map({})), delimiter: {})",
-                self.as_iter(base)?,
-                lam,
-                sep
-            ));
-        }
-        let joined = format!(
-            "String.join(collectArray<String>({}.map({{e => e.toString()}})), delimiter: {})",
-            self.as_iter(base)?, sep
-        );
-        if args.len() >= 2 {
-            let prefix = self.t(args[1])?;
-            let postfix = if args.len() >= 3 { self.t(args[2])? } else { "\"\"".to_string() };
-            return Some(format!("({} + {} + {})", prefix, joined, postfix));
-        }
-        Some(joined)
-    }
+    // 已迁移至 render_calls.rs
 
     // ============ 辅助 ============
 

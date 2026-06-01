@@ -1,0 +1,11 @@
+length: 13
+substring: Hello
+indexOf: 4
+contains: true
+startsWith: true
+endsWith: true
+replace: Hello, Cangjie!
+split size: 5
+joined: a | b | c | d | e
+letters: 3, digits: 3
+built: 1-2-3-4-5

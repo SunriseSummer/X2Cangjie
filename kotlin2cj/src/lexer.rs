@@ -38,8 +38,6 @@ pub struct Lexer<'a> {
     line: usize,
 }
 
-const KEYWORD_SYMS: &[&str] = &[];
-
 impl<'a> Lexer<'a> {
     pub fn new(src: &'a str) -> Self {
         Lexer { src: src.as_bytes(), pos: 0, line: 1 }
@@ -331,7 +329,6 @@ impl<'a> Lexer<'a> {
             }
         }
         let c = self.bump() as char;
-        let _ = KEYWORD_SYMS;
         Ok(Tok::Sym(c.to_string()))
     }
 }
