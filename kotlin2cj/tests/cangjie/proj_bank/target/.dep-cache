@@ -1,0 +1,27 @@
+{
+  "bin": {},
+  "pkg-build": {
+    "/tmp/workspace/SunriseSummer/X2Cangjie/kotlin2cj/tests/cangjie/proj_bank/src": {
+      "package": "proj_bank",
+      "isMacro": false,
+      "accessLevel": "public",
+      "timeStamp": 1780323732,
+      "dependencies": [],
+      "std-dependencies": [
+        {
+          "orPackage": "",
+          "package": "std.collection",
+          "isStd": true,
+          "imports": [
+            {
+              "file": "/tmp/workspace/SunriseSummer/X2Cangjie/kotlin2cj/tests/cangjie/proj_bank/src/main.cj"
+            }
+          ]
+        }
+      ],
+      "testUsed": false,
+      "mockUsed": false
+    }
+  },
+  "pkg-test": {}
+}

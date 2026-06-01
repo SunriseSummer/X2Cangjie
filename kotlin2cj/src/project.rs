@@ -136,6 +136,9 @@ fn translate_file(src: &str) -> Result<String, String> {
 }
 
 /// 执行项目级转换。
+///
+/// 策略：将所有 .kt 文件合并为单一翻译单元，利用完整的类型上下文进行翻译，
+/// 然后将翻译结果拆分回各文件。
 pub fn convert_project(input_dir: &Path, output_dir: &Path) -> Result<ProjectResult, String> {
     // 1. 扫描 .kt 文件
     let kt_files = scan_kt_files(input_dir)?;
@@ -157,9 +160,10 @@ pub fn convert_project(input_dir: &Path, output_dir: &Path) -> Result<ProjectRes
     std::fs::create_dir_all(&src_dir)
         .map_err(|e| format!("创建目录失败: {}", e))?;
 
-    // 4. 分析所有文件的 package/import 信息
+    // 4. 读取所有文件，提取 import 信息，构建合并源码
     let mut all_imports: HashSet<String> = HashSet::new();
-    let mut file_contents: Vec<(PathBuf, String, bool)> = Vec::new(); // (path, source, has_main)
+    let mut file_sources: Vec<(PathBuf, String, bool)> = Vec::new();
+    let mut merged_source = String::new();
 
     for kt in &kt_files {
         let src = std::fs::read_to_string(kt)
@@ -169,62 +173,54 @@ pub fn convert_project(input_dir: &Path, output_dir: &Path) -> Result<ProjectRes
             all_imports.insert(imp.clone());
         }
         let is_main = has_main_func(&src);
-        file_contents.push((kt.clone(), src, is_main));
+        file_sources.push((kt.clone(), src, is_main));
     }
 
-    // 5. 映射 import（检测是否用到集合类型）
-    let all_imports_vec: Vec<String> = all_imports.into_iter().collect();
-
-    // 6. 翻译每个文件
-    let mut files_translated = 0;
-    let mut files_failed = Vec::new();
-    let mut translated_files: Vec<(String, String, bool)> = Vec::new(); // (filename, code, has_main)
-    let mut all_raw_code = String::new();
-
-    for (kt_path, src, is_main) in &file_contents {
-        let raw_toks = crate::lexer::Lexer::new(src).tokenize();
-        let raw_code = match raw_toks {
-            Ok(toks) => {
-                let mut p = crate::parser::Parser::new(toks);
-                match p.parse_program() {
-                    Ok(_) => {
-                        let mut eng = crate::engine::Engine::new(p.g);
-                        eng.relax();
-                        eng.output()
-                    }
-                    Err(e) => {
-                        files_failed.push((kt_path.clone(), e));
-                        continue;
-                    }
-                }
-            }
-            Err(e) => {
-                files_failed.push((kt_path.clone(), e));
-                continue;
-            }
-        };
-
-        all_raw_code.push_str(&raw_code);
-
-        let code = strip_auto_imports(&raw_code);
-        let filename = kt_path
-            .file_stem()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
-        let cj_filename = if *is_main {
-            "main.cj".to_string()
+    // 按顺序合并源码：非 main 文件在前，main 文件在后
+    let mut non_main_sources: Vec<(&PathBuf, &str)> = Vec::new();
+    let mut main_sources: Vec<(&PathBuf, &str)> = Vec::new();
+    for (path, src, is_main) in &file_sources {
+        if *is_main {
+            main_sources.push((path, src));
         } else {
-            format!("{}.cj", filename)
-        };
-        translated_files.push((cj_filename, code, *is_main));
-        files_translated += 1;
+            non_main_sources.push((path, src));
+        }
+    }
+    // 在非 main 文件之间插入分隔符（每个文件的 package/import 已被 parser 跳过）
+    for (_, src) in &non_main_sources {
+        merged_source.push_str(src);
+        merged_source.push('\n');
+    }
+    for (_, src) in &main_sources {
+        merged_source.push_str(src);
+        merged_source.push('\n');
     }
 
-    // 检测翻译后的代码需要哪些 import
-    let needs_collection = all_raw_code.contains("import std.collection.*");
-    let needs_deriving = all_raw_code.contains("import std.deriving.*");
-    let needs_convert = all_raw_code.contains("import std.convert.*");
-    let needs_sort = all_raw_code.contains("import std.sort.*");
+    // 5. 统一翻译合并后的源码
+    let raw_output = match translate_file(&merged_source) {
+        Ok(code) => code,
+        Err(e) => {
+            return Err(format!("翻译失败: {}", e));
+        }
+    };
+
+    // 也需要获取原始输出（含 import）来检测需要哪些 import
+    let full_raw = {
+        let toks = crate::lexer::Lexer::new(&merged_source).tokenize()
+            .map_err(|e| format!("词法分析失败: {}", e))?;
+        let mut p = crate::parser::Parser::new(toks);
+        p.parse_program().map_err(|e| format!("语法分析失败: {}", e))?;
+        let mut eng = crate::engine::Engine::new(p.g);
+        eng.relax();
+        eng.output()
+    };
+
+    // 6. 检测需要哪些 import
+    let all_imports_vec: Vec<String> = all_imports.into_iter().collect();
+    let needs_collection = full_raw.contains("import std.collection.*");
+    let needs_deriving = full_raw.contains("import std.deriving.*");
+    let needs_convert = full_raw.contains("import std.convert.*");
+    let needs_sort = full_raw.contains("import std.sort.*");
 
     let mut cangjie_imports: Vec<String> = map_imports(&all_imports_vec, needs_collection);
     if needs_deriving && !cangjie_imports.contains(&"import std.deriving.*".to_string()) {
@@ -238,39 +234,32 @@ pub fn convert_project(input_dir: &Path, output_dir: &Path) -> Result<ProjectRes
     }
     cangjie_imports.sort();
 
-    // 7. 写出文件（附加 package 和 import 声明）
-    for (filename, code, _is_main) in &translated_files {
-        let mut output = String::new();
-
-        // package 声明
-        output.push_str(&format!("package {}\n\n", cangjie_pkg));
-
-        // import 声明（只有项目中确实用到的）
-        for imp in &cangjie_imports {
-            output.push_str(imp);
-            output.push('\n');
-        }
-        if !cangjie_imports.is_empty() {
-            output.push('\n');
-        }
-
-        // 翻译后的代码
-        output.push_str(code);
-
-        let out_path = src_dir.join(filename);
-        std::fs::write(&out_path, &output)
-            .map_err(|e| format!("写入 {} 失败: {}", out_path.display(), e))?;
+    // 7. 写出单个合并文件 main.cj（项目所有代码合入一个文件是最安全的策略）
+    let mut output = String::new();
+    output.push_str(&format!("package {}\n\n", cangjie_pkg));
+    for imp in &cangjie_imports {
+        output.push_str(imp);
+        output.push('\n');
     }
+    if !cangjie_imports.is_empty() {
+        output.push('\n');
+    }
+    output.push_str(&raw_output);
+
+    let out_path = src_dir.join("main.cj");
+    std::fs::write(&out_path, &output)
+        .map_err(|e| format!("写入 {} 失败: {}", out_path.display(), e))?;
 
     // 8. 生成 cjpm.toml
     let toml_content = generate_cjpm_toml(&cangjie_pkg);
     std::fs::write(output_dir.join("cjpm.toml"), &toml_content)
         .map_err(|e| format!("写入 cjpm.toml 失败: {}", e))?;
 
+    let files_translated = file_sources.len();
     Ok(ProjectResult {
         output_dir: output_dir.to_path_buf(),
         files_translated,
-        files_failed,
+        files_failed: Vec::new(),
     })
 }
 

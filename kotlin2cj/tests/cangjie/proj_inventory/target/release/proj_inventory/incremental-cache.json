@@ -1,0 +1,14 @@
+{
+  "packageInformation": {
+    "proj_inventory": {
+      "rootPackageName": "proj_inventory",
+      "fileNameHash": "8962293818835924885",
+      "timeStamp": 1780323734,
+      "isBuilt": true,
+      "exeName": "main",
+      "hasSubPkgs": false
+    }
+  },
+  "jsonHash": "-239386829239111588",
+  "rootPackageName": "proj_inventory"
+}

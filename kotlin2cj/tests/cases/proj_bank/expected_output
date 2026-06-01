@@ -1,0 +1,18 @@
+Initial state:
+Account(id=1, owner=Alice, balance=1000.000000)
+Account(id=2, owner=Bob, balance=500.000000)
+
+Transfer 200 from Alice to Bob:
+  Withdrew 200.000000 from Alice's account
+  Deposited 200.000000 to Bob's account
+
+After transfer:
+Account(id=1, owner=Alice, balance=800.000000)
+Account(id=2, owner=Bob, balance=700.000000)
+
+Try withdraw 2000 from Bob:
+  Withdrawal of 2000.000000 failed for Bob
+
+Final state:
+Account(id=1, owner=Alice, balance=800.000000)
+Account(id=2, owner=Bob, balance=700.000000)

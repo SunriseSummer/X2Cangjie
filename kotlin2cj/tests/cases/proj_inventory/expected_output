@@ -1,0 +1,11 @@
+=== Inventory (5 items) ===
+  Apple: 1.500000 x100 [FOOD]
+  Laptop: 999.000000 x5 [ELECTRONICS]
+  T-Shirt: 25.000000 x50 [CLOTHING]
+  Novel: 12.000000 x30 [BOOKS]
+  Bread: 3.000000 x200 [FOOD]
+  Total value: 7355.000000
+
+Food items: 2
+Electronics items: 1
+Most expensive: Laptop (999.000000)

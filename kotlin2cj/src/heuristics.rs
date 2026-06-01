@@ -604,7 +604,16 @@ impl Engine {
             Kind::IntLit(_) | Kind::FloatLit(_) => true,
             Kind::Unary { expr, .. } => self.looks_numeric(*expr),
             Kind::Binary { op, .. } => matches!(op.as_str(), "+" | "-" | "*" | "/" | "%"),
-            Kind::Member { name, .. } => matches!(name.as_str(), "size" | "length"),
+            Kind::Member { base: _, name, .. } => {
+                if matches!(name.as_str(), "size" | "length") {
+                    return true;
+                }
+                // 检查类字段类型
+                if let Some(ty) = self.field_type_by_name(name) {
+                    return ty == "Int64" || ty == "Float64";
+                }
+                false
+            }
             Kind::Index { base, .. } => {
                 // Index into a non-string collection is numeric
                 !self.looks_string(*base) && self.looks_collection(*base)
@@ -655,6 +664,13 @@ impl Engine {
                 } else {
                     false
                 }
+            }
+            Kind::Member { base: _, name, .. } => {
+                // 检查类字段类型
+                if let Some(ty) = self.field_type_by_name(name) {
+                    return ty == "Float64";
+                }
+                false
             }
             Kind::NameRef { decl: Some(d), .. } => {
                 if let Kind::Name { .. } = self.g.kind(*d) {

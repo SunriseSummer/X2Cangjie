@@ -342,7 +342,7 @@ impl Engine {
                 la, op, ra
             ));
         }
-        if matches!(op, "+" | "-" | "*" | "/" | "%") {
+        if matches!(op, "+" | "-" | "*" | "/" | "%" | ">" | "<" | ">=" | "<=" | "==" | "!=") {
             let lf = self.looks_float(lhs);
             let rf = self.looks_float(rhs);
             if lf && !rf && self.looks_numeric(rhs) {
