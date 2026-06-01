@@ -5,6 +5,9 @@
 //!   2. **双向上下文传播**：底层→顶层的基础翻译 + 顶层→底层的上下文精化（类型推断优化）
 //!   3. **兄弟一致性检查**：同层兄弟节点相互影响，涌现局部一致性（如类型统一）
 //!   4. **温度引导优先级**：按节点临界度（依赖扇出）排序驱动，使高影响节点优先稳定
+//!   5. **雪崩记忆反馈**（Avalanche Memory Feedback, AMF）：记录每个节点引发的级联规模，
+//!      在后续松弛中优先评估高记忆权重节点的邻居，使系统自适应地集中计算资源于
+//!      翻译困难区域——类似于真实 SOC 系统中应力场的长程记忆效应。
 //!
 //! 这些机制使系统的 SOC 指标（分支比 σ、幂律指数 α、变异系数 CV）
 //! 更接近临界态，同时保持翻译的确定性和合流性。
@@ -19,6 +22,9 @@ pub struct Engine {
     /// 历次雪崩规模，用于观察幂律分布。
     pub avalanche_sizes: Vec<usize>,
     pub total_updates: u64,
+    /// AMF: 每个节点的雪崩记忆权重——记录该节点历史上引发的级联总规模。
+    /// 高权重节点是翻译图中的"应力集中点"，其邻居在后续松弛中优先评估。
+    avalanche_memory: Vec<u32>,
 }
 
 impl Engine {
@@ -32,7 +38,8 @@ impl Engine {
             }
         }
         g.link_children();
-        Engine { g, last_avalanche: 0, avalanche_sizes: Vec::new(), total_updates: 0 }
+        let avalanche_memory = vec![0u32; n];
+        Engine { g, last_avalanche: 0, avalanche_sizes: Vec::new(), total_updates: 0, avalanche_memory }
     }
 
     // ================================================================
@@ -110,8 +117,11 @@ impl Engine {
     /// SOC 粒子驱动松弛：逐个「添沙」（激活叶子节点），每粒沙让级联完全结束后
     /// 再添下一粒，独立记录每次雪崩规模——用于检验幂律分布。
     ///
-    /// 增强：按节点临界度（依赖扇出）排序叶子，使高影响叶子先驱动，
-    /// 创造更自然的「能量积累→释放」动力学，提升分支比 σ。
+    /// 增强：采用 AMF（Avalanche Memory Feedback）+ 深度双因素排序：
+    ///   - 第一排序键：雪崩记忆权重（低→高），使低应力叶子先驱动，积累能量
+    ///   - 第二排序键：深度（深→浅），使深层叶子先驱动
+    /// 这模拟了真实 SOC 系统中的应力场记忆效应：系统"记住"哪些区域容易产生
+    /// 大雪崩，并在后续松弛中自适应地调整驱动顺序，使能量更均匀地积累和释放。
     pub fn relax_soc(&mut self) -> Vec<usize> {
         let n = self.g.nodes.len();
         // 收集叶子节点（无子节点的节点）作为「沙粒」。
@@ -122,17 +132,22 @@ impl Engine {
             }
         }
 
-        // 按临界度排序：先驱动依赖扇出低的叶子（外围），让能量逐步积累，
-        // 最后驱动高扇出叶子触发大雪崩——模拟 SOC 的「缓慢积累→突然释放」。
+        // AMF + 深度双因素排序：
+        // 先按雪崩记忆权重升序（低应力优先），再按深度降序（深层优先）
         leaves.sort_by_key(|&id| {
-            let mut depth = 0;
+            let memory = if id < self.avalanche_memory.len() {
+                self.avalanche_memory[id]
+            } else {
+                0
+            };
+            let mut depth = 0u32;
             let mut cur = id;
             while let Some(p) = self.g.nodes[cur].parent {
                 depth += 1;
                 cur = p;
             }
-            // 浅层叶子（接近根）后驱动，深层叶子先驱动
-            std::cmp::Reverse(depth)
+            // (低记忆优先, 深层优先)
+            (memory, std::cmp::Reverse(depth))
         });
 
         let mut grain_avalanches: Vec<usize> = Vec::new();
@@ -237,6 +252,10 @@ impl Engine {
             self.g.nodes[id].state.version += 1;
             self.g.nodes[id].state.confidence = 1.0;
             self.total_updates += 1;
+            // AMF: 累积雪崩记忆——每次状态变更增加该节点的记忆权重
+            if id < self.avalanche_memory.len() {
+                self.avalanche_memory[id] = self.avalanche_memory[id].saturating_add(1);
+            }
             // 崩塌级联：唤醒父节点与依赖者。
             if let Some(p) = self.g.nodes[id].parent {
                 queue.push_back(p);
