@@ -21,6 +21,15 @@ fn translate(src: &str) -> Result<engine::Engine, String> {
     Ok(eng)
 }
 
+fn translate_soc(src: &str) -> Result<(engine::Engine, Vec<usize>), String> {
+    let toks = lexer::Lexer::new(src).tokenize()?;
+    let mut p = parser::Parser::new(toks);
+    p.parse_program()?;
+    let mut eng = engine::Engine::new(p.g);
+    let grain_avals = eng.relax_soc();
+    Ok((eng, grain_avals))
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
@@ -32,6 +41,8 @@ fn main() -> ExitCode {
     let mut output: Option<String> = None;
     let mut stats = false;
     let mut demo = false;
+    let mut soc_analysis = false;
+    let mut soc_mode = false;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -41,6 +52,8 @@ fn main() -> ExitCode {
             }
             "--stats" => stats = true,
             "--demo-avalanche" => demo = true,
+            "--soc-analysis" => soc_analysis = true,
+            "--soc-mode" => soc_mode = true,
             other => input = Some(other.to_string()),
         }
         i += 1;
@@ -62,11 +75,21 @@ fn main() -> ExitCode {
         }
     };
 
-    let mut eng = match translate(&src) {
-        Ok(e) => e,
-        Err(e) => {
-            eprintln!("翻译失败: {}", e);
-            return ExitCode::FAILURE;
+    let mut eng = if soc_mode {
+        match translate_soc(&src) {
+            Ok((e, _avals)) => e,
+            Err(e) => {
+                eprintln!("翻译失败: {}", e);
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        match translate(&src) {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("翻译失败: {}", e);
+                return ExitCode::FAILURE;
+            }
         }
     };
 
@@ -95,7 +118,58 @@ fn main() -> ExitCode {
         run_demo(&mut eng);
     }
 
+    if soc_analysis {
+        run_soc_analysis(&src);
+    }
+
     ExitCode::SUCCESS
+}
+
+/// SOC 分析：粒子驱动松弛 + 全量扰动，输出雪崩分布 JSON。
+fn run_soc_analysis(src: &str) {
+    // Phase 1: 粒子驱动松弛
+    let toks = match lexer::Lexer::new(src).tokenize() {
+        Ok(t) => t,
+        Err(e) => { eprintln!("词法分析失败: {}", e); return; }
+    };
+    let mut p = parser::Parser::new(toks);
+    if let Err(e) = p.parse_program() {
+        eprintln!("语法分析失败: {}", e); return;
+    }
+    let mut eng = engine::Engine::new(p.g);
+    let grain_avals = eng.relax_soc();
+    eprintln!("SOC_GRAIN_AVALANCHES:{}", grain_avals.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","));
+
+    // Phase 2: 全量扰动
+    let perturb_avals = eng.perturb_all_names();
+    eprintln!("SOC_PERTURB_AVALANCHES:{}", perturb_avals.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","));
+
+    // Phase 3: 汇总统计
+    eprintln!("SOC_NODES:{}", eng.g.nodes.len());
+    eprintln!("SOC_TOTAL_UPDATES:{}", eng.total_updates);
+
+    // Timing: 比较批量模式 vs SOC 模式
+    let start_bulk = std::time::Instant::now();
+    let toks2 = lexer::Lexer::new(src).tokenize().unwrap();
+    let mut p2 = parser::Parser::new(toks2);
+    p2.parse_program().unwrap();
+    let mut eng2 = engine::Engine::new(p2.g);
+    eng2.relax();
+    let bulk_time = start_bulk.elapsed();
+    let bulk_output = eng2.output();
+
+    let start_soc = std::time::Instant::now();
+    let toks3 = lexer::Lexer::new(src).tokenize().unwrap();
+    let mut p3 = parser::Parser::new(toks3);
+    p3.parse_program().unwrap();
+    let mut eng3 = engine::Engine::new(p3.g);
+    eng3.relax_soc();
+    let soc_time = start_soc.elapsed();
+    let soc_output = eng3.output();
+
+    eprintln!("SOC_BULK_TIME_US:{}", bulk_time.as_micros());
+    eprintln!("SOC_SOC_TIME_US:{}", soc_time.as_micros());
+    eprintln!("SOC_OUTPUT_MATCH:{}", bulk_output == soc_output);
 }
 
 /// 演示：重命名一个被引用的局部声明，观察依赖引用的雪崩级联与自动修复。
