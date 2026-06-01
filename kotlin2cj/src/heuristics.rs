@@ -855,4 +855,16 @@ impl Engine {
         }
         self.g.children_of(id).iter().any(|c| self.contains_return(*c))
     }
+
+    /// 检查名称是否为 `object` 单例声明。
+    pub(crate) fn is_singleton_object(&self, name: &str) -> bool {
+        for node in &self.g.nodes {
+            if let Kind::Class { name: cn, is_singleton, .. } = &node.kind {
+                if *cn == name && *is_singleton {
+                    return true;
+                }
+            }
+        }
+        false
+    }
 }

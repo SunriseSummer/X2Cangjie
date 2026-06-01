@@ -392,6 +392,38 @@ impl Engine {
                 self.render_join_to_string(base, &b, args)
             }
 
+            // ---- 更多集合操作 ----
+            "zip" if args.len() >= 1 && !self.provably_non_collection(base) => {
+                let other = self.t(args[0])?;
+                if args.len() == 2 {
+                    // zip with transform: list.zip(other) { a, b -> expr }
+                    let lam = self.t(args[1])?;
+                    Some(format!(
+                        "collectArrayList({}.zip({}.iterator()).map({{ _p => ({})(_p[0], _p[1]) }}))",
+                        self.as_iter(base)?, other, lam
+                    ))
+                } else {
+                    Some(format!(
+                        "collectArrayList({}.zip({}.iterator()))",
+                        self.as_iter(base)?, other
+                    ))
+                }
+            }
+            "partition" if args.len() == 1 && !self.provably_non_collection(base) => {
+                let pred = self.t(args[0])?;
+                Some(format!(
+                    "({{ => let _t = ArrayList<Int64>(); let _f = ArrayList<Int64>(); for (_e in {}) {{ if (({})(_e)) {{ _t.append(_e) }} else {{ _f.append(_e) }} }}; (_t, _f) }})()",
+                    self.atom(base)?, pred
+                ))
+            }
+            "chunked" if args.len() == 1 && !self.provably_non_collection(base) => {
+                let n = self.t(args[0])?;
+                Some(format!(
+                    "({{ => let _src = collectArrayList({}); let _r = ArrayList<ArrayList<Int64>>(); var _i = 0; while (_i < _src.size) {{ let _end = if (_i + {} < _src.size) {{ _i + {} }} else {{ _src.size }}; let _c = ArrayList<Int64>(); var _j = _i; while (_j < _end) {{ _c.append(_src[_j]); _j++ }}; _r.append(_c); _i = _end }}; _r }})()",
+                    self.as_iter(base)?, n, n
+                ))
+            }
+
             // ---- HashMap 特有操作 ----
             "groupBy" if args.len() == 1 && !self.provably_non_collection(base) => {
                 let key_fn = self.t(args[0])?;

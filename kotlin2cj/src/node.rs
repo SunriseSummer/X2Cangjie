@@ -30,6 +30,8 @@ pub enum Kind {
         is_override: bool,
         /// 扩展函数接收者类型（Kotlin `fun ReceiverType.name()`）。
         receiver_type: Option<String>,
+        /// 泛型形参（`fun <T> f(x: T): T`）。
+        generic_params: Vec<String>,
     },
     Param {
         name_node: NodeId,
@@ -61,6 +63,8 @@ pub enum Kind {
         init_block: Option<NodeId>,
         /// companion object 成员（静态方法/属性）的节点 ID 集合。
         companion_members: Vec<NodeId>,
+        /// `object Name { ... }` 单例声明。
+        is_singleton: bool,
     },
     /// 枚举类（支持构造器参数 `enum class Dir(val dx: Int, val dy: Int) { ... }`）。
     Enum {
@@ -75,6 +79,8 @@ pub enum Kind {
         name_node: NodeId, // Name 节点（用于命名冲突崩塌）
         ty: Option<String>,
         init: Option<NodeId>,
+        /// `by lazy { expr }` 惰性初始化。
+        is_lazy: bool,
     },
     /// 引入一个名字的节点，可被关键字转义“崩塌”改写，触发引用雪崩。
     Name {
@@ -132,6 +138,10 @@ pub enum Kind {
     ForceUnwrap { expr: NodeId },
     /// 已经渲染好的原子片段（如简单标识符）。
     Raw(String),
+    /// `typealias Name = Type`（渲染为注释或展开）。
+    TypeAlias { name: String, target_type: String },
+    /// `as` / `as?` 类型转换。
+    TypeCast { expr: NodeId, ty: String, safe: bool },
 }
 
 /// 枚举项：包含名称和可选的构造实参。
@@ -378,7 +388,8 @@ impl Graph {
                 }
             }
             Kind::NameRef { .. } | Kind::IntLit(_) | Kind::FloatLit(_) | Kind::BoolLit(_)
-            | Kind::CharLit(_) | Kind::Raw(_) => {}
+            | Kind::CharLit(_) | Kind::Raw(_) | Kind::TypeAlias { .. } => {}
+            Kind::TypeCast { expr, .. } => v.push(*expr),
         }
         v
     }

@@ -155,7 +155,7 @@ impl Engine {
                 None => Some("return".to_string()),
             },
             Kind::Throw { value } => Some(format!("throw {}", self.t(value)?)),
-            Kind::VarDecl { mutable, name_node, ty, init } => {
+            Kind::VarDecl { mutable, name_node, ty, init, is_lazy: _ } => {
                 let name = self.t(name_node)?;
                 if init.is_none() && ty.is_none() {
                     return Some(name);
@@ -234,13 +234,26 @@ impl Engine {
                 Some(d) => Some(format!("{}!: {} = {}", self.t(name_node)?, ty, self.t(d)?)),
                 None => Some(format!("{}: {}", self.t(name_node)?, ty)),
             },
-            Kind::Func { name, params, ret, body, is_main, is_abstract, is_override, receiver_type } => {
-                self.render_func(id, &name, &params, ret, body, is_main, is_abstract, is_override, receiver_type.as_deref())
+            Kind::Func { name, params, ret, body, is_main, is_abstract, is_override, receiver_type, generic_params } => {
+                self.render_func(id, &name, &params, ret, body, is_main, is_abstract, is_override, receiver_type.as_deref(), &generic_params)
             }
-            Kind::Class { name, ctor_params, members, superclass, is_open, is_data, is_interface, is_abstract, interfaces, super_args, generics, init_block, companion_members } => {
-                self.render_class(&name, &ctor_params, &members, superclass, is_open, is_data, is_interface, is_abstract, &interfaces, &super_args, &generics, init_block, &companion_members)
+            Kind::Class { name, ctor_params, members, superclass, is_open, is_data, is_interface, is_abstract, interfaces, super_args, generics, init_block, companion_members, is_singleton } => {
+                self.render_class(&name, &ctor_params, &members, superclass, is_open, is_data, is_interface, is_abstract, &interfaces, &super_args, &generics, init_block, &companion_members, is_singleton)
             }
             Kind::Enum { name, entries, params } => self.render_enum(&name, &entries, &params),
+            Kind::TypeAlias { name, target_type } => {
+                Some(format!("// typealias {} = {}", name, target_type))
+            }
+            Kind::TypeCast { expr, ty, safe } => {
+                let e = self.atom(expr)?;
+                if safe {
+                    // `as?` → try cast, return Option
+                    Some(format!("(if ({} is {}) {{ {} as {} }} else {{ None }})", e, ty, e, ty))
+                } else {
+                    // `as` → direct cast
+                    Some(format!("({} as {})", e, ty))
+                }
+            }
             Kind::Program { items } => self.render_program(&items),
             Kind::ForceUnwrap { expr } => {
                 let e = self.t(expr)?;
@@ -344,6 +357,16 @@ impl Engine {
     // ============ 成员访问 ============
 
     fn render_member(&self, base: NodeId, name: &str, safe: bool) -> Option<String> {
+        // Singleton object member access: `ObjectName.member` → `ObjectName.INSTANCE.member`
+        if let Kind::NameRef { original, .. } = self.g.kind(base) {
+            if self.is_singleton_object(original) {
+                let mapped = match name {
+                    "length" => "size",
+                    other => other,
+                };
+                return Some(format!("{}.INSTANCE.{}", original, crate::parser::safe_name(mapped)));
+            }
+        }
         let (b, dot) = if safe {
             let bs = if let Kind::Index { base: ib, index } = self.g.kind(base) {
                 format!("{}.get({})", self.atom(*ib)?, self.t(*index)?)
@@ -433,8 +456,13 @@ impl Engine {
 
     // ============ 函数渲染 ============
 
-    fn render_func(&self, id: NodeId, name: &str, params: &[NodeId], ret: Option<String>, body: NodeId, is_main: bool, is_abstract: bool, is_override: bool, receiver_type: Option<&str>) -> Option<String> {
+    fn render_func(&self, id: NodeId, name: &str, params: &[NodeId], ret: Option<String>, body: NodeId, is_main: bool, is_abstract: bool, is_override: bool, receiver_type: Option<&str>, generic_params: &[String]) -> Option<String> {
         let ps: Vec<String> = params.iter().map(|p| self.t(*p)).collect::<Option<_>>()?;
+        let gen_suffix = if generic_params.is_empty() {
+            String::new()
+        } else {
+            format!("<{}>", generic_params.join(", "))
+        };
         if is_main {
             let b = self.render_block(body)?;
             return Some(format!("main() {}", b));
@@ -445,7 +473,7 @@ impl Engine {
                 Some(r) => format!(": {}", r),
                 None => String::new(),
             };
-            let sig = format!("{}({}){}", name, ps.join(", "), r);
+            let sig = format!("{}{}({}){}", name, gen_suffix, ps.join(", "), r);
             let b = self.render_block(body)?;
             let func_str = format!("func {} {}", sig, b);
             return Some(format!("extend {} {{\n{}\n}}", recv_ty, indent(&func_str, 1)));
@@ -457,7 +485,7 @@ impl Engine {
             None if self.has_while_true_return(body) => ": Unit".to_string(),
             None => String::new(),
         };
-        let sig = format!("{}({}){}", name, ps.join(", "), r);
+        let sig = format!("{}{}({}){}", name, gen_suffix, ps.join(", "), r);
         if is_abstract {
             return Some(format!("public func {}", sig));
         }
@@ -497,7 +525,7 @@ impl Engine {
     // ============ 类渲染 ============
 
     #[allow(clippy::too_many_arguments)]
-    fn render_class(&self, name: &str, ctor_params: &[CtorParam], members: &[NodeId], superclass: Option<String>, is_open: bool, is_data: bool, is_interface: bool, is_abstract: bool, interfaces: &[String], super_args: &[NodeId], generics: &[String], init_block: Option<NodeId>, companion_members: &[NodeId]) -> Option<String> {
+    fn render_class(&self, name: &str, ctor_params: &[CtorParam], members: &[NodeId], superclass: Option<String>, is_open: bool, is_data: bool, is_interface: bool, is_abstract: bool, interfaces: &[String], super_args: &[NodeId], generics: &[String], init_block: Option<NodeId>, companion_members: &[NodeId], is_singleton: bool) -> Option<String> {
         let gen_suffix = if generics.is_empty() {
             String::new()
         } else {
@@ -529,6 +557,41 @@ impl Engine {
                 return Some(format!("interface {}{} {{}}", name_gen, sup));
             }
             return Some(format!("interface {}{} {{\n{}}}", name_gen, sup, ibody));
+        }
+        // object 单例 → class with private init + static instance
+        if is_singleton {
+            let mut sbody = String::new();
+            sbody.push_str(&format!("{}private init() {{}}\n", IND));
+            sbody.push_str(&format!("{}public static let INSTANCE = {}()\n", IND, name));
+            for m in members {
+                let mt = self.t(*m)?;
+                sbody.push_str(&indent(&mt, 1));
+                sbody.push('\n');
+            }
+            let mut ifaces: Vec<String> = Vec::new();
+            if let Some(s) = &superclass {
+                ifaces.push(s.clone());
+            }
+            ifaces.extend(interfaces.iter().cloned());
+            // Auto-add ToString interface if object has a toString() method
+            if !ifaces.contains(&"ToString".to_string()) {
+                let has_to_string = members.iter().any(|&m| {
+                    if let Kind::Func { name: fn_name, is_override, .. } = self.g.kind(m) {
+                        fn_name == "toString" && *is_override
+                    } else {
+                        false
+                    }
+                });
+                if has_to_string {
+                    ifaces.push("ToString".to_string());
+                }
+            }
+            let sup = if ifaces.is_empty() {
+                String::new()
+            } else {
+                format!(" <: {}", ifaces.join(" & "))
+            };
+            return Some(format!("class {}{} {{\n{}}}", name_gen, sup, sbody));
         }
         let mut body = String::new();
         for p in ctor_params {
