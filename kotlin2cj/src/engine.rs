@@ -312,6 +312,30 @@ impl Engine {
                 }
             }
             Kind::If { cond, then_b, else_b } => {
+                // 可空智能转换：`if (x != null) { ... x ... }` → `if (let Some(x) <- x) { ... }`
+                // （仓颉 if 不做 narrowing，借助 if-let 绑定解包后的同名变量）。
+                if let Some((bind, recv, negated)) = self.null_check(cond) {
+                    let tb = self.render_block(then_b)?;
+                    let head = format!("if (let Some({}) <- {})", bind, recv);
+                    if negated {
+                        // x == null：null 分支在前，非空分支在 else。
+                        match else_b {
+                            Some(e) => {
+                                let eb = self.render_block(e)?;
+                                return Some(format!("{} {} else {}", head, eb, tb));
+                            }
+                            None => {}
+                        }
+                    } else {
+                        match else_b {
+                            Some(e) => {
+                                let eb = self.render_block(e)?;
+                                return Some(format!("{} {} else {}", head, tb, eb));
+                            }
+                            None => return Some(format!("{} {}", head, tb)),
+                        }
+                    }
+                }
                 let c = self.t(cond)?;
                 let tb = self.render_block(then_b)?;
                 match else_b {
@@ -881,6 +905,31 @@ impl Engine {
     /// 图中是否存在名为 `name` 的用户函数声明（用于避免覆盖同名自定义函数）。
     fn is_user_func(&self, name: &str) -> bool {
         self.g.nodes.iter().any(|n| matches!(&n.kind, Kind::Func { name: fname, .. } if fname == name))
+    }
+
+    /// 识别 `name != null` / `name == null` 形式的空值判定，返回
+    /// (绑定名, 接收者表达式, 是否为 `== null`)。仅在一侧是简单标识符、另一侧是 null 时成立。
+    fn null_check(&self, cond: NodeId) -> Option<(String, String, bool)> {
+        if let Kind::Binary { op, lhs, rhs } = self.g.kind(cond) {
+            if op != "==" && op != "!=" {
+                return None;
+            }
+            let is_null = |id: NodeId| matches!(self.g.kind(id), Kind::Raw(s) if s == "None");
+            let name_side = if is_null(*rhs) {
+                Some(*lhs)
+            } else if is_null(*lhs) {
+                Some(*rhs)
+            } else {
+                None
+            }?;
+            // 仅对简单标识符做智能转换（绑定名与接收者同名）。
+            if let Kind::NameRef { original, .. } = self.g.kind(name_side) {
+                let bind = crate::parser::safe_name(original);
+                let recv = self.atom(name_side)?;
+                return Some((bind, recv, op == "=="));
+            }
+        }
+        None
     }
 
     /// 成员字段 `base.field` 是否为集合类型（解析 base 的类与字段声明）。
