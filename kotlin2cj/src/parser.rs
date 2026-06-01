@@ -169,8 +169,13 @@ impl Parser {
             let pname = self.expect_ident()?;
             self.expect_sym(":")?;
             let ty = self.parse_type()?;
+            let default = if self.eat_sym("=") {
+                Some(self.parse_expr()?)
+            } else {
+                None
+            };
             let nn = self.g.add(Kind::Name { original: pname.clone() });
-            let pid = self.g.add(Kind::Param { name_node: nn, ty });
+            let pid = self.g.add(Kind::Param { name_node: nn, ty, default });
             self.declare(&pname, nn);
             params.push(pid);
             self.skip_newlines();

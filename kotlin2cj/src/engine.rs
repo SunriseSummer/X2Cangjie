@@ -428,7 +428,11 @@ impl Engine {
             Kind::TypePat { ty } => Some(format!("_: {}", ty)),
 
             // ---- 声明 ----
-            Kind::Param { name_node, ty } => Some(format!("{}: {}", self.t(name_node)?, ty)),
+            Kind::Param { name_node, ty, default } => match default {
+                // Kotlin 默认参数 → 仓颉具名参数 `p!: T = default`。
+                Some(d) => Some(format!("{}!: {} = {}", self.t(name_node)?, ty, self.t(d)?)),
+                None => Some(format!("{}: {}", self.t(name_node)?, ty)),
+            },
             Kind::Func { name, params, ret, body, is_main } => {
                 let ps: Vec<String> = params.iter().map(|p| self.t(*p)).collect::<Option<_>>()?;
                 let b = self.render_block(body)?;
@@ -911,8 +915,54 @@ impl Engine {
             }
         }
         let c = self.atom(callee)?;
+        // 用户函数若含默认参数（渲染为仓颉具名参数），对应位置实参需补 `名:` 前缀。
+        if let Kind::NameRef { original, .. } = self.g.kind(callee) {
+            if let Some(named) = self.fn_named_params(original) {
+                let mut a = Vec::with_capacity(args.len());
+                for (i, x) in args.iter().enumerate() {
+                    let s = self.t(*x)?;
+                    match named.get(i) {
+                        Some((pname, true)) => a.push(format!("{}: {}", pname, s)),
+                        _ => a.push(s),
+                    }
+                }
+                return Some(format!("{}({})", c, a.join(", ")));
+            }
+        }
         let a: Vec<String> = args.iter().map(|x| self.t(*x)).collect::<Option<_>>()?;
         Some(format!("{}({})", c, a.join(", ")))
+    }
+
+    /// 查找名为 `fname` 的用户函数，返回其参数（安全名, 是否有默认值）列表。
+    /// 仅当至少一个参数有默认值时返回 Some（否则无需改写调用点）。
+    fn fn_named_params(&self, fname: &str) -> Option<Vec<(String, bool)>> {
+        let target = crate::parser::safe_name(fname);
+        for node in &self.g.nodes {
+            if let Kind::Func { name, params, .. } = &node.kind {
+                if *name != target {
+                    continue;
+                }
+                let mut out = Vec::new();
+                let mut any_default = false;
+                for p in params {
+                    if let Kind::Param { name_node, default, .. } = self.g.kind(*p) {
+                        let pn = if let Kind::Name { original } = self.g.kind(*name_node) {
+                            crate::parser::safe_name(original)
+                        } else {
+                            "_".to_string()
+                        };
+                        let has = default.is_some();
+                        any_default = any_default || has;
+                        out.push((pn, has));
+                    }
+                }
+                if any_default {
+                    return Some(out);
+                }
+                return None;
+            }
+        }
+        None
     }
 
     /// 把接收者渲染为「产生迭代器」的表达式（`recv.iterator()`）。map/filter 已急切收集为
@@ -974,7 +1024,7 @@ impl Engine {
                         }
                         return None;
                     }
-                    Kind::Param { name_node, ty } if name_node == d => {
+                    Kind::Param { name_node, ty, .. } if name_node == d => {
                         return Some(ty.clone());
                     }
                     _ => {}
@@ -1100,7 +1150,7 @@ impl Engine {
                             }
                             return false;
                         }
-                        Kind::Param { name_node, ty } if name_node == d => {
+                        Kind::Param { name_node, ty, .. } if name_node == d => {
                             return Self::is_coll_type(ty);
                         }
                         _ => {}
@@ -1185,7 +1235,7 @@ impl Engine {
                             }
                             return false; // 循环变量等：类型未知，放行
                         }
-                        Kind::Param { name_node, ty } if *name_node == d => {
+                        Kind::Param { name_node, ty, .. } if *name_node == d => {
                             return !Self::is_coll_type(ty);
                         }
                         _ => {}
@@ -1218,7 +1268,7 @@ impl Engine {
                             }
                             return false;
                         }
-                        Kind::Param { name_node, ty } if *name_node == d => {
+                        Kind::Param { name_node, ty, .. } if *name_node == d => {
                             return ty == "String";
                         }
                         _ => {}
@@ -1298,7 +1348,7 @@ impl Engine {
                             }
                             return false;
                         }
-                        Kind::Param { name_node, ty } if name_node == d => {
+                        Kind::Param { name_node, ty, .. } if name_node == d => {
                             return ty.trim_start_matches('?').starts_with('(');
                         }
                         _ => {}
@@ -1348,7 +1398,7 @@ impl Engine {
                 Kind::VarDecl { name_node: nn, ty: None, init: Some(i), .. } if *nn == name_node => {
                     return self.looks_float(*i);
                 }
-                Kind::Param { name_node: nn, ty } if *nn == name_node => {
+                Kind::Param { name_node: nn, ty, .. } if *nn == name_node => {
                     return ty == "Float64" || ty == "Float32";
                 }
                 _ => {}
@@ -1368,7 +1418,7 @@ impl Engine {
                 Kind::VarDecl { name_node: nn, ty: None, init: Some(i), .. } if *nn == name_node => {
                     return self.looks_numeric(*i);
                 }
-                Kind::Param { name_node: nn, ty } if *nn == name_node => {
+                Kind::Param { name_node: nn, ty, .. } if *nn == name_node => {
                     return ty == "Int64" || ty == "Float64";
                 }
                 _ => {}

@@ -28,6 +28,8 @@ pub enum Kind {
     Param {
         name_node: NodeId,
         ty: String, // 已映射类型
+        /// 默认值（Kotlin 默认参数）；存在时渲染为仓颉具名参数 `p!: T = default`。
+        default: Option<NodeId>,
     },
     Class {
         name: String,
@@ -217,7 +219,12 @@ impl Graph {
                 v.extend(params);
                 v.push(*body);
             }
-            Kind::Param { name_node, .. } => v.push(*name_node),
+            Kind::Param { name_node, default, .. } => {
+                v.push(*name_node);
+                if let Some(d) = default {
+                    v.push(*d);
+                }
+            }
             Kind::Class { members, .. } => v.extend(members),
             Kind::Enum { .. } => {}
             Kind::VarDecl { name_node, init, .. } => {
