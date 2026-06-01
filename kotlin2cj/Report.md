@@ -533,3 +533,67 @@ v2 的翻译质量在以下方面有提升：
 [6] Z. Olami, H. J. S. Feder, K. Christensen, "Self-organized criticality in a continuous, nonconservative cellular automaton modeling earthquakes," *Physical Review Letters*, vol. 68, no. 8, pp. 1244–1247, 1992
 
 [7] J. M. Beggs, D. Plenz, "Neuronal avalanches in neocortical circuits," *Journal of Neuroscience*, vol. 23, no. 35, pp. 11167–11177, 2003
+
+---
+
+## 8 经典算法泛化评估（126 用例分析）
+
+### 8.1 动机
+
+此前 §7 的 SOC 分析基于 100 个用例（主要为语言特性探针与综合程序），为进一步评估翻译器的**泛化能力**——即对从未见过的程序模式的适应性——本节引入 26 个经典算法题 Kotlin 题解代码（用例 101–126），不修改翻译器即进行端到端翻译+编译+运行测试。
+
+### 8.2 算法用例覆盖
+
+| 编号 | 算法 | 类别 | 关键 Kotlin 特性 |
+|:---|:---|:---|:---|
+| 101 | 01 背包 (DP) | 动态规划 | 二维 `ArrayList<ArrayList<Int>>`、三重循环 |
+| 102 | 冒泡排序 | 排序 | 元素交换、嵌套循环 |
+| 103 | 二分查找 | 搜索 | `while` 循环、条件分支 |
+| 104 | 归并排序 | 排序 | 递归分治、ArrayList 拼接 |
+| 105 | 快速排序 (Lomuto) | 排序 | 递归、in-place 交换 |
+| 106 | Fibonacci (DP) | 动态规划 | `Long` 类型、`toLong()` 转换 |
+| 107 | GCD / LCM (欧几里得) | 数论 | `while`、`%` 取模 |
+| 108 | 素数筛 (Eratosthenes) | 数论 | `ArrayList<Boolean>`、嵌套 while |
+| 109 | 矩阵乘法 | 线性代数 | 三重循环、嵌套集合 |
+| 110 | 栈实现 + 括号匹配 | 数据结构 | 自定义类、`ArrayList<Char>`、字符串迭代 |
+| 111 | 选择排序 | 排序 | 最小值索引跟踪 |
+| 112 | 插入排序 | 排序 | `while` 内移元素 |
+| 113 | 计数排序 | 排序 | 频次数组 |
+| 114 | 最长递增子序列 (DP) | 动态规划 | 二重循环 DP |
+| 115 | 零钱兑换 (DP) | 动态规划 | 无穷值哨兵 |
+| 116 | 两数之和 | 哈希表 | `HashMap<Int,Int>`、`containsKey`、`!!` |
+| 117 | 快速幂 | 数论 | `Long` 类型、位运算 |
+| 118 | 编辑距离 (DP) | 动态规划 | 字符串字符级索引 `s[i]` |
+| 119 | 最大子数组和 (Kadane) | 动态规划 | 简洁条件赋值 |
+| 120 | BFS | 图论 | 邻接表、队列 (`removeAt(0)`) |
+| 121 | DFS (迭代) | 图论 | 栈 (`removeAt(size-1)`)、`downTo` |
+| 122 | 拓扑排序 (Kahn) | 图论 | 入度计数、BFS |
+| 123 | 最长公共子序列 (DP) | 动态规划 | 字符串索引比较 |
+| 124 | Dijkstra 最短路径 | 图论 | 自定义 `Edge` 类、邻接表 |
+| 125 | 罗马数字转换 | 字符串 | `HashMap<Char,Int>`、字符索引、`!!` |
+| 126 | 回文检测 + 最长回文子串 | 字符串 | `ArrayList<Char>`、`StringBuilder`、中心扩展 |
+
+### 8.3 结果
+
+```
+126/126 translate → cjc compile → run match (100%)
+其中算法批次: 26/26 首次通过 (100% 零缺陷通过率)
+```
+
+**翻译器在未做任何修改的情况下，对 26 个全新经典算法程序达到 100% 首次通过率**。这表明：
+
+1. **SOC 局部规则的覆盖性已足够广泛**：从简单循环到三重嵌套 DP、从递归分治到图论算法，各类 Kotlin 控制流模式均能被正确翻译。
+2. **类型推断的泛化性强**：HashMap、自定义类（Edge、Stack）、嵌套泛型集合（`ArrayList<ArrayList<Int>>`）、Long 类型等均在未经专门训练的情况下正确处理。
+3. **SOC 引擎的双向传播机制有效**：字符串索引自动改写 `s.toRuneArray()[i]`（编辑距离/LCS/罗马数字）、Char→Rune 映射、`!!` 空断言自动剥离等均由类型推断级联自动完成。
+
+### 8.4 SOC 机制在算法翻译中的体现
+
+算法用例展现了 SOC 松弛过程的几个典型模式：
+
+1. **底→顶传播**：DP 表达式 `dp[i-1][w-weights[i-1]]` 从最内层索引运算→下标访问→赋值→循环体→函数体，逐层渲染并汇聚。
+
+2. **依赖边级联**：`merge(mergeSort(left), mergeSort(right))` 中的递归调用经依赖边确保函数名在所有调用点一致更新。
+
+3. **上下文精化**：Dijkstra 中 `Edge` 类的 `to`/`weight` 成员被正确推断为数值类型（非字符串），因此 `dist[edge.to]` 的下标运算无需额外类型转换——这是顶→底精化阶段沿 NameRef 链传播类型信息的结果。
+
+4. **兄弟一致性**：`bubbleSort` 中同一函数的两个参数 `arr[j]` 和 `arr[j+1]` 被同层评估，确保交换操作的左右侧类型一致。
