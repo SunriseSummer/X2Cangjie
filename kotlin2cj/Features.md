@@ -71,7 +71,7 @@
 | 全局顶层 val | ✅ | `val PI = 3.14` | 顶层 `let` | |
 | `lateinit var` | ❌ | `lateinit var x: T` | — | 无对应机制 |
 | `const val` | ⚠️ | `const val X = 1` | `let X = 1` | `const` 关键字被跳过 |
-| `by lazy { }` | ❌ | `val x by lazy { ... }` | — | 见[委托](#19-委托) |
+| `by lazy { }` | ✅ | `val x by lazy { ... }` | `let x = ({ => ... })()` | 编译期即时求值（IIFE 模式） |
 
 ---
 
@@ -135,10 +135,10 @@
 | 隐式 `it` 参数 | ✅ | `{ it * 2 }` | `{ it => it * 2 }` | 显式化 |
 | 扩展函数 | ✅ | `fun Int.square() = this * this` | `extend Int64 { func square() }` | P2 已实现 |
 | 扩展属性 | ❌ | `val String.lastChar get() = ...` | — | |
-| 可变参数 `vararg` | ❌ | `fun sum(vararg nums: Int)` | — | 关键字识别但不特殊处理 |
+| 可变参数 `vararg` | ✅ | `fun sum(vararg nums: Int)` | `func sum(nums: Array<Int64>)` | 翻译为数组参数 |
 | `tailrec` 尾递归优化 | ⚠️ | `tailrec fun f(...)` | 作为普通递归函数 | 关键字被跳过 |
 | `inline` 函数 | ⚠️ | `inline fun f(...)` | 作为普通函数 | 关键字被跳过 |
-| `crossinline` / `noinline` | ❌ | | — | |
+| `crossinline` / `noinline` | ⚠️ | | 关键字被跳过 | 修饰符识别 |
 
 ---
 
@@ -156,7 +156,7 @@
 | `sealed class` | ✅ | `sealed class S { }` | `sealed class` + `match` 穷尽分支 | |
 | 嵌套类 | ⚠️ | `class Outer { class Inner { } }` | 部分支持 | |
 | 内部类 `inner class` | ❌ | `inner class Inner` | — | `inner` 关键字不处理 |
-| 对象声明 `object` | ❌ | `object Singleton { }` | — | 单例模式无对应翻译 |
+| 对象声明 `object` | ✅ | `object Singleton { }` | `class + private init + static INSTANCE` | 单例模式 |
 | 对象表达式（匿名对象） | ❌ | `object : Interface { }` | — | |
 | `companion object` | ✅ | `companion object { ... }` | `static func` / `static let` | P2 已实现 |
 | 属性 getter/setter | ❌ | `var x: Int; get() = ...; set(v) { }` | — | 仓颉无自定义属性访问器 |
@@ -188,7 +188,7 @@
 |:---|:---:|:---|:---|:---|
 | 泛型类 | ✅ | `class Stack<T>` | `class Stack<T>` | |
 | 嵌套泛型 | ✅ | `Stack<Pair<Int, Int>>` | `Stack<(Int64, Int64)>` | 用例 127 验证 |
-| 泛型函数 | ⚠️ | `fun <T> first(list: List<T>): T` | 类型参数可能不完整保留 | |
+| 泛型函数 | ✅ | `fun <T> first(list: List<T>): T` | `func first<T>(list: ArrayList<T>): T` | 保留类型参数 |
 | 类型上界 `<T : Bound>` | ❌ | `<T : Comparable<T>>` | — | |
 | 型变 `in/out` | ❌ | `List<out T>` / `MutableList<in T>` | — | 仓颉泛型模型不同 |
 | 星投影 `<*>` | ❌ | `List<*>` | — | |
@@ -300,9 +300,9 @@
 | `toList` / `toMutableList` | ✅ | | | |
 | `average` | ✅ | `.average()` | | |
 | `asSequence()` | ❌ | `.asSequence()` | — | 所有操作均为即时求值 |
-| `zip { }` | ❌ | `.zip(other) { }` | — | |
-| `chunked` / `windowed` | ❌ | `.chunked(n)` | — | |
-| `partition { }` | ❌ | `.partition { }` | — | |
+| `zip { }` | ✅ | `.zip(other) { }` | 迭代器 `.zip()` | |
+| `chunked` / `windowed` | ✅ | `.chunked(n)` | IIFE + 手动分块 | `chunked` 已支持 |
+| `partition { }` | ✅ | `.partition { }` | IIFE + 条件分组 | |
 | `unzip` | ❌ | `.unzip()` | — | |
 
 ### 11.4 就地排序
@@ -376,8 +376,8 @@
 | `is` 类型检查 | ✅ | `if (x is String)` | `if (x is String)` | 语法一致 |
 | `!is` 否定检查 | ✅ | `if (x !is Int)` | | |
 | 智能转型（`is` 后） | ✅ | `if (x is String) x.length` | | |
-| `as` 类型转换 | ⚠️ | `x as String` | 关键字识别；转换语义可能不完整 | |
-| `as?` 安全转换 | ⚠️ | `x as? String` | 部分支持 | |
+| `as` 类型转换 | ✅ | `x as String` | `(x as String)` | |
+| `as?` 安全转换 | ✅ | `x as? String` | `if (x is T) { x as T } else { None }` | |
 
 ---
 
@@ -411,11 +411,11 @@
 | 特性 | 状态 | Kotlin | Cangjie | 备注 |
 |:---|:---:|:---|:---|:---|
 | `?.let { }` | ✅ | `x?.let { it.f() }` | `if (let Some(x) <- x) { ... }` | |
-| `let { }` (非空) | ⚠️ | `x.let { ... }` | 部分场景 | |
-| `run { }` | ❌ | `obj.run { ... }` | — | 隐式 `this` 不支持 |
+| `let { }` (非空) | ✅ | `x.let { ... }` | SafeLet 语法 | |
+| `run { }` | ✅ | `obj.run { ... }` | IIFE 去糖 `({ => body })()` | |
 | `with(obj) { }` | ❌ | `with(obj) { x = 1 }` | — | 隐式 `this` 不支持 |
-| `apply { }` | ❌ | `obj.apply { x = 1 }` | — | 隐式 `this` 不支持 |
-| `also { }` | ❌ | `obj.also { it.f() }` | — | |
+| `apply { }` | ✅ | `obj.apply { x = 1 }` | IIFE + 返回 receiver | 同 `also` 模式 |
+| `also { }` | ✅ | `obj.also { it.f() }` | IIFE + 返回 receiver | |
 | `takeIf { }` / `takeUnless { }` | ❌ | `x.takeIf { it > 0 }` | — | |
 
 ---
@@ -477,7 +477,7 @@
 
 | 特性 | 状态 | 备注 |
 |:---|:---:|:---|
-| `typealias` 类型别名 | ❌ | 未解析 |
+| `typealias` 类型别名 | ✅ | 解析时展开为目标类型 |
 | `value class` / `inline class` | ❌ | Kotlin 1.5+/1.3+ 特性 |
 | 操作符重载 | ❌ | 关键字识别但不特殊渲染 |
 | 中缀函数 `infix` | ❌ | 关键字识别但不特殊渲染 |
@@ -530,27 +530,33 @@
 
 按「实用价值 ÷ 实现成本」排序：
 
+### 已完成的 P1/P2 特性
+
+| # | 特性 | 状态 | 说明 |
+|:---|:---|:---:|:---|
+| 1 | **`by lazy { }`** | ✅ | IIFE 即时求值模式 |
+| 2 | **`vararg` 可变参数** | ✅ | 翻译为 `Array<T>` 参数 |
+| 3 | **泛型函数完整支持** | ✅ | 保留函数级类型参数 `<T>` |
+| 4 | **`object` 单例声明** | ✅ | class + 私有构造器 + 静态 INSTANCE |
+| 5 | **`typealias`** | ✅ | 解析时展开为目标类型 |
+| 6 | **`as` / `as?` 完整支持** | ✅ | Cangjie cast 语法 |
+| 7 | **作用域函数 `run/apply/also`** | ✅ | IIFE 去糖 |
+| 8 | **更多集合操作 `zip/chunked/partition`** | ✅ | 迭代器映射规则 |
+
 ### P1（高优先级）— 常用且实现成本可控
 
 | # | 特性 | 使用频率 | 实现复杂度 | 说明 |
 |:---|:---|:---:|:---:|:---|
-| 1 | **`by lazy { }`** | 高 | 中 | 可翻译为初始化标志 + 缓存变量；是 Kotlin 最常用的委托 |
-| 2 | **早返式空安全智能转换** | 高 | 中 | `if (x == null) return; x.f()` → 需数据流分析 + 后续引用自动 unwrap |
-| 3 | **`vararg` 可变参数** | 中 | 中 | 可翻译为 `Array<T>` 参数 + 调用端打包 |
-| 4 | **泛型函数完整支持** | 中 | 中 | 保留函数级类型参数 `<T>` 及约束 |
-| 5 | **`object` 单例声明** | 中 | 低 | 翻译为 class + 私有构造器 + 静态 instance |
+| 1 | **早返式空安全智能转换** | 高 | 中 | `if (x == null) return; x.f()` → 需数据流分析 + 后续引用自动 unwrap |
+| 2 | **属性 getter/setter** | 中 | 高 | 仓颉无自定义属性访问器；需翻译为显式 getter/setter 方法 + 调用端替换 |
 
 ### P2（中优先级）— 有价值但实现有一定复杂度
 
 | # | 特性 | 使用频率 | 实现复杂度 | 说明 |
 |:---|:---|:---:|:---:|:---|
-| 6 | **属性 getter/setter** | 中 | 高 | 仓颉无自定义属性访问器；需翻译为显式 getter/setter 方法 + 调用端替换 |
-| 7 | **`typealias`** | 低-中 | 低 | 展开替换或翻译为注释 |
-| 8 | **操作符重载** | 低-中 | 中 | 需将操作符调用展开为方法调用（`a + b` → `a.plus(b)`） |
-| 9 | **`as` / `as?` 完整支持** | 低-中 | 中 | 需仓颉类型转换 API 映射 |
-| 10 | **扩展属性** | 低 | 中 | `extend` 块内添加计算属性（仓颉是否支持需确认） |
-| 11 | **作用域函数 `run/with/apply/also`** | 中 | 高 | 需翻译隐式 `this` 接收者为显式变量引用 |
-| 12 | **更多集合操作 `zip/chunked/partition`** | 低-中 | 低 | 逐个添加迭代器映射规则 |
+| 3 | **操作符重载** | 低-中 | 中 | 需将操作符调用展开为方法调用（`a + b` → `a.plus(b)`） |
+| 4 | **扩展属性** | 低 | 中 | `extend` 块内添加计算属性 |
+| 5 | **`with(obj) { }` 完整支持** | 低-中 | 中 | 需隐式 `this` → 显式变量引用 |
 
 ### P3（低优先级）— 使用频率低或实现成本极高
 
@@ -582,27 +588,28 @@
 | 类别 | 特性数 | ✅ 已支持 | ⚠️ 部分 | ❌ 未支持 |
 |:---|:---:|:---:|:---:|:---:|
 | 基础类型与字面量 | 17 | 17 | 0 | 0 |
-| 变量与类型推断 | 8 | 5 | 1 | 2 |
+| 变量与类型推断 | 8 | 6 | 1 | 1 |
 | 运算符 | 11 | 9 | 0 | 2 |
 | 控制流 | 17 | 17 | 0 | 0 |
-| 函数 | 16 | 12 | 2 | 2 |
-| 类与对象 | 14 | 8 | 2 | 4 |
+| 函数 | 16 | 14 | 1 | 1 |
+| 类与对象 | 14 | 9 | 2 | 3 |
 | 继承与接口 | 10 | 9 | 1 | 0 |
-| 泛型 | 8 | 2 | 1 | 5 |
+| 泛型 | 8 | 3 | 0 | 5 |
 | 枚举 | 8 | 5 | 1 | 2 |
 | 空安全 | 11 | 9 | 1 | 1 |
-| 集合与集合操作 | 50+ | 42 | 2 | 6+ |
+| 集合与集合操作 | 50+ | 45 | 2 | 3+ |
 | 字符串与 StringBuilder | 26 | 26 | 0 | 0 |
 | 异常处理 | 7 | 6 | 0 | 1 |
-| 类型检查与转换 | 5 | 3 | 2 | 0 |
+| 类型检查与转换 | 5 | 5 | 0 | 0 |
 | 解构声明 | 5 | 5 | 0 | 0 |
 | 区间与步进 | 6 | 6 | 0 | 0 |
-| 作用域函数 | 7 | 1 | 1 | 5 |
+| 作用域函数 | 7 | 4 | 0 | 3 |
 | 协程与异步 | 7 | 0 | 0 | 7 |
-| 委托 | 6 | 0 | 0 | 6 |
+| 委托 | 6 | 1 | 0 | 5 |
 | 注解与反射 | 6 | 0 | 1 | 5 |
-| 其他高级特性 | 14 | 1 | 3 | 10 |
-| **合计** | **~260** | **~183 (70%)** | **~18 (7%)** | **~59 (23%)** |
+| 其他高级特性 | 14 | 2 | 3 | 9 |
+| **合计** | **~260** | **~197 (76%)** | **~13 (5%)** | **~50 (19%)** |
 
 > 核心特性（基础类型、控制流、函数、类、集合、字符串、异常、区间）覆盖率接近 **100%**。
+> P1/P2 特性已大幅完善：`by lazy`、`vararg`、`object` 单例、泛型函数、`typealias`、作用域函数、类型转换、更多集合操作均已支持。
 > 未支持的特性多集中在高级元编程（反射/注解）、异步（协程）和语言语法糖（委托/DSL）领域。
