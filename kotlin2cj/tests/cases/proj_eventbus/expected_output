@@ -1,0 +1,40 @@
+Registered handler 'FileLogger' for 'click'
+Registered handler 'Analytics' for 'click'
+Registered handler 'FileLogger' for 'error'
+Registered handler 'Notifier' for 'error'
+Registered handler 'Analytics' for 'login'
+
+  [FileLogger] LOG: [click] from button1: pressed
+  [Analytics] counted event from button1
+  [FileLogger] LOG: [click] from button2: pressed
+  [Analytics] counted event from button2
+  [FileLogger] LOG: [error] from server: timeout
+  [Notifier] handled: [error] from server: timeout
+  [Analytics] counted event from user1
+  [Analytics] counted event from user2
+  [FileLogger] LOG: [click] from button1: double-click
+  [Analytics] counted event from button1
+No handlers for event type 'unknown'
+
+=== EventBus 'main' Stats ===
+Total events: 7
+  click: 3 events
+  error: 1 events
+  login: 2 events
+  unknown: 1 events
+
+FileLogger logged 4 messages:
+  LOG: [click] from button1: pressed
+  LOG: [click] from button2: pressed
+  LOG: [error] from server: timeout
+  LOG: [click] from button1: double-click
+
+Analytics counts:
+  button1: 2 events
+  button2: 1 events
+  user1: 1 events
+  user2: 1 events
+
+Logger handled: 4
+Counter handled: 5
+Notifier handled: 1

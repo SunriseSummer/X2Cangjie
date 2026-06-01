@@ -1,0 +1,52 @@
+Dr. Smith (Cardiology) joined General Hospital
+Dr. Jones (Neurology) joined General Hospital
+Dr. Lee (Orthopedics) joined General Hospital
+
+Admitted Alice (#1) under Dr. Smith
+Admitted Bob (#2) under Dr. Smith
+Admitted Charlie (#3) under Dr. Jones
+Admitted Diana (#4) under Dr. Lee
+
+=== General Hospital Status ===
+Doctors: 3
+Admitted patients: 4
+Total records: 4
+Dr. Smith (Cardiology) - 2 patients:
+    - Alice (#1)
+    - Bob (#2)
+Dr. Jones (Neurology) - 1 patients:
+    - Charlie (#3)
+Dr. Lee (Orthopedics) - 1 patients:
+    - Diana (#4)
+
+Discharging Alice...
+Discharged Alice (#1)
+
+=== General Hospital Status ===
+Doctors: 3
+Admitted patients: 3
+Total records: 5
+Dr. Smith (Cardiology) - 1 patients:
+    - Bob (#2)
+Dr. Jones (Neurology) - 1 patients:
+    - Charlie (#3)
+Dr. Lee (Orthopedics) - 1 patients:
+    - Diana (#4)
+
+=== Medical Records ===
+  Patient #1: ADMIT by Dr. Smith
+  Patient #2: ADMIT by Dr. Smith
+  Patient #3: ADMIT by Dr. Jones
+  Patient #4: ADMIT by Dr. Lee
+  Patient #1: DISCHARGE by Dr. Smith
+
+Patient details:
+  Patient #1: Alice (discharged, doctor: none)
+    Diagnoses: 2
+      - Hypertension
+      - Arrhythmia
+  Patient #2: Bob (admitted, doctor: Smith)
+  Patient #3: Charlie (admitted, doctor: Jones)
+    Diagnoses: 1
+      - Migraine
+  Patient #4: Diana (admitted, doctor: Lee)

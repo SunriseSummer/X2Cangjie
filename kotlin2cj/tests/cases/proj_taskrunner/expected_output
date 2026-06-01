@@ -1,0 +1,36 @@
+Initial state:
+Queue 'build': 4 pending, 0 done
+  Pending:
+    [TODO] #1 compile (pri=3)
+    [TODO] #2 lint (pri=1)
+    [TODO] #3 test (pri=2)
+    [TODO] #4 package (pri=4)
+Queue 'deploy': 3 pending, 0 done
+  Pending:
+    [TODO] #5 upload (pri=2)
+    [TODO] #6 verify (pri=3)
+    [TODO] #7 notify (pri=1)
+
+Runner 'CI' starting...
+  Runner 'CI' executing: package
+  Runner 'CI' executing: compile
+  Runner 'CI' executing: test
+  Runner 'CI' executing: lint
+  Runner 'CI' executing: verify
+  Runner 'CI' executing: upload
+  Runner 'CI' executing: notify
+Runner 'CI' finished. Processed 7 tasks.
+
+=== Runner Report: CI ===
+Tasks processed: 7
+Queue 'build': 0 pending, 4 done
+  Done:
+    [DONE] #4 package (pri=4)
+    [DONE] #1 compile (pri=3)
+    [DONE] #3 test (pri=2)
+    [DONE] #2 lint (pri=1)
+Queue 'deploy': 0 pending, 3 done
+  Done:
+    [DONE] #6 verify (pri=3)
+    [DONE] #5 upload (pri=2)
+    [DONE] #7 notify (pri=1)

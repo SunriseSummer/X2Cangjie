@@ -1,0 +1,40 @@
+fun main() {
+    val lib = Library("City Library")
+
+    lib.addBook(Book("001", "Design Patterns", "GoF", 1994))
+    lib.addBook(Book("002", "Clean Code", "Martin", 2008))
+    lib.addBook(Book("003", "Refactoring", "Fowler", 1999))
+    lib.addBook(Book("004", "SICP", "Abelson", 1985))
+    lib.addBook(Book("005", "TAOCP", "Knuth", 1968))
+
+    val alice = lib.registerMember("Alice")
+    val bob = lib.registerMember("Bob")
+
+    println("Initial catalog:")
+    lib.printCatalog()
+
+    println("\nCheckouts:")
+    lib.checkout(alice.memberId, "001")
+    lib.checkout(alice.memberId, "003")
+    lib.checkout(bob.memberId, "002")
+    lib.checkout(bob.memberId, "001")
+
+    println("\nAfter checkouts:")
+    lib.printCatalog()
+
+    println("\nReturns:")
+    lib.doReturn(alice.memberId, "001")
+
+    println("\nAfter return:")
+    lib.printCatalog()
+
+    println()
+    lib.printTransactions()
+
+    println()
+    alice.printHistory()
+    println()
+    bob.printHistory()
+    println("\nAlice borrows: ${alice.currentBorrows()}")
+    println("Bob borrows: ${bob.currentBorrows()}")
+}

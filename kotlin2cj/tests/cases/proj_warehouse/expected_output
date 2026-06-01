@@ -1,0 +1,51 @@
+Stocking warehouse:
+  Stored Widget on shelf A1
+  Stored Gadget on shelf A1
+  Stored Doohickey on shelf A1
+  Stored Thingamajig on shelf A2
+  Stored Whatchamacallit on shelf A2
+  Stored Gizmo on shelf A2
+  Stored Sprocket on shelf B1
+  Stored Doodad on shelf B1
+  No space for Contraption!
+
+=== Warehouse 'Central' ===
+Shelf A1 (3/3):
+  SKU001: Widget (qty=100, unit=5, total=500)
+  SKU002: Gadget (qty=50, unit=15, total=750)
+  SKU003: Doohickey (qty=200, unit=2, total=400)
+Shelf A2 (3/3):
+  SKU004: Thingamajig (qty=30, unit=25, total=750)
+  SKU005: Whatchamacallit (qty=80, unit=8, total=640)
+  SKU006: Gizmo (qty=60, unit=12, total=720)
+Shelf B1 (2/2):
+  SKU007: Sprocket (qty=40, unit=10, total=400)
+  SKU008: Doodad (qty=90, unit=3, total=270)
+Total value: 4430
+Orders: 0
+
+Fulfilling Order #1 (Alice): 2 lines [pending]
+  Picked 10x Widget (remaining: 90)
+  Picked 50x Doohickey (remaining: 150)
+  Order #1 fulfilled!
+
+Fulfilling Order #2 (Bob): 2 lines [pending]
+  Picked 5x Gadget (remaining: 45)
+  Insufficient stock for Thingamajig: need 100, have 30
+
+=== Warehouse 'Central' ===
+Shelf A1 (3/3):
+  SKU001: Widget (qty=90, unit=5, total=450)
+  SKU002: Gadget (qty=45, unit=15, total=675)
+  SKU003: Doohickey (qty=150, unit=2, total=300)
+Shelf A2 (3/3):
+  SKU004: Thingamajig (qty=30, unit=25, total=750)
+  SKU005: Whatchamacallit (qty=80, unit=8, total=640)
+  SKU006: Gizmo (qty=60, unit=12, total=720)
+Shelf B1 (2/2):
+  SKU007: Sprocket (qty=40, unit=10, total=400)
+  SKU008: Doodad (qty=90, unit=3, total=270)
+Total value: 4205
+Orders: 2
+  Order #1 (Alice): 2 lines [fulfilled]
+  Order #2 (Bob): 2 lines [pending]

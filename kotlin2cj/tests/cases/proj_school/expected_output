@@ -1,0 +1,27 @@
+Teacher: Mr. Smith, age 40
+Teacher: Ms. Jones, age 35
+
+=== Math Class Report (Mr. Smith) ===
+  Alice (Grade 9): avg=85, passed=true
+  Bob (Grade 9): avg=50, passed=false
+  Charlie (Grade 9): avg=91, passed=true
+  Class average: 75
+  Pass rate: 66%
+  Top student: Charlie
+
+=== Science Class Report (Ms. Jones) ===
+  Alice (Grade 9): avg=85, passed=true
+  Charlie (Grade 9): avg=91, passed=true
+  Diana (Grade 9): avg=69, passed=true
+  Class average: 81
+  Pass rate: 100%
+  Top student: Charlie
+
+Room #101: 2 teachers, 4 students
+  Teacher: Mr. Smith (Math)
+  Teacher: Ms. Jones (Science)
+  Student: Alice, age 15
+  Student: Bob, age 16
+  Student: Charlie, age 15
+  Student: Diana, age 16
+Total people in room: 6
