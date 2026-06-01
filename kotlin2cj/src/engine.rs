@@ -490,6 +490,8 @@ impl Engine {
                 }
             }
             Kind::Program { items } => self.render_program(&items),
+            // InPat 仅作为 when 分支模式出现，由 render_when_as_if 处理，不会被直接渲染。
+            Kind::InPat { .. } => None,
         }
     }
 
@@ -526,6 +528,16 @@ impl Engine {
     fn render_when(&self, subject: Option<NodeId>, arms: &[WhenArm]) -> Option<String> {
         match subject {
             Some(subj) => {
+                // 含 `in 范围` / 比较等非常量分支时，主语 when 退化为对主语取条件的 if-else 链
+                // （仓颉 match 无法直接表达区间/关系分支）。
+                let needs_cond = arms.iter().any(|a| {
+                    a.patterns.as_ref().map_or(false, |ps| {
+                        ps.iter().any(|p| matches!(self.g.kind(*p), Kind::InPat { .. }))
+                    })
+                });
+                if needs_cond {
+                    return self.render_when_as_if(subj, arms);
+                }
                 let s = self.t(subj)?;
                 // 主语为简单标识符时，类型分支可复用该名字绑定，获得「智能转换」语义。
                 let bind = if let Kind::NameRef { original, .. } = self.g.kind(subj) {
@@ -581,6 +593,41 @@ impl Engine {
                 Some(out)
             }
         }
+    }
+
+    /// 把含区间/关系分支的「主语 when」渲染为针对主语取条件的 if-else 链。
+    fn render_when_as_if(&self, subj: NodeId, arms: &[WhenArm]) -> Option<String> {
+        let mut out = String::new();
+        let mut first = true;
+        for a in arms {
+            let arm_body = self.render_block(a.body)?;
+            match &a.patterns {
+                Some(ps) => {
+                    // 每个分支的多个模式以 || 合并，逐个对主语取条件。
+                    let mut conds = Vec::new();
+                    for p in ps {
+                        let c = match self.g.kind(*p) {
+                            Kind::InPat { negated, rhs } => {
+                                let inner = self.render_in(subj, *rhs)?;
+                                if *negated { format!("!({})", inner) } else { inner }
+                            }
+                            Kind::TypePat { ty } => format!("{} is {}", self.atom(subj)?, ty),
+                            _ => format!("{} == {}", self.atom(subj)?, self.t(*p)?),
+                        };
+                        conds.push(c);
+                    }
+                    let cond = conds.join(" || ");
+                    if first {
+                        out.push_str(&format!("if ({}) {}", cond, arm_body));
+                        first = false;
+                    } else {
+                        out.push_str(&format!(" else if ({}) {}", cond, arm_body));
+                    }
+                }
+                None => out.push_str(&format!(" else {}", arm_body)),
+            }
+        }
+        Some(out)
     }
 
     /// match 分支体：单表达式直接内联，多语句各占一行。

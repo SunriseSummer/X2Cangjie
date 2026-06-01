@@ -1147,6 +1147,12 @@ impl Parser {
                         self.bump();
                         let ty = self.parse_type()?;
                         pats.push(self.g.add(Kind::TypePat { ty }));
+                    } else if self.is_kw("in") || (self.is_sym("!") && self.peek_next_is_kw("in")) {
+                        // `in rhs` / `!in rhs` 成员检查分支模式
+                        let negated = self.eat_sym("!");
+                        self.eat_kw("in");
+                        let rhs = self.parse_expr()?;
+                        pats.push(self.g.add(Kind::InPat { negated, rhs }));
                     } else {
                         let p = self.parse_expr()?;
                         pats.push(p);
