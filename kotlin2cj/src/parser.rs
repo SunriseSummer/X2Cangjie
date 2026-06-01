@@ -908,9 +908,10 @@ impl Parser {
                 self.expect_sym("]")?;
                 e = self.g.add(Kind::Index { base: e, index: idx });
             } else if self.is_sym("!") && self.peek_next_is_bang() {
-                // !! 非空断言：剥离
+                // !! 非空断言 → ForceUnwrap
                 self.bump();
                 self.bump();
+                e = self.g.add(Kind::ForceUnwrap { expr: e });
             } else {
                 break;
             }
@@ -1131,6 +1132,9 @@ impl Parser {
                 }
                 if name == "when" {
                     return self.parse_when();
+                }
+                if name == "try" {
+                    return self.parse_try();
                 }
                 if name == "null" {
                     self.bump();
@@ -1388,7 +1392,7 @@ impl Parser {
 /// 关键字转义：把与仓颉关键字冲突的标识符用反引号包裹。
 pub fn safe_name(name: &str) -> String {
     const KW: &[&str] = &[
-        "this", "super", "let", "var", "func", "class", "struct", "interface", "enum",
+        "super", "let", "var", "func", "class", "struct", "interface", "enum",
         "match", "case", "where", "open", "init", "main", "type", "as", "is", "in",
         "spawn", "macro", "quote", "extend", "prop", "mut", "unsafe", "foreign",
     ];

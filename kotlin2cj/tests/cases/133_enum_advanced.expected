@@ -1,0 +1,10 @@
+NORTH -> SOUTH
+EAST -> WEST
+SOUTH -> NORTH
+WEST -> EAST
+[low] LOW
+[med] MEDIUM
+[HIGH] HIGH
+[!!!] CRITICAL
+true
+false

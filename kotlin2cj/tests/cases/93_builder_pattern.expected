@@ -1,0 +1,5 @@
+SELECT * FROM users WHERE age > 18 AND active = true ORDER BY name LIMIT 10
+SELECT * FROM orders
+SELECT * FROM products WHERE price < 100 LIMIT 5
+SELECT * FROM a WHERE x = 1
+SELECT * FROM b WHERE y = 2

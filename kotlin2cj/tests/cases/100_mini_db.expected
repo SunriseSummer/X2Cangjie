@@ -1,0 +1,19 @@
+--- users (id, name, role) ---
+  1 | Alice | admin
+  2 | Bob | user
+  3 | Carol | user
+  4 | Dave | admin
+  5 | Eve | user
+Total: 5
+Admins: 2
+  1 | Alice | admin
+  4 | Dave | admin
+Updated: 1
+Admins after update: 3
+Deleted: 1
+Remaining: 4
+--- users (id, name, role) ---
+  1 | Alice | admin
+  2 | Bob | admin
+  3 | Carol | user
+  4 | Dave | admin

@@ -1,9 +1,9 @@
 # kotlin2cj 测试日志
 
-- 用例总数: 90
-- 翻译成功: 90/90
-- 仓颉编译通过: 90/90
-- 运行输出匹配: 90/90
+- 用例总数: 168
+- 翻译成功: 168/168
+- 仓颉编译通过: 168/168
+- 运行输出匹配: 168/168
 
 | 用例 | 翻译 | 编译 | 运行 | 备注 |
 |------|------|------|------|------|
@@ -16,12 +16,81 @@
 | 07_for_range | ✅ | ✅ | ✅ |  |
 | 08_for_step_down | ✅ | ✅ | ✅ |  |
 | 09_functions | ✅ | ✅ | ✅ |  |
+| 100_mini_db | ✅ | ✅ | ✅ |  |
+| 101_dp_knapsack | ✅ | ✅ | ✅ |  |
+| 102_bubble_sort | ✅ | ✅ | ✅ |  |
+| 103_binary_search | ✅ | ✅ | ✅ |  |
+| 104_merge_sort | ✅ | ✅ | ✅ |  |
+| 105_quick_sort | ✅ | ✅ | ✅ |  |
+| 106_fibonacci_dp | ✅ | ✅ | ✅ |  |
+| 107_gcd_lcm | ✅ | ✅ | ✅ |  |
+| 108_sieve_primes | ✅ | ✅ | ✅ |  |
+| 109_matrix_multiply | ✅ | ✅ | ✅ |  |
 | 10_recursion | ✅ | ✅ | ✅ |  |
+| 110_stack_impl | ✅ | ✅ | ✅ |  |
+| 111_selection_sort | ✅ | ✅ | ✅ |  |
+| 112_insertion_sort | ✅ | ✅ | ✅ |  |
+| 113_counting_sort | ✅ | ✅ | ✅ |  |
+| 114_dp_lis | ✅ | ✅ | ✅ |  |
+| 115_dp_coin_change | ✅ | ✅ | ✅ |  |
+| 116_two_sum | ✅ | ✅ | ✅ |  |
+| 117_power_fast | ✅ | ✅ | ✅ |  |
+| 118_dp_edit_distance | ✅ | ✅ | ✅ |  |
+| 119_max_subarray | ✅ | ✅ | ✅ |  |
 | 11_list | ✅ | ✅ | ✅ |  |
+| 120_bfs_graph | ✅ | ✅ | ✅ |  |
+| 121_dfs_graph | ✅ | ✅ | ✅ |  |
+| 122_topological_sort | ✅ | ✅ | ✅ |  |
+| 123_dp_lcs | ✅ | ✅ | ✅ |  |
+| 124_dijkstra | ✅ | ✅ | ✅ |  |
+| 125_roman_numerals | ✅ | ✅ | ✅ |  |
+| 126_palindrome | ✅ | ✅ | ✅ |  |
+| 127_nested_generics | ✅ | ✅ | ✅ |  |
+| 128_try_catch_complex | ✅ | ✅ | ✅ |  |
+| 129_multiple_interfaces | ✅ | ✅ | ✅ |  |
 | 12_map | ✅ | ✅ | ✅ |  |
+| 130_string_edge_cases | ✅ | ✅ | ✅ |  |
+| 131_nullable_chains | ✅ | ✅ | ✅ |  |
+| 132_when_complex | ✅ | ✅ | ✅ |  |
+| 133_enum_advanced | ✅ | ✅ | ✅ |  |
+| 134_higher_order_funcs | ✅ | ✅ | ✅ |  |
+| 135_data_class_advanced | ✅ | ✅ | ✅ |  |
+| 136_stringbuilder_heavy | ✅ | ✅ | ✅ |  |
+| 137_hashmap_advanced | ✅ | ✅ | ✅ |  |
+| 138_recursive_expr | ✅ | ✅ | ✅ |  |
+| 139_stack_queue | ✅ | ✅ | ✅ |  |
 | 13_nested_loop | ✅ | ✅ | ✅ |  |
+| 140_loop_patterns | ✅ | ✅ | ✅ |  |
+| 141_sealed_class_adv | ✅ | ✅ | ✅ |  |
+| 142_inheritance_deep | ✅ | ✅ | ✅ |  |
+| 143_graph_components | ✅ | ✅ | ✅ |  |
+| 144_bit_manipulation | ✅ | ✅ | ✅ |  |
+| 145_math_combinatorics | ✅ | ✅ | ✅ |  |
+| 146_matrix_ops | ✅ | ✅ | ✅ |  |
+| 147_interval_scheduling | ✅ | ✅ | ✅ |  |
+| 148_kmp_search | ✅ | ✅ | ✅ |  |
+| 149_bank_accounts | ✅ | ✅ | ✅ |  |
 | 14_boolean | ✅ | ✅ | ✅ |  |
+| 150_event_simulator | ✅ | ✅ | ✅ |  |
+| 151_anagram_groups | ✅ | ✅ | ✅ |  |
+| 152_min_heap | ✅ | ✅ | ✅ |  |
+| 153_trie | ✅ | ✅ | ✅ |  |
+| 154_lru_cache | ✅ | ✅ | ✅ |  |
+| 155_expr_tokenizer | ✅ | ✅ | ✅ |  |
+| 156_union_find | ✅ | ✅ | ✅ |  |
+| 157_statistics | ✅ | ✅ | ✅ |  |
+| 158_astar_pathfind | ✅ | ✅ | ✅ |  |
+| 159_state_machine_lex | ✅ | ✅ | ✅ |  |
 | 15_class | ✅ | ✅ | ✅ |  |
+| 160_custom_iterator | ✅ | ✅ | ✅ |  |
+| 161_multireturn_logic | ✅ | ✅ | ✅ |  |
+| 162_collection_format | ✅ | ✅ | ✅ |  |
+| 163_polymorphism_deep | ✅ | ✅ | ✅ |  |
+| 164_recursive_algo | ✅ | ✅ | ✅ |  |
+| 165_enum_direction | ✅ | ✅ | ✅ |  |
+| 166_math_hash | ✅ | ✅ | ✅ |  |
+| 167_string_process | ✅ | ✅ | ✅ |  |
+| 168_game_of_life | ✅ | ✅ | ✅ |  |
 | 16_class_mut | ✅ | ✅ | ✅ |  |
 | 17_two_classes | ✅ | ✅ | ✅ |  |
 | 18_break_continue | ✅ | ✅ | ✅ |  |
@@ -97,3 +166,12 @@
 | 88_graph | ✅ | ✅ | ✅ |  |
 | 89_life | ✅ | ✅ | ✅ |  |
 | 90_expr_interp | ✅ | ✅ | ✅ |  |
+| 91_linked_list | ✅ | ✅ | ✅ |  |
+| 92_observer_pattern | ✅ | ✅ | ✅ |  |
+| 93_builder_pattern | ✅ | ✅ | ✅ |  |
+| 94_state_pattern | ✅ | ✅ | ✅ |  |
+| 95_iterator_pattern | ✅ | ✅ | ✅ |  |
+| 96_strategy_pattern | ✅ | ✅ | ✅ |  |
+| 97_string_parser | ✅ | ✅ | ✅ |  |
+| 98_math_utils | ✅ | ✅ | ✅ |  |
+| 99_task_scheduler | ✅ | ✅ | ✅ |  |

@@ -6,8 +6,10 @@
 //!   kotlin2cj --demo-avalanche <in.kt> 演示重命名引发的引用雪崩
 
 mod engine;
+mod heuristics;
 mod lexer;
 mod node;
+mod render;
 mod parser;
 
 use std::process::ExitCode;

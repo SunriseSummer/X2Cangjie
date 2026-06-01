@@ -1,0 +1,5 @@
+Preorder: 1 2 4 5 3 6 7
+Postorder: 4 5 2 7 6 3 1
+Depth: 4
+Leaves: 3
+Sum: 28

@@ -122,6 +122,8 @@ pub enum Kind {
     TypePat { ty: String },
     /// `when` 的成员检查分支模式 `in rhs` / `!in rhs`（仅出现在 when 臂的 patterns 中）。
     InPat { negated: bool, rhs: NodeId },
+    /// `expr!!` 非空断言 → `.getOrThrow()`。
+    ForceUnwrap { expr: NodeId },
     /// 已经渲染好的原子片段（如简单标识符）。
     Raw(String),
 }
@@ -352,6 +354,7 @@ impl Graph {
             Kind::IsCheck { expr, .. } => v.push(*expr),
             Kind::TypePat { .. } => {}
             Kind::InPat { rhs, .. } => v.push(*rhs),
+            Kind::ForceUnwrap { expr } => v.push(*expr),
             Kind::StrTemplate { parts } => {
                 for p in parts {
                     if let TemplatePart::Expr(e) = p {

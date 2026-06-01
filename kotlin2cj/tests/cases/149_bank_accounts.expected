@@ -1,0 +1,14 @@
+SAV001: 1000
+CHK001: 500
+After deposit: SAV001: 1500
+After interest: SAV001: 1575
+Withdraw 600 from checking: true
+CHK001: -100
+Withdraw 200 from checking: false
+CHK001: -100
+Transfer 200: true
+A1: 100
+A2: 300
+Transfer 200: false
+A1: 100
+A2: 300
