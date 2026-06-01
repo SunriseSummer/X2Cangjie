@@ -908,9 +908,10 @@ impl Parser {
                 self.expect_sym("]")?;
                 e = self.g.add(Kind::Index { base: e, index: idx });
             } else if self.is_sym("!") && self.peek_next_is_bang() {
-                // !! 非空断言：剥离
+                // !! 非空断言 → ForceUnwrap
                 self.bump();
                 self.bump();
+                e = self.g.add(Kind::ForceUnwrap { expr: e });
             } else {
                 break;
             }
@@ -1131,6 +1132,9 @@ impl Parser {
                 }
                 if name == "when" {
                     return self.parse_when();
+                }
+                if name == "try" {
+                    return self.parse_try();
                 }
                 if name == "null" {
                     self.bump();

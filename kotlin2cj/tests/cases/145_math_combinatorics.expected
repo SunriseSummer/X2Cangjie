@@ -1,0 +1,17 @@
+gcd(12,8) = 4
+gcd(100,75) = 25
+gcd(17,13) = 1
+modPow(2,10,1000) = 24
+modPow(3,13,1000000007) = 1594323
+C(5,2) = 10
+C(10,3) = 120
+C(20,10) = 184756
+isPerfSq(0) = true
+isPerfSq(1) = true
+isPerfSq(4) = true
+isPerfSq(9) = true
+isPerfSq(15) = false
+isPerfSq(16) = true
+isPerfSq(25) = true
+isPerfSq(26) = false
+isPerfSq(100) = true

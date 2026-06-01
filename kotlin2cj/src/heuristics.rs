@@ -82,12 +82,50 @@ impl Engine {
         if let Some(ty) = self.expr_type_name(id) {
             return ty.starts_with('?');
         }
+        // Check Member access: base.field → look up field type in class
+        if let Kind::Member { base, name, .. } = self.g.kind(id) {
+            if let Some(base_ty) = self.expr_type_name(*base) {
+                let clean_ty = base_ty.trim_start_matches('?');
+                for node in &self.g.nodes {
+                    if let Kind::Class { name: cn, ctor_params, .. } = &node.kind {
+                        if *cn == clean_ty {
+                            for cp in ctor_params {
+                                if cp.name == *name {
+                                    return cp.ty.starts_with('?');
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // Also check field_type_by_name directly
+            if let Some(ty) = self.field_type_by_name(name) {
+                return ty.starts_with('?');
+            }
+        }
         false
     }
 
     /// 图中是否存在名为 `name` 的类声明。
     pub(crate) fn is_class_name(&self, name: &str) -> bool {
         self.g.nodes.iter().any(|n| matches!(&n.kind, Kind::Class { name: cn, .. } if cn == name))
+    }
+
+    /// 判断函数节点是否位于 open 或 abstract 类中（需要 open 修饰符）。
+    pub(crate) fn func_in_open_class(&self, func_id: NodeId) -> bool {
+        if let Some(parent_id) = self.g.nodes[func_id].parent {
+            // parent is a Block; check the Block's parent for Class
+            if let Some(class_id) = self.g.nodes[parent_id].parent {
+                if let Kind::Class { is_open, is_abstract, .. } = self.g.kind(class_id) {
+                    return *is_open || *is_abstract;
+                }
+            }
+            // direct parent is a Class (members list)
+            if let Kind::Class { is_open, is_abstract, .. } = self.g.kind(parent_id) {
+                return *is_open || *is_abstract;
+            }
+        }
+        false
     }
 
     /// 查找名为 `name` 的枚举声明，返回其所有枚举项名。

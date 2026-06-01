@@ -233,13 +233,22 @@ impl Engine {
                 None => Some(format!("{}: {}", self.t(name_node)?, ty)),
             },
             Kind::Func { name, params, ret, body, is_main, is_abstract, is_override } => {
-                self.render_func(&name, &params, ret, body, is_main, is_abstract, is_override)
+                self.render_func(id, &name, &params, ret, body, is_main, is_abstract, is_override)
             }
             Kind::Class { name, ctor_params, members, superclass, is_open, is_data, is_interface, is_abstract, interfaces, super_args, generics, init_block } => {
                 self.render_class(&name, &ctor_params, &members, superclass, is_open, is_data, is_interface, is_abstract, &interfaces, &super_args, &generics, init_block)
             }
             Kind::Enum { name, entries } => self.render_enum(&name, &entries),
             Kind::Program { items } => self.render_program(&items),
+            Kind::ForceUnwrap { expr } => {
+                let e = self.t(expr)?;
+                // Only emit .getOrThrow() if the expression is actually nullable
+                if self.is_nullable_expr(expr) {
+                    Some(format!("{}.getOrThrow()", e))
+                } else {
+                    Some(e)
+                }
+            }
             Kind::InPat { .. } => None,
         }
     }
@@ -406,7 +415,7 @@ impl Engine {
 
     // ============ 函数渲染 ============
 
-    fn render_func(&self, name: &str, params: &[NodeId], ret: Option<String>, body: NodeId, is_main: bool, is_abstract: bool, is_override: bool) -> Option<String> {
+    fn render_func(&self, id: NodeId, name: &str, params: &[NodeId], ret: Option<String>, body: NodeId, is_main: bool, is_abstract: bool, is_override: bool) -> Option<String> {
         let ps: Vec<String> = params.iter().map(|p| self.t(*p)).collect::<Option<_>>()?;
         if is_main {
             let b = self.render_block(body)?;
@@ -423,7 +432,17 @@ impl Engine {
             return Some(format!("public func {}", sig));
         }
         let b = self.render_block(body)?;
-        let vis = if is_override { "public " } else { "" };
+        // Determine visibility/open modifiers based on parent class context
+        let in_open_class = self.func_in_open_class(id);
+        let vis = if is_override && in_open_class {
+            "public open override "
+        } else if is_override {
+            "public override "
+        } else if in_open_class {
+            "public open "
+        } else {
+            ""
+        };
         Some(format!("{}func {} {}", vis, sig, b))
     }
 
@@ -688,7 +707,17 @@ impl Engine {
                         false
                     };
                     if !is_enum {
-                        body.push_str("case _ => ()\n");
+                        // Check if all arms are type patterns (sealed class style)
+                        let all_type_pats = arms.iter().all(|a| {
+                            a.patterns.as_ref().map_or(false, |ps| {
+                                ps.iter().all(|p| matches!(self.g.kind(*p), Kind::TypePat { .. }))
+                            })
+                        });
+                        if all_type_pats {
+                            body.push_str("case _ => throw Exception(\"\")\n");
+                        } else {
+                            body.push_str("case _ => ()\n");
+                        }
                     }
                 }
                 Some(format!("match ({}) {{\n{}}}", s, indent(&body, 1)))

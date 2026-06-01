@@ -1,0 +1,7 @@
+Components: 3
+Path 0->3: 2
+Path 0->2: 1
+Path 0->5: -1
+Path 4->5: 1
+Components2: 1
+Path 0->2: 2

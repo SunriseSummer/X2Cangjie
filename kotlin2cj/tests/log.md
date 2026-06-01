@@ -1,9 +1,9 @@
 # kotlin2cj 测试日志
 
-- 用例总数: 126
-- 翻译成功: 126/126
-- 仓颉编译通过: 126/126
-- 运行输出匹配: 126/126
+- 用例总数: 150
+- 翻译成功: 150/150
+- 仓颉编译通过: 150/150
+- 运行输出匹配: 150/150
 
 | 用例 | 翻译 | 编译 | 运行 | 备注 |
 |------|------|------|------|------|
@@ -45,9 +45,33 @@
 | 124_dijkstra | ✅ | ✅ | ✅ |  |
 | 125_roman_numerals | ✅ | ✅ | ✅ |  |
 | 126_palindrome | ✅ | ✅ | ✅ |  |
+| 127_nested_generics | ✅ | ✅ | ✅ |  |
+| 128_try_catch_complex | ✅ | ✅ | ✅ |  |
+| 129_multiple_interfaces | ✅ | ✅ | ✅ |  |
 | 12_map | ✅ | ✅ | ✅ |  |
+| 130_string_edge_cases | ✅ | ✅ | ✅ |  |
+| 131_nullable_chains | ✅ | ✅ | ✅ |  |
+| 132_when_complex | ✅ | ✅ | ✅ |  |
+| 133_enum_advanced | ✅ | ✅ | ✅ |  |
+| 134_higher_order_funcs | ✅ | ✅ | ✅ |  |
+| 135_data_class_advanced | ✅ | ✅ | ✅ |  |
+| 136_stringbuilder_heavy | ✅ | ✅ | ✅ |  |
+| 137_hashmap_advanced | ✅ | ✅ | ✅ |  |
+| 138_recursive_expr | ✅ | ✅ | ✅ |  |
+| 139_stack_queue | ✅ | ✅ | ✅ |  |
 | 13_nested_loop | ✅ | ✅ | ✅ |  |
+| 140_loop_patterns | ✅ | ✅ | ✅ |  |
+| 141_sealed_class_adv | ✅ | ✅ | ✅ |  |
+| 142_inheritance_deep | ✅ | ✅ | ✅ |  |
+| 143_graph_components | ✅ | ✅ | ✅ |  |
+| 144_bit_manipulation | ✅ | ✅ | ✅ |  |
+| 145_math_combinatorics | ✅ | ✅ | ✅ |  |
+| 146_matrix_ops | ✅ | ✅ | ✅ |  |
+| 147_interval_scheduling | ✅ | ✅ | ✅ |  |
+| 148_kmp_search | ✅ | ✅ | ✅ |  |
+| 149_bank_accounts | ✅ | ✅ | ✅ |  |
 | 14_boolean | ✅ | ✅ | ✅ |  |
+| 150_event_simulator | ✅ | ✅ | ✅ |  |
 | 15_class | ✅ | ✅ | ✅ |  |
 | 16_class_mut | ✅ | ✅ | ✅ |  |
 | 17_two_classes | ✅ | ✅ | ✅ |  |

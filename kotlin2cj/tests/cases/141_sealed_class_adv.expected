@@ -1,0 +1,7 @@
+OK: 42
+ERR: not found
+WAIT: 75%
+OK: 100
+ERR: timeout
+3 + 5 * 2
+Success: 2, Failures: 2

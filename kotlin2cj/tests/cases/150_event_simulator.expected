@@ -1,0 +1,9 @@
+t=5: process_B (p=2)
+t=5: process_C (p=1)
+t=10: process_E (p=2)
+t=10: process_A (p=1)
+t=15: process_D (p=3)
+---
+high: priority=10
+mid: priority=5
+low: priority=1
