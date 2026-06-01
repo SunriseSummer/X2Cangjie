@@ -156,6 +156,18 @@ impl Engine {
                 }
                 let la = self.atom(lhs)?;
                 let ra = self.atom(rhs)?;
+                // 仓颉无 Int64→Float64 隐式提升：算术运算中若一侧为 Float、另一侧为
+                // 整型数值，则把整型侧显式包裹 Float64(...)，对齐 Kotlin 的自动提升语义。
+                if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%") {
+                    let lf = self.looks_float(lhs);
+                    let rf = self.looks_float(rhs);
+                    if lf && !rf && self.looks_numeric(rhs) {
+                        return Some(format!("{} {} Float64({})", la, op, ra));
+                    }
+                    if rf && !lf && self.looks_numeric(lhs) {
+                        return Some(format!("Float64({}) {} {}", la, op, ra));
+                    }
+                }
                 Some(format!("{} {} {}", la, op, ra))
             }
             Kind::Range { lo, hi, inclusive, down, step } => {
@@ -566,6 +578,28 @@ impl Engine {
                 // recv.removeAt(i) → recv.remove(at: i)
                 "removeAt" if args.len() == 1 => {
                     return Some(format!("{}.remove(at: {})", b, self.t(args[0])?));
+                }
+                // Map 成员检查：Kotlin 的 containsKey/containsValue → 仓颉 HashMap.contains。
+                "containsKey" if args.len() == 1 => {
+                    return Some(format!("{}.contains({})", b, self.t(args[0])?));
+                }
+                // map.getOrDefault(k, d) → (map.get(k) ?? d)（下标读取会抛异常，get 返回 Option）。
+                "getOrDefault" if args.len() == 2 => {
+                    return Some(format!("({}.get({}) ?? {})", b, self.t(args[0])?, self.t(args[1])?));
+                }
+                // 就地排序：Kotlin 的 sort/sortDescending/sortBy/sortByDescending 改原集合，
+                // 映射到仓颉 std.sort 的全局 sort（成员版已弃用），保持就地语义。
+                "sort" if args.is_empty() && !self.provably_non_collection(*base) => {
+                    return Some(format!("sort({})", b));
+                }
+                "sortDescending" if args.is_empty() && !self.provably_non_collection(*base) => {
+                    return Some(format!("sort({}, descending: true)", b));
+                }
+                "sortBy" if args.len() == 1 && !self.provably_non_collection(*base) => {
+                    return Some(format!("sort({}, key: {})", b, self.t(args[0])?));
+                }
+                "sortByDescending" if args.len() == 1 && !self.provably_non_collection(*base) => {
+                    return Some(format!("sort({}, key: {}, descending: true)", b, self.t(args[0])?));
                 }
                 // s.substring(a, b) → s[a..b]；s.substring(a) → s[a..]
                 "substring" if args.len() == 2 => {
@@ -1022,6 +1056,21 @@ impl Engine {
             Kind::IntLit(_) | Kind::FloatLit(_) => true,
             Kind::Unary { expr, .. } => self.looks_numeric(*expr),
             Kind::Binary { op, .. } => matches!(op.as_str(), "+" | "-" | "*" | "/" | "%"),
+            // 数值结果的成员访问/调用（.size/.length、聚合与数值转换）。
+            Kind::Member { name, .. } => matches!(name.as_str(), "size" | "length"),
+            Kind::Call { callee, .. } => {
+                if let Kind::Member { name, .. } = self.g.kind(*callee) {
+                    matches!(
+                        name.as_str(),
+                        "sum" | "sumOf" | "count" | "size" | "length"
+                            | "max" | "min" | "toInt" | "toLong" | "toDouble" | "toFloat"
+                    )
+                } else if let Kind::NameRef { original, .. } = self.g.kind(*callee) {
+                    matches!(original.as_str(), "maxOf" | "minOf")
+                } else {
+                    false
+                }
+            }
             Kind::NameRef { decl: Some(d), .. } => {
                 if let Kind::Name { .. } = self.g.kind(*d) {
                     // 找到声明它的 VarDecl/Param，检查映射后的类型。
@@ -1034,12 +1083,64 @@ impl Engine {
         }
     }
 
+    /// 启发式判断表达式是否求值为浮点数（用于补显式 Int64→Float64 提升）。
+    fn looks_float(&self, id: NodeId) -> bool {
+        match self.g.kind(id) {
+            Kind::FloatLit(_) => true,
+            Kind::Unary { expr, .. } => self.looks_float(*expr),
+            Kind::Binary { op, lhs, rhs } => {
+                matches!(op.as_str(), "+" | "-" | "*" | "/" | "%")
+                    && (self.looks_float(*lhs) || self.looks_float(*rhs))
+            }
+            Kind::Call { callee, .. } => {
+                if let Kind::Member { name, .. } = self.g.kind(*callee) {
+                    matches!(name.as_str(), "toDouble" | "toFloat")
+                } else if let Kind::NameRef { original, .. } = self.g.kind(*callee) {
+                    original == "Float64" || original == "Float32"
+                } else {
+                    false
+                }
+            }
+            Kind::NameRef { decl: Some(d), .. } => {
+                if let Kind::Name { .. } = self.g.kind(*d) {
+                    self.decl_is_float(*d)
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
+    /// 检查某 Name 节点所属声明是否为浮点类型（按显式类型或初值推断）。
+    fn decl_is_float(&self, name_node: NodeId) -> bool {
+        for node in &self.g.nodes {
+            match &node.kind {
+                Kind::VarDecl { name_node: nn, ty: Some(t), .. } if *nn == name_node => {
+                    return t == "Float64" || t == "Float32";
+                }
+                Kind::VarDecl { name_node: nn, ty: None, init: Some(i), .. } if *nn == name_node => {
+                    return self.looks_float(*i);
+                }
+                Kind::Param { name_node: nn, ty } if *nn == name_node => {
+                    return ty == "Float64" || ty == "Float32";
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
     /// 检查某 Name 节点所属声明的类型是否为数值类型。
     fn decl_is_numeric(&self, name_node: NodeId) -> bool {
         for node in &self.g.nodes {
             match &node.kind {
                 Kind::VarDecl { name_node: nn, ty: Some(t), .. } if *nn == name_node => {
                     return t == "Int64" || t == "Float64";
+                }
+                // 无显式类型时由初值表达式推断（如 `val total = xs.sum()`）。
+                Kind::VarDecl { name_node: nn, ty: None, init: Some(i), .. } if *nn == name_node => {
+                    return self.looks_numeric(*i);
                 }
                 Kind::Param { name_node: nn, ty } if *nn == name_node => {
                     return ty == "Int64" || ty == "Float64";
@@ -1118,7 +1219,7 @@ impl Engine {
         if body.contains("Int64.parse") || body.contains("Float64.parse") {
             header.push_str("import std.convert.*\n");
         }
-        if body.contains("sort(_s") {
+        if body.contains("sort(_s") || body.contains("sort(") {
             header.push_str("import std.sort.*\n");
         }
         if !header.is_empty() {
