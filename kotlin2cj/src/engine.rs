@@ -156,7 +156,13 @@ impl Engine {
                 }
                 let la = self.atom(lhs)?;
                 let ra = self.atom(rhs)?;
-                // 仓颉无 Int64→Float64 隐式提升：算术运算中若一侧为 Float、另一侧为
+                // 仓颉 `+` 不支持 String 与非 String 直接拼接：Kotlin `"a" + x` 语义为
+                // 字符串拼接，这里对非字符串一侧补 `.toString()`（String 自身亦有 toString，安全）。
+                if op == "+" && (self.looks_string(lhs) || self.looks_string(rhs)) {
+                    let lc = if self.looks_string(lhs) { la.clone() } else { format!("{}.toString()", la) };
+                    let rc = if self.looks_string(rhs) { ra.clone() } else { format!("{}.toString()", ra) };
+                    return Some(format!("{} + {}", lc, rc));
+                }
                 // 整型数值，则把整型侧显式包裹 Float64(...)，对齐 Kotlin 的自动提升语义。
                 if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%") {
                     let lf = self.looks_float(lhs);
@@ -670,6 +676,10 @@ impl Engine {
                 // recv.removeAt(i) → recv.remove(at: i)
                 "removeAt" if args.len() == 1 => {
                     return Some(format!("{}.remove(at: {})", b, self.t(args[0])?));
+                }
+                // recv.addAll(xs) → recv.add(all: xs)（仓颉 ArrayList 批量追加命名参数形式）。
+                "addAll" if args.len() == 1 && !self.provably_non_collection(*base) => {
+                    return Some(format!("{}.add(all: {})", b, self.t(args[0])?));
                 }
                 // Map 成员检查：Kotlin 的 containsKey/containsValue → 仓颉 HashMap.contains。
                 "containsKey" if args.len() == 1 => {
