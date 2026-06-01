@@ -604,7 +604,7 @@ impl Engine {
             Kind::IntLit(_) | Kind::FloatLit(_) => true,
             Kind::Unary { expr, .. } => self.looks_numeric(*expr),
             Kind::Binary { op, .. } => matches!(op.as_str(), "+" | "-" | "*" | "/" | "%"),
-            Kind::Member { base: _, name, .. } => {
+            Kind::Member { name, .. } => {
                 if matches!(name.as_str(), "size" | "length") {
                     return true;
                 }
@@ -665,7 +665,7 @@ impl Engine {
                     false
                 }
             }
-            Kind::Member { base: _, name, .. } => {
+            Kind::Member { name, .. } => {
                 // 检查类字段类型
                 if let Some(ty) = self.field_type_by_name(name) {
                     return ty == "Float64";
