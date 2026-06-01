@@ -789,6 +789,8 @@ impl Parser {
                     let lam = self.parse_lambda()?;
                     if name == "forEach" {
                         e = self.build_for_each(e, lam);
+                    } else if name == "forEachIndexed" {
+                        e = self.build_for_each_indexed(e, lam);
                     } else if name == "let" {
                         // recv?.let { it -> ... } / recv.let { ... }
                         e = self.build_safe_let(e, lam);
@@ -818,8 +820,7 @@ impl Parser {
         Ok(e)
     }
 
-    fn build_for_each(&mut self, recv: NodeId, lam: NodeId) -> NodeId {
-        let (params, body) = if let Kind::Lambda { params, body } = self.g.kind(lam) {
+    fn build_for_each(&mut self, recv: NodeId, lam: NodeId) -> NodeId {        let (params, body) = if let Kind::Lambda { params, body } = self.g.kind(lam) {
             (params.clone(), *body)
         } else {
             (Vec::new(), lam)
@@ -833,6 +834,26 @@ impl Parser {
             init: None,
         });
         self.g.add(Kind::ForEach { var, iter: recv, body })
+    }
+
+    /// xs.forEachIndexed { i, v -> ... } → for ((i, v) in xs.withIndex()) { ... }
+    fn build_for_each_indexed(&mut self, recv: NodeId, lam: NodeId) -> NodeId {
+        let (params, body) = if let Kind::Lambda { params, body } = self.g.kind(lam) {
+            (params.clone(), *body)
+        } else {
+            (Vec::new(), lam)
+        };
+        let strip = |p: &String| -> String {
+            p.split_once(':').map(|(n, _)| n.trim().to_string()).unwrap_or_else(|| p.clone())
+        };
+        let iname = params.first().map(&strip).unwrap_or_else(|| "index".to_string());
+        let vname = params.get(1).map(&strip).unwrap_or_else(|| "it".to_string());
+        let in_node = self.g.add(Kind::Name { original: iname });
+        let vn_node = self.g.add(Kind::Name { original: vname });
+        let var = self.g.add(Kind::Destructure { names: vec![in_node, vn_node] });
+        let wi = self.g.add(Kind::Member { base: recv, name: "withIndex".to_string(), safe: false });
+        let iter = self.g.add(Kind::Call { callee: wi, args: vec![] });
+        self.g.add(Kind::ForEach { var, iter, body })
     }
 
     fn build_safe_let(&mut self, recv: NodeId, lam: NodeId) -> NodeId {
@@ -901,18 +922,21 @@ impl Parser {
         self.expect_sym("{")?;
         self.push_scope();
         let mut params = Vec::new();
-        // 检测 `params ->`
+        // 检测 `params ->`，参数可带类型注解 `n: Int`。
         let save = self.pos;
         let mut has_arrow = false;
-        let mut tmp = Vec::new();
+        let mut tmp: Vec<String> = Vec::new();
         loop {
             match self.peek().clone() {
                 Tok::Ident(n) => {
-                    tmp.push(n);
                     self.bump();
-                    if !self.eat_sym(",") {
-                        // 继续
+                    let mut p = n;
+                    if self.eat_sym(":") {
+                        let ty = self.parse_type()?;
+                        p = format!("{}: {}", p, ty);
                     }
+                    tmp.push(p);
+                    self.eat_sym(",");
                 }
                 Tok::Sym(s) if s == "->" => {
                     self.bump();
@@ -1152,6 +1176,27 @@ impl Parser {
     }
 
     fn parse_type_raw(&mut self) -> PResult<String> {
+        // 函数类型 `(A, B) -> R`（仓颉语法一致，可直接映射）。
+        if self.is_sym("(") {
+            self.bump();
+            let mut params = Vec::new();
+            if !self.is_sym(")") {
+                loop {
+                    params.push(self.parse_type_raw()?);
+                    if !self.eat_sym(",") {
+                        break;
+                    }
+                }
+            }
+            self.expect_sym(")")?;
+            self.expect_sym("->")?;
+            let ret = self.parse_type_raw()?;
+            let mut s = format!("({}) -> {}", params.join(", "), ret);
+            if self.eat_sym("?") {
+                s = format!("{}?", s);
+            }
+            return Ok(s);
+        }
         let mut s = self.expect_ident()?;
         if self.eat_sym("<") {
             let mut args = Vec::new();
@@ -1199,6 +1244,22 @@ pub fn collection_ctor(name: &str) -> Option<&'static str> {
 /// Kotlin 类型 → 仓颉类型。
 pub fn map_type(raw: &str) -> String {
     let raw = raw.trim();
+    // 函数类型 `(A, B) -> R` → 逐段映射参数与返回类型（仓颉语法一致）。
+    if raw.starts_with('(') {
+        if let Some(close) = matching_paren(raw) {
+            let after = raw[close + 1..].trim_start();
+            if let Some(rest) = after.strip_prefix("->") {
+                let inner = &raw[1..close];
+                let params: Vec<String> = if inner.trim().is_empty() {
+                    Vec::new()
+                } else {
+                    split_top(inner).iter().map(|a| map_type(a)).collect()
+                };
+                let ret = map_type(rest.trim());
+                return format!("({}) -> {}", params.join(", "), ret);
+            }
+        }
+    }
     // 可空类型：Kotlin `T?` → 仓颉 `?T`
     if let Some(base) = raw.strip_suffix('?') {
         return format!("?{}", map_type(base));
@@ -1239,11 +1300,11 @@ fn split_top(s: &str) -> Vec<String> {
     let mut cur = String::new();
     for c in s.chars() {
         match c {
-            '<' => {
+            '<' | '(' => {
                 depth += 1;
                 cur.push(c);
             }
-            '>' => {
+            '>' | ')' => {
                 depth -= 1;
                 cur.push(c);
             }
@@ -1258,4 +1319,26 @@ fn split_top(s: &str) -> Vec<String> {
         out.push(cur.trim().to_string());
     }
     out
+}
+
+/// 返回与位置 0 的 `(` 匹配的 `)` 的下标。
+fn matching_paren(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    if bytes.first() != Some(&b'(') {
+        return None;
+    }
+    let mut depth = 0;
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }

@@ -237,7 +237,13 @@ impl Engine {
                         "=>".to_string()
                     }
                 } else {
-                    let ps: Vec<String> = params.iter().map(|p| crate::parser::safe_name(p)).collect();
+                    let ps: Vec<String> = params
+                        .iter()
+                        .map(|p| match p.split_once(':') {
+                            Some((n, t)) => format!("{}: {}", crate::parser::safe_name(n.trim()), t.trim()),
+                            None => crate::parser::safe_name(p),
+                        })
+                        .collect();
                     format!("{} =>", ps.join(", "))
                 };
                 if inner.trim().is_empty() {
@@ -600,6 +606,17 @@ impl Engine {
                 }
                 "sortByDescending" if args.len() == 1 && !self.provably_non_collection(*base) => {
                     return Some(format!("sort({}, key: {}, descending: true)", b, self.t(args[0])?));
+                }
+                // xs.withIndex() → xs.iterator().enumerate()（产出 (index, value) 元组）。
+                "withIndex" if args.is_empty() && !self.provably_non_collection(*base) => {
+                    return Some(format!("{}.iterator().enumerate()", b));
+                }
+                // xs.average() → Float64(总和) / Float64(个数)（仓颉无内建 average）。
+                "average" if args.is_empty() && !self.provably_non_collection(*base) => {
+                    return Some(format!(
+                        "(Float64({}.fold<Int64>(0, {{acc, x => acc + x}})) / Float64({}.count()))",
+                        self.as_iter(*base)?, self.as_iter(*base)?
+                    ));
                 }
                 // s.substring(a, b) → s[a..b]；s.substring(a) → s[a..]
                 "substring" if args.len() == 2 => {
