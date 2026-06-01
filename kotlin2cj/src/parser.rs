@@ -1188,9 +1188,9 @@ pub fn safe_name(name: &str) -> String {
 /// 集合字面量构造器名 → 仓颉容器类型名。
 pub fn collection_ctor(name: &str) -> Option<&'static str> {
     match name {
-        "listOf" | "mutableListOf" | "arrayListOf" => Some("ArrayList"),
-        "setOf" | "mutableSetOf" | "hashSetOf" => Some("HashSet"),
-        "mapOf" | "mutableMapOf" | "hashMapOf" => Some("HashMap"),
+        "listOf" | "mutableListOf" | "arrayListOf" | "ArrayList" => Some("ArrayList"),
+        "setOf" | "mutableSetOf" | "hashSetOf" | "HashSet" => Some("HashSet"),
+        "mapOf" | "mutableMapOf" | "hashMapOf" | "HashMap" | "LinkedHashMap" => Some("HashMap"),
         _ => None,
     }
 }
@@ -1207,6 +1207,10 @@ pub fn map_type(raw: &str) -> String {
         let base = &raw[..lt];
         let inner = &raw[lt + 1..raw.rfind('>').unwrap_or(raw.len())];
         let args: Vec<String> = split_top(inner).iter().map(|a| map_type(a)).collect();
+        // Kotlin `Pair<A, B>` / `Triple<A, B, C>` → 仓颉元组类型 `(A, B)`。
+        if base == "Pair" || base == "Triple" {
+            return format!("({})", args.join(", "));
+        }
         let mapped_base = match base {
             "List" | "MutableList" | "ArrayList" | "Collection" | "Iterable" => "ArrayList",
             "Map" | "MutableMap" | "HashMap" | "LinkedHashMap" => "HashMap",

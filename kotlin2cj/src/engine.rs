@@ -519,6 +519,13 @@ impl Engine {
     }
 
     fn render_call(&self, callee: NodeId, args: &[NodeId]) -> Option<String> {
+        // Pair(a, b) / Triple(a, b, c) → 仓颉元组字面量 (a, b)。
+        if let Kind::NameRef { original, .. } = self.g.kind(callee) {
+            if (original == "Pair" || original == "Triple") && args.len() >= 2 {
+                let a: Vec<String> = args.iter().map(|x| self.t(*x)).collect::<Option<_>>()?;
+                return Some(format!("({})", a.join(", ")));
+            }
+        }
         // 成员方法的特殊映射。
         if let Kind::Member { base, name } = self.g.kind(callee) {
             let b = self.atom(*base)?;
@@ -553,6 +560,19 @@ impl Engine {
                     };
                     return Some(format!("String.join({}.toArray(), delimiter: {})", b, sep));
                 }
+                // 数值/字符串转换：数值接收者用类型构造转换，字符串用 parse。
+                "toInt" | "toLong" if args.is_empty() => {
+                    if self.looks_numeric(*base) {
+                        return Some(format!("Int64({})", b));
+                    }
+                    return Some(format!("Int64.parse({})", b));
+                }
+                "toDouble" | "toFloat" if args.is_empty() => {
+                    if self.looks_numeric(*base) {
+                        return Some(format!("Float64({})", b));
+                    }
+                    return Some(format!("Float64.parse({})", b));
+                }
                 _ => {}
             }
         }
@@ -575,6 +595,40 @@ impl Engine {
         }
         let r = self.atom(rhs)?;
         Some(format!("{}.contains({})", r, l))
+    }
+
+    /// 粗略判断表达式是否为数值类型（用于 `toInt`/`toDouble` 转换分流）。
+    fn looks_numeric(&self, id: NodeId) -> bool {
+        match self.g.kind(id) {
+            Kind::IntLit(_) | Kind::FloatLit(_) => true,
+            Kind::Unary { expr, .. } => self.looks_numeric(*expr),
+            Kind::Binary { op, .. } => matches!(op.as_str(), "+" | "-" | "*" | "/" | "%"),
+            Kind::NameRef { decl: Some(d), .. } => {
+                if let Kind::Name { .. } = self.g.kind(*d) {
+                    // 找到声明它的 VarDecl/Param，检查映射后的类型。
+                    self.decl_is_numeric(*d)
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
+    /// 检查某 Name 节点所属声明的类型是否为数值类型。
+    fn decl_is_numeric(&self, name_node: NodeId) -> bool {
+        for node in &self.g.nodes {
+            match &node.kind {
+                Kind::VarDecl { name_node: nn, ty: Some(t), .. } if *nn == name_node => {
+                    return t == "Int64" || t == "Float64";
+                }
+                Kind::Param { name_node: nn, ty } if *nn == name_node => {
+                    return ty == "Int64" || ty == "Float64";
+                }
+                _ => {}
+            }
+        }
+        false
     }
 
     /// 判断子树中是否使用了隐式 lambda 参数 `it`。
@@ -639,6 +693,9 @@ impl Engine {
         }
         if has_enum {
             header.push_str("import std.deriving.*\n");
+        }
+        if body.contains("Int64.parse") || body.contains("Float64.parse") {
+            header.push_str("import std.convert.*\n");
         }
         if !header.is_empty() {
             header.push('\n');
