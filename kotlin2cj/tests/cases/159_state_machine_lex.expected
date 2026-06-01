@@ -1,0 +1,4 @@
+WORD:hello, NUM:123, WORD:world
+WORD:x, +, NUM:42, *, WORD:y
+WORD:say, STR:hello world, WORD:end
+WORD:abc123, NUM:456, d, WORD:ef

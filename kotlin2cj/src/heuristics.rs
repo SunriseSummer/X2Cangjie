@@ -84,23 +84,114 @@ impl Engine {
         }
         // Check Member access: base.field → look up field type in class
         if let Kind::Member { base, name, .. } = self.g.kind(id) {
+            // First check field_type_by_name (constructor params across all classes)
+            if let Some(ty) = self.field_type_by_name(name) {
+                return ty.starts_with('?');
+            }
+            // Check member VarDecls in the class that matches base's type
             if let Some(base_ty) = self.expr_type_name(*base) {
                 let clean_ty = base_ty.trim_start_matches('?');
                 for node in &self.g.nodes {
-                    if let Kind::Class { name: cn, ctor_params, .. } = &node.kind {
+                    if let Kind::Class { name: cn, ctor_params, members, .. } = &node.kind {
                         if *cn == clean_ty {
+                            // Check constructor params
                             for cp in ctor_params {
                                 if cp.name == *name {
                                     return cp.ty.starts_with('?');
+                                }
+                            }
+                            // Check member VarDecls
+                            for m in members {
+                                if let Kind::VarDecl { name_node, ty, .. } = self.g.kind(*m) {
+                                    if let Kind::Name { original } = self.g.kind(*name_node) {
+                                        if crate::parser::safe_name(original) == *name {
+                                            if let Some(t) = ty {
+                                                return t.starts_with('?');
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-            // Also check field_type_by_name directly
-            if let Some(ty) = self.field_type_by_name(name) {
-                return ty.starts_with('?');
+        }
+        false
+    }
+
+    /// 检查 base.field 中 field 是否在类声明中为可空类型。
+    pub(crate) fn is_nullable_member_field(&self, base: NodeId, field: &str) -> bool {
+        // Check field_type_by_name across all classes
+        if let Some(ty) = self.field_type_by_name(field) {
+            if ty.starts_with('?') {
+                return true;
+            }
+        }
+        // Check member VarDecls in the base's type class
+        if let Some(base_ty) = self.expr_type_name(base) {
+            let clean_ty = base_ty.trim_start_matches('?');
+            for node in &self.g.nodes {
+                if let Kind::Class { name: cn, members, .. } = &node.kind {
+                    if *cn == clean_ty {
+                        for m in members {
+                            if let Kind::VarDecl { name_node, ty, .. } = self.g.kind(*m) {
+                                if let Kind::Name { original } = self.g.kind(*name_node) {
+                                    if crate::parser::safe_name(original) == field {
+                                        if let Some(t) = ty {
+                                            return t.starts_with('?');
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// 判断 NameRef 是否位于一个 if-let null-check 块中，该块已经将变量重绑定为非空。
+    pub(crate) fn is_null_check_rebound(&self, id: NodeId) -> bool {
+        let var_name = if let Kind::NameRef { original, .. } = self.g.kind(id) {
+            crate::parser::safe_name(original)
+        } else {
+            return false;
+        };
+        // Walk up the parent chain to find an If node with a null-check on this variable
+        let mut cur = id;
+        for _ in 0..20 {
+            if let Some(parent_id) = self.g.nodes[cur].parent {
+                if let Kind::If { cond, then_b, .. } = self.g.kind(parent_id) {
+                    // Check if this If has a null-check on our variable name
+                    if let Some((bind, _, is_eq)) = self.null_check(*cond) {
+                        if bind == var_name {
+                            // Check if we're in the then-branch (non-null) or else-branch (null)
+                            let in_then = self.is_descendant_of(id, *then_b);
+                            if (in_then && !is_eq) || (!in_then && is_eq) {
+                                // Also check: the variable must not be reassigned in the block
+                                return !self.block_assigns(*then_b, &bind);
+                            }
+                        }
+                    }
+                }
+                cur = parent_id;
+            } else {
+                break;
+            }
+        }
+        false
+    }
+
+    fn is_descendant_of(&self, node: NodeId, ancestor: NodeId) -> bool {
+        let mut cur = node;
+        for _ in 0..50 {
+            if cur == ancestor { return true; }
+            if let Some(p) = self.g.nodes[cur].parent {
+                cur = p;
+            } else {
+                break;
             }
         }
         false
@@ -481,9 +572,23 @@ impl Engine {
             Kind::NameRef { decl: Some(d), .. } => {
                 let d = *d;
                 for node in &self.g.nodes {
-                    if let Kind::VarDecl { name_node, init: Some(i), .. } = &node.kind {
+                    if let Kind::VarDecl { name_node, ty, init, .. } = &node.kind {
                         if *name_node == d {
-                            return self.iter_elem_is_string(*i);
+                            // Check explicit type annotation for String collection
+                            if let Some(t) = ty {
+                                if t.contains("String") && (t.starts_with("ArrayList") || t.starts_with("Array<") || t.starts_with("HashSet")) {
+                                    return true;
+                                }
+                            }
+                            if let Some(i) = init {
+                                return self.iter_elem_is_string(*i);
+                            }
+                            return false;
+                        }
+                    }
+                    if let Kind::Param { name_node, ty, .. } = &node.kind {
+                        if *name_node == d {
+                            return ty.contains("String") && (ty.starts_with("ArrayList") || ty.starts_with("Array<") || ty.starts_with("HashSet"));
                         }
                     }
                 }
@@ -500,6 +605,10 @@ impl Engine {
             Kind::Unary { expr, .. } => self.looks_numeric(*expr),
             Kind::Binary { op, .. } => matches!(op.as_str(), "+" | "-" | "*" | "/" | "%"),
             Kind::Member { name, .. } => matches!(name.as_str(), "size" | "length"),
+            Kind::Index { base, .. } => {
+                // Index into a non-string collection is numeric
+                !self.looks_string(*base) && self.looks_collection(*base)
+            }
             Kind::Call { callee, .. } => {
                 if let Kind::Member { name, .. } = self.g.kind(*callee) {
                     matches!(
@@ -657,6 +766,18 @@ impl Engine {
                 }
                 Kind::Param { name_node: nn, ty, .. } if *nn == name_node => {
                     return ty == "Int64" || ty == "Float64";
+                }
+                // ForEach loop variable: check if iterated collection has explicit numeric element type
+                Kind::ForEach { var, iter, .. } => {
+                    if let Kind::VarDecl { name_node: nn, .. } = self.g.kind(*var) {
+                        if *nn == name_node {
+                            // Check explicit type annotations for numeric collections
+                            if let Some(ty) = self.expr_type_name(*iter) {
+                                let inner = ty.trim_start_matches("ArrayList<").trim_end_matches('>');
+                                return inner == "Int64" || inner == "Float64" || inner == "Int" || inner == "Double";
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }

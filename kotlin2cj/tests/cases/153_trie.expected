@@ -1,0 +1,10 @@
+search apple: true
+search app: true
+search apt: false
+search banana: true
+startsWith ap: true
+startsWith ban: true
+startsWith cat: false
+count ap: 3
+count ban: 3
+count band: 2

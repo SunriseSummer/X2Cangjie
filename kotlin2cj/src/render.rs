@@ -242,7 +242,22 @@ impl Engine {
             Kind::Program { items } => self.render_program(&items),
             Kind::ForceUnwrap { expr } => {
                 let e = self.t(expr)?;
-                // Only emit .getOrThrow() if the expression is actually nullable
+                // Only emit .getOrThrow() for expressions that are genuinely Optional in Cangjie
+                // HashMap/collection indexing already returns non-optional in Cangjie
+                let is_map_index = matches!(self.g.kind(expr), Kind::Index { .. });
+                if is_map_index {
+                    return Some(e);
+                }
+                // Member access on nullable fields
+                if let Kind::Member { base, name, .. } = self.g.kind(expr) {
+                    // Check if this member field is nullable in the class declaration
+                    let field_nullable = self.is_nullable_member_field(*base, name);
+                    if field_nullable {
+                        return Some(format!("{}.getOrThrow()", e));
+                    }
+                    return Some(e);
+                }
+                // NameRef: check if the variable itself is nullable
                 if self.is_nullable_expr(expr) {
                     Some(format!("{}.getOrThrow()", e))
                 } else {
@@ -336,8 +351,9 @@ impl Engine {
             (bs, "?.")
         } else {
             // Auto-unwrap nullable types: if base has type ?T, use .getOrThrow() before member access
+            // Skip unwrap for variables that are rebound inside if-let null-check blocks
             let raw = self.atom(base)?;
-            let b = if self.is_nullable_expr(base) {
+            let b = if self.is_nullable_expr(base) && !self.is_null_check_rebound(base) {
                 format!("{}.getOrThrow()", raw)
             } else {
                 raw
@@ -920,6 +936,9 @@ impl Engine {
             }
             "containsKey" if args.len() == 1 => {
                 Some(format!("{}.contains({})", b, self.t(args[0])?))
+            }
+            "clear" if args.is_empty() => {
+                Some(format!("{}.reset()", b))
             }
             "getOrDefault" if args.len() == 2 => {
                 Some(format!("({}.get({}) ?? {})", b, self.t(args[0])?, self.t(args[1])?))
