@@ -28,6 +28,8 @@ pub enum Kind {
         is_abstract: bool,
         /// `override` 修饰：实现接口/抽象方法，仓颉需 `public func`。
         is_override: bool,
+        /// 扩展函数接收者类型（Kotlin `fun ReceiverType.name()`）。
+        receiver_type: Option<String>,
     },
     Param {
         name_node: NodeId,
@@ -57,11 +59,15 @@ pub enum Kind {
         generics: Vec<String>,
         /// `init {}` 块体（语句合并入仓颉构造器）。
         init_block: Option<NodeId>,
+        /// companion object 成员（静态方法/属性）的节点 ID 集合。
+        companion_members: Vec<NodeId>,
     },
-    /// 枚举类（仅简单具名常量项）。
+    /// 枚举类（支持构造器参数 `enum class Dir(val dx: Int, val dy: Int) { ... }`）。
     Enum {
         name: String,
-        entries: Vec<String>,
+        entries: Vec<EnumEntry>,
+        /// 枚举构造器参数列表（如 `val dx: Int`）。
+        params: Vec<CtorParam>,
     },
     /// 局部变量 / 顶层变量 / 属性声明。
     VarDecl {
@@ -128,6 +134,13 @@ pub enum Kind {
     Raw(String),
 }
 
+/// 枚举项：包含名称和可选的构造实参。
+#[derive(Debug, Clone)]
+pub struct EnumEntry {
+    pub name: String,
+    pub args: Vec<NodeId>,
+}
+
 #[derive(Debug, Clone)]
 pub struct CtorParam {
     pub kind: CtorParamKind,
@@ -168,8 +181,6 @@ pub enum TemplatePart {
 pub struct State {
     pub target: Option<String>,
     pub confidence: f32,
-    #[allow(dead_code)]
-    pub conflict: bool,
     pub version: u64,
     pub temperature: u32,
 }
@@ -250,7 +261,11 @@ impl Graph {
                     v.push(*ib);
                 }
             }
-            Kind::Enum { .. } => {}
+            Kind::Enum { entries, .. } => {
+                for e in entries {
+                    v.extend(&e.args);
+                }
+            }
             Kind::VarDecl { name_node, init, .. } => {
                 v.push(*name_node);
                 if let Some(i) = init {

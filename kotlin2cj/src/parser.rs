@@ -140,7 +140,7 @@ impl Parser {
     fn skip_modifiers(&mut self) -> Vec<String> {
         const MODS: &[&str] = &[
             "public", "private", "internal", "protected", "open", "final", "abstract",
-            "override", "inline", "data", "sealed", "const", "lateinit", "companion",
+            "override", "inline", "data", "sealed", "const", "lateinit",
         ];
         let mut seen = Vec::new();
         loop {
@@ -162,27 +162,47 @@ impl Parser {
     // ---- 函数 ----
     fn parse_fun(&mut self, mods: &[String]) -> PResult<NodeId> {
         self.eat_kw("fun");
-        let name = self.expect_ident()?;
-        // 跳过泛型形参 `<T>`（声明端，不影响渲染）。
+        let mut name = self.expect_ident()?;
+        // 跳过泛型形参 `<T>`（声明端）
+        let mut generic_suffix = String::new();
         if self.is_sym("<") {
             let mut depth = 0;
+            let mut gen_tokens = Vec::new();
             loop {
                 if self.is_sym("<") {
                     depth += 1;
+                    gen_tokens.push("<".to_string());
                 } else if self.is_sym(">") {
                     depth -= 1;
+                    gen_tokens.push(">".to_string());
                     if depth == 0 {
                         self.bump();
                         break;
                     }
                 } else if self.at_eof() {
                     break;
+                } else {
+                    if let Tok::Ident(s) = self.peek() {
+                        gen_tokens.push(map_type(&s));
+                    } else if let Tok::Sym(s) = self.peek() {
+                        gen_tokens.push(s.clone());
+                    }
                 }
                 self.bump();
             }
+            generic_suffix = gen_tokens.join("");
+        }
+        // 扩展函数：`fun ReceiverType.name(...)` 或 `fun Type<T>.name(...)` → extend 语法
+        let mut receiver_type: Option<String> = None;
+        if self.eat_sym(".") {
+            // `name` + generic_suffix was actually the receiver type
+            let recv = format!("{}{}", map_type(&name), generic_suffix);
+            receiver_type = Some(recv);
+            name = self.expect_ident()?;
         }
         self.push_scope();
         let mut params = Vec::new();
+        // 扩展函数中 `this` 自然引用接收者，无需特殊处理
         self.expect_sym("(")?;
         self.skip_newlines();
         while !self.is_sym(")") {
@@ -236,48 +256,133 @@ impl Parser {
             is_main,
             is_abstract,
             is_override,
+            receiver_type,
         }))
     }
 
     // ---- 枚举 ----
     fn parse_enum(&mut self) -> PResult<NodeId> {
         self.eat_kw("enum");
-        // `enum class Name { A, B, C }`
+        // `enum class Name { A, B, C }` or `enum class Name(val x: Int) { A(1), B(2) }`
         self.eat_kw("class");
         let name = self.expect_ident()?;
+        // 解析枚举构造器参数
+        let mut params = Vec::new();
+        if self.is_sym("(") {
+            self.bump();
+            self.skip_newlines();
+            while !self.is_sym(")") {
+                self.skip_modifiers();
+                let kind = if self.eat_kw("val") {
+                    CtorParamKind::Val
+                } else if self.eat_kw("var") {
+                    CtorParamKind::Var
+                } else {
+                    CtorParamKind::Plain
+                };
+                let pname = self.expect_ident()?;
+                self.expect_sym(":")?;
+                let ty = self.parse_type()?;
+                // 跳过默认值
+                if self.eat_sym("=") {
+                    self.parse_expr()?;
+                }
+                params.push(CtorParam { kind, name: safe_name(&pname), ty });
+                self.skip_newlines();
+                if !self.eat_sym(",") {
+                    break;
+                }
+                self.skip_newlines();
+            }
+            self.expect_sym(")")?;
+        }
+        // 跳过可能的继承列表（如 `: Interface`）
+        if self.eat_sym(":") {
+            loop {
+                self.skip_newlines();
+                if !matches!(self.peek(), Tok::Ident(_)) {
+                    break;
+                }
+                self.bump(); // type name
+                // 跳过泛型实参
+                if self.is_sym("<") {
+                    let mut depth = 1;
+                    self.bump();
+                    while depth > 0 && !self.at_eof() {
+                        if self.is_sym("<") { depth += 1; }
+                        else if self.is_sym(">") { depth -= 1; }
+                        self.bump();
+                    }
+                }
+                // 跳过构造器实参
+                if self.is_sym("(") {
+                    self.skip_balanced_parens();
+                }
+                if !self.eat_sym(",") {
+                    break;
+                }
+            }
+        }
         self.skip_newlines();
         self.expect_sym("{")?;
         self.skip_seps();
         let mut entries = Vec::new();
         // 解析具名枚举项，直到 `}` 或成员分隔 `;`
         while !self.is_sym("}") && !self.is_sym(";") && !self.at_eof() {
-            let entry = self.expect_ident()?;
-            entries.push(entry);
-            // 忽略枚举项可能携带的构造实参，如 RED(0xFF)
+            let entry_name = self.expect_ident()?;
+            // 解析枚举项构造实参（如 `RED(0xFF)`）
+            let mut entry_args = Vec::new();
             if self.is_sym("(") {
-                self.skip_balanced_parens();
+                self.bump();
+                self.skip_newlines();
+                while !self.is_sym(")") {
+                    entry_args.push(self.parse_expr()?);
+                    self.skip_newlines();
+                    if !self.eat_sym(",") {
+                        break;
+                    }
+                    self.skip_newlines();
+                }
+                self.expect_sym(")")?;
             }
+            entries.push(EnumEntry { name: entry_name, args: entry_args });
             self.skip_newlines();
             if !self.eat_sym(",") {
                 break;
             }
             self.skip_seps();
         }
-        // 跳过枚举体其余部分（成员函数等暂不支持）
-        let mut depth = 1;
-        while depth > 0 && !self.at_eof() {
-            if self.is_sym("{") {
-                depth += 1;
-            } else if self.is_sym("}") {
-                depth -= 1;
-                if depth == 0 {
-                    break;
+        // 解析枚举体的成员函数部分（`;` 之后）
+        let mut enum_members = Vec::new();
+        if self.eat_sym(";") {
+            self.skip_seps();
+            while !self.is_sym("}") && !self.at_eof() {
+                let mmods = self.skip_modifiers();
+                if self.is_kw("fun") {
+                    enum_members.push(self.parse_fun(&mmods)?);
+                } else {
+                    // 跳过其他成员
+                    self.bump();
                 }
+                self.skip_seps();
             }
-            self.bump();
+        } else {
+            // 跳过枚举体其余部分
+            let mut depth = 1;
+            while depth > 0 && !self.at_eof() {
+                if self.is_sym("{") {
+                    depth += 1;
+                } else if self.is_sym("}") {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                self.bump();
+            }
         }
         self.expect_sym("}")?;
-        Ok(self.g.add(Kind::Enum { name: safe_name(&name), entries }))
+        Ok(self.g.add(Kind::Enum { name: safe_name(&name), entries, params }))
     }
 
     fn skip_balanced_parens(&mut self) {
@@ -395,6 +500,7 @@ impl Parser {
             }
         }
         let mut members = Vec::new();
+        let mut companion_members = Vec::new();
         let mut init_block: Option<NodeId> = None;
         self.skip_newlines();
         if self.eat_sym("{") {
@@ -412,10 +518,56 @@ impl Parser {
                     self.bump();
                     let blk = self.parse_block()?;
                     init_block = Some(blk);
-                } else if self.is_kw("companion") || self.is_kw("class") || self.is_kw("object") {
-                    self.bump();
+                } else if self.is_kw("companion") {
+                    // companion object { ... } → 解析成员作为静态方法/属性
+                    self.bump(); // companion
+                    self.eat_kw("object"); // object (optional)
+                    // 可能有名字
+                    if matches!(self.peek(), Tok::Ident(s) if s != "object" && !s.is_empty()) {
+                        if !self.is_sym("{") {
+                            self.bump(); // companion name
+                        }
+                    }
                     if self.is_sym("{") {
-                        self.parse_block()?;
+                        self.bump(); // {
+                        self.skip_seps();
+                        while !self.is_sym("}") && !self.at_eof() {
+                            let cmods = self.skip_modifiers();
+                            if self.is_kw("fun") {
+                                let func = self.parse_fun(&cmods)?;
+                                companion_members.push(func);
+                                members.push(func);
+                            } else if self.is_kw("val") || self.is_kw("var") {
+                                let v = self.parse_var_decl()?;
+                                companion_members.push(v);
+                                members.push(v);
+                            } else if self.is_kw("const") {
+                                self.bump(); // const
+                                let v = self.parse_var_decl()?;
+                                companion_members.push(v);
+                                members.push(v);
+                            } else {
+                                self.bump();
+                            }
+                            self.skip_seps();
+                        }
+                        self.expect_sym("}")?;
+                    }
+                } else if self.is_kw("class") || self.is_kw("object") || self.is_kw("enum") {
+                    // 嵌套类/对象：跳过
+                    self.bump();
+                    if matches!(self.peek(), Tok::Ident(_)) {
+                        self.bump(); // name
+                    }
+                    if self.is_sym("{") {
+                        let mut depth = 1;
+                        self.bump();
+                        while depth > 0 && !self.at_eof() {
+                            if self.is_sym("{") { depth += 1; }
+                            else if self.is_sym("}") { depth -= 1; }
+                            if depth > 0 { self.bump(); }
+                        }
+                        if self.is_sym("}") { self.bump(); }
                     }
                 } else {
                     self.bump();
@@ -441,6 +593,7 @@ impl Parser {
             super_args,
             generics,
             init_block,
+            companion_members,
         }))
     }
 

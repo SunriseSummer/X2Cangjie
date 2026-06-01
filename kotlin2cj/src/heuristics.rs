@@ -222,8 +222,8 @@ impl Engine {
     /// 查找名为 `name` 的枚举声明，返回其所有枚举项名。
     pub(crate) fn enum_entries(&self, name: &str) -> Option<Vec<String>> {
         self.g.nodes.iter().find_map(|n| match &n.kind {
-            Kind::Enum { name: en, entries } if en == name && !entries.is_empty() => {
-                Some(entries.clone())
+            Kind::Enum { name: en, entries, .. } if en == name && !entries.is_empty() => {
+                Some(entries.iter().map(|e| e.name.clone()).collect())
             }
             _ => None,
         })
@@ -785,6 +785,37 @@ impl Engine {
         false
     }
 
+    /// 判断表达式是否为 StringBuilder 类型。
+    pub(crate) fn looks_string_builder(&self, id: NodeId) -> bool {
+        match self.g.kind(id) {
+            Kind::Call { callee, .. } => {
+                matches!(self.g.kind(*callee), Kind::NameRef { original, .. } if original == "StringBuilder")
+            }
+            Kind::NameRef { decl: Some(d), .. } => {
+                let d = *d;
+                for node in &self.g.nodes {
+                    match &node.kind {
+                        Kind::VarDecl { name_node, ty, init, .. } if *name_node == d => {
+                            if let Some(t) = ty {
+                                return t == "StringBuilder";
+                            }
+                            if let Some(i) = init {
+                                return self.looks_string_builder(*i);
+                            }
+                            return false;
+                        }
+                        Kind::Param { name_node, ty, .. } if *name_node == d => {
+                            return ty == "StringBuilder";
+                        }
+                        _ => {}
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
     /// 判断子树中是否使用了隐式 lambda 参数 `it`。
     pub(crate) fn uses_it(&self, id: NodeId) -> bool {
         if let Kind::NameRef { original, .. } = self.g.kind(id) {
@@ -798,5 +829,30 @@ impl Engine {
             }
         }
         false
+    }
+
+    /// 检查函数体是否包含 `while(true)` 且其中有 `return` 语句。
+    /// 用于推断返回类型（仓颉要求 while(true) 内有返回时函数须声明返回类型）。
+    pub(crate) fn has_while_true_return(&self, id: NodeId) -> bool {
+        if let Kind::Block { stmts } = self.g.kind(id) {
+            for s in stmts {
+                if let Kind::While { cond, body } = self.g.kind(*s) {
+                    if matches!(self.g.kind(*cond), Kind::BoolLit(true)) {
+                        if self.contains_return(*body) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// 递归检查子树中是否包含 return 语句。
+    fn contains_return(&self, id: NodeId) -> bool {
+        if matches!(self.g.kind(id), Kind::Return { .. }) {
+            return true;
+        }
+        self.g.children_of(id).iter().any(|c| self.contains_return(*c))
     }
 }

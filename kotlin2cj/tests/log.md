@@ -1,9 +1,9 @@
 # kotlin2cj 测试日志
 
-- 用例总数: 168
-- 翻译成功: 168/168
-- 仓颉编译通过: 168/168
-- 运行输出匹配: 168/168
+- 用例总数: 178
+- 翻译成功: 178/178
+- 仓颉编译通过: 178/178
+- 运行输出匹配: 178/178
 
 | 用例 | 翻译 | 编译 | 运行 | 备注 |
 |------|------|------|------|------|
@@ -91,7 +91,17 @@
 | 166_math_hash | ✅ | ✅ | ✅ |  |
 | 167_string_process | ✅ | ✅ | ✅ |  |
 | 168_game_of_life | ✅ | ✅ | ✅ |  |
+| 169_enum_ctor_params | ✅ | ✅ | ✅ |  |
 | 16_class_mut | ✅ | ✅ | ✅ |  |
+| 170_hashmap_entry | ✅ | ✅ | ✅ |  |
+| 171_while_true_return | ✅ | ✅ | ✅ |  |
+| 172_companion_object | ✅ | ✅ | ✅ |  |
+| 173_extension_func | ✅ | ✅ | ✅ |  |
+| 174_destructure_enhanced | ✅ | ✅ | ✅ |  |
+| 175_collection_ops | ✅ | ✅ | ✅ |  |
+| 176_string_ops | ✅ | ✅ | ✅ |  |
+| 177_enum_methods | ✅ | ✅ | ✅ |  |
+| 178_combined_features | ✅ | ✅ | ✅ |  |
 | 17_two_classes | ✅ | ✅ | ✅ |  |
 | 18_break_continue | ✅ | ✅ | ✅ |  |
 | 19_string_ops | ✅ | ✅ | ✅ |  |

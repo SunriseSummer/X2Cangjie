@@ -1,0 +1,9 @@
+evenDoubled: 4, 8, 12, 16, 20
+first3: 1, 2, 3
+rest: 4, 5, 6, 7, 8, 9, 10
+any > 5: true
+all > 0: true
+fold sum: 55
+reduce product(1..5): 120
+sorted: 1, 2, 3, 4, 5
+sortedDescending: 5, 4, 3, 2, 1

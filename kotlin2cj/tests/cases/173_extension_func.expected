@@ -1,0 +1,5 @@
+5.isPositive: true
+-3.isPositive: false
+4.square: 16
+Hello.addBrackets: [Hello]
+list size: 3

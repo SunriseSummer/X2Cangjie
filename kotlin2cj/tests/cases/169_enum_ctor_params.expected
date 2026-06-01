@@ -1,0 +1,12 @@
+UP: dx=0, dy=-1
+DOWN: dx=0, dy=1
+LEFT: dx=-1, dy=0
+RIGHT: dx=1, dy=0
+(5, 4)
+(6, 5)
+RED: rgb=(255,0,0)
+GREEN: rgb=(0,255,0)
+BLUE: rgb=(0,0,255)
+WHITE: rgb=(255,255,255)
+true
+false
