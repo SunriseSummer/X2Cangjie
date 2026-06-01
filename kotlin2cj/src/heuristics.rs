@@ -35,6 +35,11 @@ impl Engine {
 
     /// 解析表达式的静态类名（对带声明类型的标识符，或由构造器初始化的变量有效）。
     pub(crate) fn expr_type_name(&self, id: NodeId) -> Option<String> {
+        self.expr_type_name_depth(id, 0)
+    }
+
+    fn expr_type_name_depth(&self, id: NodeId, depth: usize) -> Option<String> {
+        if depth > 10 { return None; } // Prevent deep recursion on long assignment chains
         if let Kind::NameRef { decl: Some(d), .. } = self.g.kind(id) {
             for node in &self.g.nodes {
                 match &node.kind {
@@ -45,7 +50,7 @@ impl Engine {
                         if let Some(i) = init {
                             // Recurse: if init is a NameRef, propagate its type
                             if let Kind::NameRef { .. } = self.g.kind(*i) {
-                                return self.expr_type_name(*i);
+                                return self.expr_type_name_depth(*i, depth + 1);
                             }
                             if let Kind::Call { callee, .. } = self.g.kind(*i) {
                                 if let Kind::NameRef { original, .. } = self.g.kind(*callee) {

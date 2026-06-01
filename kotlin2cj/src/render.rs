@@ -663,17 +663,30 @@ impl Engine {
                 let has_catch_all = arms.iter().any(|a| a.patterns.is_none());
                 if !has_catch_all {
                     // Check if subject is an enum type (already exhaustive)
-                    let is_enum = arms.iter().any(|a| {
-                        a.patterns.as_ref().map_or(false, |ps| {
-                            ps.iter().any(|p| {
-                                if let Some(s) = self.t(*p) {
-                                    s.contains('.')
-                                } else {
-                                    false
-                                }
+                    // Use enum_entries() for robust detection instead of fragile '.' heuristic
+                    let is_enum = if let Kind::NameRef { original: _, .. } = self.g.kind(subj) {
+                        // Check if the subject variable's type or declared enum matches
+                        self.expr_type_name(subj)
+                            .map_or(false, |ty| self.enum_entries(&ty).is_some())
+                        || arms.iter().any(|a| {
+                            a.patterns.as_ref().map_or(false, |ps| {
+                                ps.iter().any(|p| {
+                                    if let Some(s) = self.t(*p) {
+                                        // Pattern like EnumName.ENTRY
+                                        if let Some(prefix) = s.split('.').next() {
+                                            self.enum_entries(prefix).is_some()
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        false
+                                    }
+                                })
                             })
                         })
-                    });
+                    } else {
+                        false
+                    };
                     if !is_enum {
                         body.push_str("case _ => ()\n");
                     }
