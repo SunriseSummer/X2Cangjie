@@ -7,23 +7,23 @@
 ## 1. 一句话现状
 
 kotlin2cj 已从「基础语法演示」推进到「**可翻译并端到端跑通中大规模实用 Kotlin
-程序（数百行级单文件）**」的阶段：覆盖控制流、函数（含嵌套/递归/**默认参数**）、类（含继承/`sealed`/
-`data class` 自动 `toString`）、枚举、集合、异常、位运算、区间成员检查、`is` 类型判定、解构声明、
+程序（千行级单文件）**」的阶段：覆盖控制流、函数（含嵌套/递归/**默认参数**）、类（含继承/`sealed`/
+**接口/抽象类/用户泛型类**/`data class` 自动 `toString`）、枚举、集合、异常、位运算、区间成员检查、`is` 类型判定、解构声明、
 `?.` 安全调用、`maxOf/minOf`、**返回集合的链式高阶（`map/filter/sorted/fold/reduce` 等）**、
-**`when (x) { in 区间 -> }` 区间分支**、**字符串与非字符串 `+` 拼接**、可空 `if (x != null)` 智能转换
-及常见空安全惯用法等特性，**84 个端到端用例全部翻译 → `cjc` 编译 → 运行输出逐字节匹配（84/84/84）**，
-其中含 3 个 200–310 行的大规模综合程序（电商订单、成绩册、银行模拟）。
+**`when (x) { in 区间 -> }` 区间分支**、**字符串与非字符串 `+` 拼接**、**字符级访问与字符算术**、可空 `if (x != null)` 智能转换
+及常见空安全惯用法等特性，**85 个端到端用例全部翻译 → `cjc` 编译 → 运行输出逐字节匹配（85/85/85）**，
+其中含 1 个 **1068 行**与 3 个 200–310 行的大规模综合程序（综合工具箱、电商订单、成绩册、银行模拟）。
 State.md 路线图中的 **P0 与 P1 已完成**。
 
 ## 2. 测试现状
 
 | 指标 | 数值 |
 |------|------|
-| 端到端用例总数 | 84 |
-| 翻译成功 | 84/84 |
-| 仓颉 `cjc` 编译通过 | 84/84 |
-| 运行输出匹配 | 84/84 |
-| 大规模用例 | 用例 82–84 为 213/222/310 行综合程序（订单/成绩册/银行） |
+| 端到端用例总数 | 85 |
+| 翻译成功 | 85/85 |
+| 仓颉 `cjc` 编译通过 | 85/85 |
+| 运行输出匹配 | 85/85 |
+| 大规模用例 | 用例 85 为 **1068 行**综合工具箱；82–84 为 213/222/310 行综合程序（订单/成绩册/银行） |
 | 泛化抽样（未训练的新程序） | 累计 17/19 通过（详见 §3.2） |
 | 验证工具链 | Cangjie SDK 1.0.5（cjnative，x86_64-linux）；用例期望值由 `kotlinc` 实编译运行产出 |
 
@@ -33,9 +33,9 @@ State.md 路线图中的 **P0 与 P1 已完成**。
 - **区间与成员**：`..`/`until`/`downTo`/`step`、`in`/`!in`（区间转比较、集合转 `contains`）。
 - **函数**：块体/表达式体、递归、嵌套局部函数、顶层全局 `val`、`maxOf/minOf`、**默认参数**（→ 仓颉具名可选形参 + 调用端补名）、**函数类型 `(A,B)->R` 与高阶函数值**。
 - **集合**：List/Map/Set 字面量与泛型、`ArrayList/HashMap/HashSet` 构造器、下标读写、嵌套集合、`forEach`、`map[k] ?: d`、`?.` 安全调用链、**函数式链式高阶 `map/filter/sorted/sortedBy/reversed/fold/reduce/sum/count/any/all/joinToString`**。
-- **类型抽象**：类（主构造器/方法/多类协作/继承）、`sealed class` + `when (x) { is T -> }`、`data class`（**自动 `toString`**）、`enum class`（+`@Derive[Equatable]` 与自定义 `toString`）、解构声明 `val (a, b) = p`。
+- **类型抽象**：类（主构造器/方法/多类协作/继承）、**接口 `interface`**、**抽象类 `abstract class` + `super(...)`**、**用户泛型容器类 `class Stack<T>`**、`sealed class` + `when (x) { is T -> }`、`data class`（**自动 `toString`**）、`enum class`（+`@Derive[Equatable]` 与自定义 `toString`）、解构声明 `val (a, b) = p`。
 - **区间/关系分支**：`when (x) { in 90..100 -> ...; !in 0..100 -> ... }` → if-else 链。
-- **规模**：用例 82–84 为 213/222/310 行综合程序（电商订单、成绩册、银行+库存+文本处理），覆盖多类协作、嵌套可空智能转换、默认参数、`when in`、数据类 `toString`、函数式链、质数/斐波那契/GCD 等。
+- **规模**：用例 85 为 **1068 行**综合工具箱（数论/字符串/排序/矩阵/接口与抽象类多态/泛型栈与队列/枚举状态机/数据类/函数式链/RPN）；82–84 为 213/222/310 行综合程序（电商订单、成绩册、银行+库存+文本处理），覆盖多类协作、嵌套可空智能转换、默认参数、`when in`、数据类 `toString`、函数式链、质数/斐波那契/GCD 等。
 - **异常**：`try/catch/finally`、`throw`。
 - **位运算与字面量**：`and/or/xor/shl/shr`、`0x`/`0b`/下划线数字字面量。
 - **字符串**：`for (c in s)` 逐字符遍历（改写为 `.runes()` 得 Rune）、`length/uppercase/contains/substring` 等方法映射。
@@ -94,6 +94,25 @@ cd kotlin2cj && python3 tests/run_tests.py   # 结果写入 tests/log.md
    `.indices`/`.lastIndex`、Pair `.first/.second/.third` → 元组下标、`for ((k,v) in map)`、`forEachIndexed`、
    算术中 `Int↔Float` 单侧自动 `Float64(...)` 提升、顶层 `package`/`import` 跳过。
 
+### 3.4 本轮（1000 行级单文件强化）新增能力
+
+本轮在 §3.3 基础上继续打磨「**1000 行以上单文件**」翻译，新增能力同样为**通用规则**（非用例硬编码），
+均以局部渲染规则 + 轻量类型启发式接入，未改 SOC 核心引擎：
+
+1. **接口与抽象类**：`interface Name { fun f(): T }` → 仓颉 `interface`（成员默认 public）；
+   `abstract class A(...) { abstract fun g(): T; fun h() = ... }` → 仓颉 `abstract class`（抽象方法 `public func` 签名）；
+   实现/继承方法的 `override` → `public func`，`A(name) : Animal(name)` 生成 `super(name)` 构造调用。
+2. **用户泛型容器类**：`class Stack<T> { ... }`、`class Queue<T> { ... }` → 仓颉 `class Stack<T>`；
+   泛型构造调用 `Stack<Int>()` 经平衡尖括号前瞻识别，避免与 `a < b` 比较歧义。
+3. **字符与字符串字符级访问**：字符串 `s[i]`（接收者可证明为字符串时）→ `s.toRuneArray()[i]` 得 `Rune`；
+   字符算术 `c - '0'`/`c + n` → `Int64(UInt32(c))` 码点运算；`Char.code` → 码点、`Int.toChar()` → `Rune(UInt32(n))`；
+   字符判定 `isDigit/isLetter/isWhitespace/isUpperCase/isLowerCase/isLetterOrDigit` → Rune 的 `isAscii*` 方法。
+4. **更多集合/字符串惯用法**：列表 `take/drop` → 迭代器 `take(n)`/`skip(n)`；字符串 `take/drop/repeat` → 切片与 `*`；
+   `padStart/padEnd(len, char)` → 仓颉 `padding:` 具名（字符转字符串）；`joinToString(sep, prefix, postfix)` 支持前后缀；
+   `repeat(n) { it }` 的索引 `it` 正确绑定；遍历「元组列表」时循环变量识别为元组（`p.first/.second` → 下标）。
+5. **数值转换分流增强**：`x.toInt()/toLong()` 当接收者为返回数值的用户函数调用时走类型构造转换 `Int64(...)`
+   （而非字符串 `parse`），覆盖 `power(...).toInt()` 等链式场景。
+
 ### 3.2 泛化能力评估（未训练新程序）
 
 为避免「只对已有用例过拟合」，分两批撰写**不在测试集**的新程序，用 `kotlinc` 实编译运行得到
@@ -113,6 +132,12 @@ cd kotlin2cj && python3 tests/run_tests.py   # 结果写入 tests/log.md
 
 合计 **17/19 通过**，两类失败（可空流敏感、Option 直接打印）均为已文档化的设计边界（见 §4）。
 
+- **批次四（本轮，1000 行级与定向探针）**：撰写一个 **1068 行**综合工具箱程序（数论/字符串/排序/矩阵/
+  接口与抽象类多态/泛型栈与队列/枚举状态机/数据类/函数式链/RPN 求值机，共 16 个子域、上百个函数与近 150 行输出），
+  经 `kotlinc` 基准比对**逐字节通过**，已固化为正式用例 85；另以 8 组定向探针验证接口/抽象类、泛型容器、
+  字符算术与 `Char.code`/`Int.toChar`、`padStart/padEnd`、`joinToString` 前后缀、`repeat{it}`、元组列表遍历、
+  `power(...).toInt()` 数值转换等惯用法，均通过。
+
 ## 4. 已知边界与风险
 
 | 类别 | 现状 | 影响 |
@@ -122,11 +147,12 @@ cd kotlin2cj && python3 tests/run_tests.py   # 结果写入 tests/log.md
 | 带参/枚举成员函数 | 未支持（带参项的实参被忽略） | 复杂枚举语义丢失（`sealed class` 子类已可） |
 | 数值隐式提升 | 仓颉无 `Int64→Float64` 隐式转换 | 混合数值运算需源端显式统一类型 |
 | 浮点打印格式 | 仓颉默认 6 位小数 `3.140000` | 期望输出需按此格式书写 |
-| 字符串字符级下标 | 仓颉 `s[i]` 取字节 | 字符级遍历用 `for (c in s)`（已自动改 `.runes()`），避免直接 `s[i]` |
-| 协程 / 泛型函数声明 / 扩展函数 / 委托属性 | 未支持 | 超出当前子集 |
+| 字符串字符级下标 | 部分支持 | 接收者可证明为字符串时 `s[i]` 自动改 `s.toRuneArray()[i]` 取 `Rune`；类型不明处仍建议用 `for (c in s)`（自动 `.runes()`） |
+| 协程 / 泛型**函数**声明 / 扩展函数 / 委托属性 | 未支持 | 泛型**类**已支持；泛型函数、扩展函数、协程超出当前子集 |
 
 > 注：原表中的「`is` 类型判定」「二进制/十六进制/下划线字面量」「返回集合的链式高阶 `map/filter/reduce/sorted`」
-> 「默认参数 / 命名参数调用」「块式可空智能转换」已在历轮实现并移出风险表。
+> 「默认参数 / 命名参数调用」「块式可空智能转换」「接口/抽象类/用户泛型类」「字符串字符级访问与字符算术」
+> 已在历轮实现并移出风险表。
 
 ## 5. 下一步规划
 
