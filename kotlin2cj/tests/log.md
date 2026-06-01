@@ -1,9 +1,9 @@
 # kotlin2cj 测试日志
 
-- 用例总数: 100
-- 翻译成功: 100/100
-- 仓颉编译通过: 100/100
-- 运行输出匹配: 100/100
+- 用例总数: 126
+- 翻译成功: 126/126
+- 仓颉编译通过: 126/126
+- 运行输出匹配: 126/126
 
 | 用例 | 翻译 | 编译 | 运行 | 备注 |
 |------|------|------|------|------|
@@ -17,8 +17,34 @@
 | 08_for_step_down | ✅ | ✅ | ✅ |  |
 | 09_functions | ✅ | ✅ | ✅ |  |
 | 100_mini_db | ✅ | ✅ | ✅ |  |
+| 101_dp_knapsack | ✅ | ✅ | ✅ |  |
+| 102_bubble_sort | ✅ | ✅ | ✅ |  |
+| 103_binary_search | ✅ | ✅ | ✅ |  |
+| 104_merge_sort | ✅ | ✅ | ✅ |  |
+| 105_quick_sort | ✅ | ✅ | ✅ |  |
+| 106_fibonacci_dp | ✅ | ✅ | ✅ |  |
+| 107_gcd_lcm | ✅ | ✅ | ✅ |  |
+| 108_sieve_primes | ✅ | ✅ | ✅ |  |
+| 109_matrix_multiply | ✅ | ✅ | ✅ |  |
 | 10_recursion | ✅ | ✅ | ✅ |  |
+| 110_stack_impl | ✅ | ✅ | ✅ |  |
+| 111_selection_sort | ✅ | ✅ | ✅ |  |
+| 112_insertion_sort | ✅ | ✅ | ✅ |  |
+| 113_counting_sort | ✅ | ✅ | ✅ |  |
+| 114_dp_lis | ✅ | ✅ | ✅ |  |
+| 115_dp_coin_change | ✅ | ✅ | ✅ |  |
+| 116_two_sum | ✅ | ✅ | ✅ |  |
+| 117_power_fast | ✅ | ✅ | ✅ |  |
+| 118_dp_edit_distance | ✅ | ✅ | ✅ |  |
+| 119_max_subarray | ✅ | ✅ | ✅ |  |
 | 11_list | ✅ | ✅ | ✅ |  |
+| 120_bfs_graph | ✅ | ✅ | ✅ |  |
+| 121_dfs_graph | ✅ | ✅ | ✅ |  |
+| 122_topological_sort | ✅ | ✅ | ✅ |  |
+| 123_dp_lcs | ✅ | ✅ | ✅ |  |
+| 124_dijkstra | ✅ | ✅ | ✅ |  |
+| 125_roman_numerals | ✅ | ✅ | ✅ |  |
+| 126_palindrome | ✅ | ✅ | ✅ |  |
 | 12_map | ✅ | ✅ | ✅ |  |
 | 13_nested_loop | ✅ | ✅ | ✅ |  |
 | 14_boolean | ✅ | ✅ | ✅ |  |

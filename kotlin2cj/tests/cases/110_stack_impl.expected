@@ -1,0 +1,7 @@
+Top: 30
+Pop: 30
+Size: 2
+() balanced: true
+([{}]) balanced: true
+([)] balanced: false
+empty balanced: true

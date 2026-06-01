@@ -1,0 +1,4 @@
+LCS(ABCBDAB, BDCAB) = 4
+LCS(abc, abc) = 3
+LCS(abc, def) = 0
+LCS(AGGTAB, GXTXAYB) = 4
