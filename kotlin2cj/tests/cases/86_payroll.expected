@@ -1,0 +1,111 @@
+=== Acme Roster ===
+Alice   Engineering Senior       7500
+Bob     Sales       Mid          4800
+Carol   Engineering Lead        10800
+Dave    Support     Junior       3000
+Eve     Finance     Manager     15400
+Frank   Engineering Junior       3200
+Grace   Sales       Senior       7800
+Heidi   HR          Mid          4560
+=== Department Headcount ===
+Engineering: 3
+Sales: 2
+Support: 1
+Finance: 1
+HR: 1
+=== Payroll Summary ===
+Total payroll: 57060
+Highest: 15400
+Lowest: 3000
+Average: 7132
+=== Engineering Team ===
+Carol -> 10800
+Alice -> 7500
+Frank -> 3200
+=== Bonuses ===
+Holiday bonus: 500
+Performance bonus: 500
+Retention bonus: 250
+=== Pay Stubs ===
+Alice    gross=  7656 tax= 1378 net=  6278
+Bob      gross=  4956 tax=  495 net=  4461
+Carol    gross= 10956 tax= 2739 net=  8217
+Dave     gross=  3156 tax=  315 net=  2841
+Eve      gross= 15556 tax= 3889 net= 11667
+Frank    gross=  3356 tax=  335 net=  3021
+Grace    gross=  7956 tax= 1432 net=  6524
+Heidi    gross=  4716 tax=  471 net=  4245
+=== Leave Report ===
+Alice: 7 day(s)
+Carol: 1 day(s)
+Grace: 3 day(s)
+=== Lookup ===
+Found: Eve (Manager)
+Missing id 99 is null: true
+=== Generic Roster ===
+Roster size: 3, first: x
+=== Stats ===
+Count above 5000: 4
+Sum of all: 57060
+Senior+: 4
+Senior+ names: Alice, Carol, Eve, Grace
+=== Performance Reviews ===
+Alice    avg= 90 Outstanding
+Bob      avg= 70 Meets
+Carol    avg= 93 Outstanding
+Dave     avg= 55 Developing
+Grace    avg= 79 Exceeds
+=== Score Histogram ===
+Alice   #########
+Bob     #######
+Carol   #########
+Dave    #####
+Grace   #######
+=== Top Performer ===
+Top: Carol (93)
+=== Shift Coverage ===
+night: 1
+morning: 2
+afternoon: 3
+evening: 2
+=== Quarters Worked ===
+Alice: 1-2
+Bob: 1
+Carol: 1-2
+Dave: 1
+Grace: 1-2
+=== Salary Bands ===
+low: 2
+mid: 4
+high: 2
+=== Indexed Listing ===
+1. Alice
+2. Bob
+3. Carol
+4. Dave
+5. Eve
+6. Frank
+7. Grace
+8. Heidi
+=== Name Lengths ===
+Lengths: 3,3,4,5,5,5,5,5
+Longest name: Alice
+=== Department Payroll ===
+Engineering: 21500 (3)
+Sales: 12600 (2)
+Support: 3000 (1)
+Finance: 15400 (1)
+HR: 4560 (1)
+=== Raise Simulation ===
+Raise for Carol (avg 93), budget left 9500
+Raise for Alice (avg 90), budget left 9000
+Final budget: 9000
+=== Project Portfolio ===
+[5] BETA Mobile team=2
+[3] ALPHA Platform team=3
+[1] GAMMA Analytics team=1
+Total assignments: 6
+=== Project Members ===
+BETA: Bob, Grace
+ALPHA: Alice, Carol, Frank
+GAMMA: Eve

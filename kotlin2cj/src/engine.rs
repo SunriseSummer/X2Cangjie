@@ -154,6 +154,18 @@ impl Engine {
                     let inner = self.render_in(lhs, rhs)?;
                     return Some(if op == "!in" { format!("!({})", inner) } else { inner });
                 }
+                // `x == null` / `x != null` 作为值表达式（非 if 条件，那里由 null_check 处理）：
+                // 仓颉中可空类型是 Option<T>，与 None 直接比较需类型实参，改用 isNone()/isSome()。
+                if op == "==" || op == "!=" {
+                    let lhs_null = matches!(self.g.kind(lhs), Kind::Raw(s) if s == "None");
+                    let rhs_null = matches!(self.g.kind(rhs), Kind::Raw(s) if s == "None");
+                    if lhs_null ^ rhs_null {
+                        let other = if lhs_null { rhs } else { lhs };
+                        let oa = self.atom(other)?;
+                        let m = if op == "==" { "isNone" } else { "isSome" };
+                        return Some(format!("{}.{}()", oa, m));
+                    }
+                }
                 let la = self.atom(lhs)?;
                 let ra = self.atom(rhs)?;
                 // 仓颉 `+` 不支持 String 与非 String 直接拼接：Kotlin `"a" + x` 语义为
@@ -171,6 +183,17 @@ impl Engine {
                 {
                     return Some(format!(
                         "(Int64(UInt32({})) {} Int64(UInt32({})))",
+                        la, op, ra
+                    ));
+                }
+                // Kotlin `Char + Int` / `Char - Int` → Char：按码点运算后包回 Rune。
+                if matches!(op.as_str(), "+" | "-")
+                    && self.looks_char(lhs)
+                    && !self.looks_char(rhs)
+                    && !self.looks_string(rhs)
+                {
+                    return Some(format!(
+                        "Rune(UInt32(Int64(UInt32({})) {} {}))",
                         la, op, ra
                     ));
                 }
@@ -248,7 +271,7 @@ impl Engine {
                     "values" => return Some(format!("{}{}values()", b, dot)),
                     other => other,
                 };
-                Some(format!("{}{}{}", b, dot, mapped))
+                Some(format!("{}{}{}", b, dot, crate::parser::safe_name(mapped)))
             }
             Kind::Call { callee, args } => self.render_call(callee, &args),
             Kind::CollLit { ctor, elem, args } => {
@@ -466,7 +489,12 @@ impl Engine {
                     let b = self.render_block(body)?;
                     return Some(format!("main() {}", b));
                 }
-                let r = ret.map(|r| format!(": {}", r)).unwrap_or_default();
+                let r = match ret {
+                    Some(r) => format!(": {}", r),
+                    // 无返回类型（Kotlin Unit）的递归函数：仓颉无法推断递归返回类型，显式标注 `: Unit`。
+                    None if self.refers_name(body, &name) => ": Unit".to_string(),
+                    None => String::new(),
+                };
                 let sig = format!("{}({}){}", name, ps.join(", "), r);
                 // 抽象方法（接口/抽象类）：仅签名，无函数体。仓颉抽象方法须 public。
                 if is_abstract {
@@ -477,7 +505,7 @@ impl Engine {
                 let vis = if is_override { "public " } else { "" };
                 Some(format!("{}func {} {}", vis, sig, b))
             }
-            Kind::Class { name, ctor_params, members, superclass, is_open, is_data, is_interface, is_abstract, interfaces, super_args, generics } => {
+            Kind::Class { name, ctor_params, members, superclass, is_open, is_data, is_interface, is_abstract, interfaces, super_args, generics, init_block } => {
                 // 泛型形参后缀 `<T>`（类名后）。
                 let gen_suffix = if generics.is_empty() {
                     String::new()
@@ -533,7 +561,7 @@ impl Engine {
                         super_args.iter().map(|x| self.t(*x)).collect::<Option<_>>()?;
                     Some(format!("super({})", a.join(", ")))
                 };
-                if !ctor_params.is_empty() || super_call.is_some() {
+                if !ctor_params.is_empty() || super_call.is_some() || init_block.is_some() {
                     let ps: Vec<String> = ctor_params
                         .iter()
                         .map(|p| format!("{}: {}", p.name, p.ty))
@@ -545,6 +573,16 @@ impl Engine {
                     for p in &ctor_params {
                         if p.kind != CtorParamKind::Plain {
                             body.push_str(&format!("{}{}this.{} = {}\n", IND, IND, p.name, p.name));
+                        }
+                    }
+                    // Kotlin `init {}` 块语句并入构造器体。
+                    if let Some(ib) = init_block {
+                        if let Kind::Block { stmts } = self.g.kind(ib) {
+                            for s in stmts {
+                                let st = self.t(*s)?;
+                                body.push_str(&indent(&st, 2));
+                                body.push('\n');
+                            }
                         }
                     }
                     body.push_str(&format!("{}}}\n", IND));
@@ -758,7 +796,10 @@ impl Engine {
     /// match 分支体：单表达式直接内联，多语句各占一行。
     fn render_arm_body(&self, id: NodeId) -> Option<String> {
         let inner = self.render_block_inner(id, 0)?;
-        if inner.lines().count() <= 1 {
+        if inner.trim().is_empty() {
+            // 仓颉 match 分支不可为空，空体（Kotlin `else -> {}`）补 Unit `()`。
+            Some("()".to_string())
+        } else if inner.lines().count() <= 1 {
             Some(inner.trim().to_string())
         } else {
             Some(format!("\n{}", indent(&inner, 1)))
@@ -787,9 +828,45 @@ impl Engine {
                 let a = self.atom(args[0])?;
                 return Some(format!("(if ({} < 0) {{ -({}) }} else {{ {} }})", a, a, a));
             }
+            // Kotlin `Array(n) { i -> init }` / `Array(n) { init }`（隐式索引 it）→
+            // 仓颉 `Array(n, { i => init })`（构造器的 lambda 必须带索引形参）。
+            if (original == "Array" || original == "IntArray" || original == "BooleanArray"
+                || original == "DoubleArray" || original == "LongArray")
+                && args.len() == 2
+            {
+                if let Kind::Lambda { params, body } = self.g.kind(args[1]) {
+                    let n = self.t(args[0])?;
+                    let inner = self.render_block_inner(*body, 0)?;
+                    let pname = if let Some(p) = params.first() {
+                        crate::parser::safe_name(p.split(':').next().unwrap_or(p).trim())
+                    } else if self.uses_it(*body) {
+                        "it".to_string()
+                    } else {
+                        "_idx".to_string()
+                    };
+                    let body_str = if inner.lines().count() <= 1 {
+                        inner.trim().to_string()
+                    } else {
+                        format!("\n{}\n", indent(&inner, 1))
+                    };
+                    return Some(format!("Array({}, {{ {} => {} }})", n, pname, body_str));
+                }
+            }
         }
         // 成员方法的特殊映射。
         if let Kind::Member { base, name, .. } = self.g.kind(callee) {
+            // 枚举 `EnumName.values()` → 全部枚举项的数组字面量（仓颉枚举无 values()）。
+            if name == "values" && args.is_empty() {
+                if let Kind::NameRef { original, .. } = self.g.kind(*base) {
+                    if let Some(entries) = self.enum_entries(original) {
+                        let items: Vec<String> = entries
+                            .iter()
+                            .map(|e| format!("{}.{}", original, e))
+                            .collect();
+                        return Some(format!("[{}]", items.join(", ")));
+                    }
+                }
+            }
             let b = self.atom(*base)?;
             match name.as_str() {
                 // Char 判定方法（接收者为 Rune）：Kotlin → 仓颉 Rune 的 isAscii* 方法。
@@ -831,7 +908,13 @@ impl Engine {
                 }
                 // 字符串 indexOf：仓颉返回 Option<Int64>，Kotlin 返回 Int（缺省 -1）。
                 "indexOf" if args.len() == 1 && self.looks_string(*base) => {
-                    return Some(format!("({}.indexOf({}) ?? -1)", b, self.t(args[0])?));
+                    // Kotlin `indexOf(Char)` → 仓颉以单字符字符串查找（无 Rune 重载）。
+                    let needle = if let Kind::CharLit(c) = self.g.kind(args[0]) {
+                        format!("\"{}\"", c)
+                    } else {
+                        self.t(args[0])?
+                    };
+                    return Some(format!("({}.indexOf({}) ?? -1)", b, needle));
                 }
                 // recv.removeAt(i) → recv.remove(at: i)
                 "removeAt" if args.len() == 1 => {
@@ -958,6 +1041,13 @@ impl Engine {
                         self.as_iter(*base)?, self.t(args[0])?
                     ));
                 }
+                // 字符串反转：仓颉集合 reverse 不适用于 String，按 Rune 数组逆序重建。
+                "reversed" if args.is_empty() && self.looks_string(*base) => {
+                    return Some(format!(
+                        "({{ => let _r = {}.toRuneArray(); String(Array<Rune>(_r.size, {{j => _r[_r.size - 1 - j]}})) }})()",
+                        b
+                    ));
+                }
                 "reversed" if args.is_empty() && !self.provably_non_collection(*base) => {
                     return Some(format!(
                         "({{ => let _s = collectArrayList({}); _s.reverse(); _s }})()",
@@ -966,7 +1056,7 @@ impl Engine {
                 }
                 // 字符串 take/drop/repeat：用切片与重复运算符（ASCII 友好）。
                 "repeat" if args.len() == 1 && self.looks_string(*base) => {
-                    return Some(format!("({} * {})", b, self.t(args[0])?));
+                    return Some(format!("({} * {})", b, self.atom(args[0])?));
                 }
                 "take" if args.len() == 1 && self.looks_string(*base) => {
                     return Some(format!("{}[0..{}]", b, self.t(args[0])?));
@@ -1187,6 +1277,12 @@ impl Engine {
                 }
             }
         }
+        // 主构造器字段引用（未解析）：按字段名恢复类型。
+        if let Kind::NameRef { original, .. } = self.g.kind(id) {
+            if let Some(t) = self.field_type_by_name(original) {
+                return Some(t);
+            }
+        }
         None
     }
 
@@ -1195,9 +1291,45 @@ impl Engine {
         self.g.nodes.iter().any(|n| matches!(&n.kind, Kind::Class { name: cn, .. } if cn == name))
     }
 
+    /// 查找名为 `name` 的枚举声明，返回其所有枚举项名（用于 `EnumName.values()`）。
+    fn enum_entries(&self, name: &str) -> Option<Vec<String>> {
+        self.g.nodes.iter().find_map(|n| match &n.kind {
+            Kind::Enum { name: en, entries } if en == name && !entries.is_empty() => {
+                Some(entries.clone())
+            }
+            _ => None,
+        })
+    }
+
+    /// 按字段名在所有类的主构造器参数中查找其（已映射的）类型。
+    /// 用于在方法体内引用类字段（仓颉主构造器字段无独立 Name 节点、NameRef 未解析）时，
+    /// 仍能恢复 `src: String` / `c: Char` 之类的类型供 looks_string/looks_char 等启发式使用。
+    fn field_type_by_name(&self, name: &str) -> Option<String> {
+        for node in &self.g.nodes {
+            if let Kind::Class { ctor_params, .. } = &node.kind {
+                for cp in ctor_params {
+                    if cp.name == name && cp.kind != crate::node::CtorParamKind::Plain {
+                        return Some(cp.ty.clone());
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// 图中是否存在名为 `name` 的用户函数声明（用于避免覆盖同名自定义函数）。
     fn is_user_func(&self, name: &str) -> bool {
         self.g.nodes.iter().any(|n| matches!(&n.kind, Kind::Func { name: fname, .. } if fname == name))
+    }
+
+    /// 子树 `id` 中是否出现对标识符 `name` 的引用（用于识别递归函数）。
+    fn refers_name(&self, id: NodeId, name: &str) -> bool {
+        if let Kind::NameRef { original, .. } = self.g.kind(id) {
+            if original == name {
+                return true;
+            }
+        }
+        self.g.children_of(id).iter().any(|c| self.refers_name(*c, name))
     }
 
     /// 识别 `name != null` / `name == null` 形式的空值判定，返回
@@ -1419,6 +1551,12 @@ impl Engine {
                             }
                         }
                     }
+                    // 函数/方法形参 `c: Char`（已映射为 Rune）。
+                    if let Kind::Param { name_node, ty, .. } = &node.kind {
+                        if *name_node == d {
+                            return ty == "Char" || ty == "Rune";
+                        }
+                    }
                     // `val ch = 'A'` 之类初始化为字符字面量的不可变绑定。
                     if let Kind::VarDecl { name_node, ty, init, .. } = &node.kind {
                         if *name_node == d {
@@ -1426,12 +1564,17 @@ impl Engine {
                                 return t == "Char" || t == "Rune";
                             }
                             if let Some(i) = init {
-                                return matches!(self.g.kind(*i), Kind::CharLit(_));
+                                return matches!(self.g.kind(*i), Kind::CharLit(_))
+                                    || matches!(self.g.kind(*i), Kind::Index { base, .. } if self.looks_string(*base));
                             }
                         }
                     }
                 }
                 false
+            }
+            // 主构造器字段引用（未解析）：按字段名恢复类型。
+            Kind::NameRef { original, .. } => {
+                matches!(self.field_type_by_name(original).as_deref(), Some("Char") | Some("Rune"))
             }
             _ => false,
         }
@@ -1444,8 +1587,33 @@ impl Engine {
             Kind::Binary { op, lhs, rhs } if op == "+" => {
                 self.looks_string(*lhs) || self.looks_string(*rhs)
             }
+            // 返回字符串的常见方法调用：toString / substring / trim / join / 大小写转换等。
+            Kind::Call { callee, .. } => {
+                if let Kind::Member { name, base, .. } = self.g.kind(*callee) {
+                    matches!(
+                        name.as_str(),
+                        "toString" | "substring" | "joinToString" | "trim" | "trimStart"
+                            | "trimEnd" | "uppercase" | "lowercase" | "toUpperCase"
+                            | "toLowerCase" | "replace" | "padStart" | "padEnd" | "repeat"
+                            | "reversed"
+                    ) && (matches!(name.as_str(), "toString" | "joinToString")
+                        || self.looks_string(*base))
+                } else {
+                    false
+                }
+            }
             Kind::NameRef { decl: Some(d), .. } => {
                 let d = *d;
+                // 循环变量：`for (s in xs)` 中若 xs 的元素是字符串，则 s 亦为字符串。
+                for node in &self.g.nodes {
+                    if let Kind::ForEach { var, iter, .. } = &node.kind {
+                        if let Kind::VarDecl { name_node, .. } = self.g.kind(*var) {
+                            if *name_node == d && self.iter_elem_is_string(*iter) {
+                                return true;
+                            }
+                        }
+                    }
+                }
                 for node in &self.g.nodes {
                     match &node.kind {
                         Kind::VarDecl { name_node, ty, init, .. } if *name_node == d => {
@@ -1453,7 +1621,7 @@ impl Engine {
                                 return t == "String";
                             }
                             if let Some(i) = init {
-                                return matches!(self.g.kind(*i), Kind::StrTemplate { .. });
+                                return self.looks_string(*i);
                             }
                             return false;
                         }
@@ -1461,6 +1629,36 @@ impl Engine {
                             return ty == "String";
                         }
                         _ => {}
+                    }
+                }
+                false
+            }
+            // 主构造器字段引用（未解析）：按字段名恢复类型。
+            Kind::NameRef { original, .. } => {
+                self.field_type_by_name(original).as_deref() == Some("String")
+            }
+            _ => false,
+        }
+    }
+
+    /// 迭代源 `iter` 的元素是否为字符串（用于把 `for (s in xs)` 的循环变量识别为 String）。
+    fn iter_elem_is_string(&self, iter: NodeId) -> bool {
+        match self.g.kind(iter) {
+            Kind::CollLit { elem, args, .. } => {
+                if let Some(e) = elem {
+                    if e == "String" {
+                        return true;
+                    }
+                }
+                args.first().map_or(false, |a| self.looks_string(*a))
+            }
+            Kind::NameRef { decl: Some(d), .. } => {
+                let d = *d;
+                for node in &self.g.nodes {
+                    if let Kind::VarDecl { name_node, init: Some(i), .. } = &node.kind {
+                        if *name_node == d {
+                            return self.iter_elem_is_string(*i);
+                        }
                     }
                 }
                 false

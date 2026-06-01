@@ -55,6 +55,8 @@ pub enum Kind {
         super_args: Vec<NodeId>,
         /// 泛型形参名（`class Stack<T>`）。
         generics: Vec<String>,
+        /// `init {}` 块体（语句合并入仓颉构造器）。
+        init_block: Option<NodeId>,
     },
     /// 枚举类（仅简单具名常量项）。
     Enum {
@@ -239,9 +241,12 @@ impl Graph {
                     v.push(*d);
                 }
             }
-            Kind::Class { members, super_args, .. } => {
+            Kind::Class { members, super_args, init_block, .. } => {
                 v.extend(members);
                 v.extend(super_args);
+                if let Some(ib) = init_block {
+                    v.push(*ib);
+                }
             }
             Kind::Enum { .. } => {}
             Kind::VarDecl { name_node, init, .. } => {

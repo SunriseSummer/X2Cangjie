@@ -395,6 +395,7 @@ impl Parser {
             }
         }
         let mut members = Vec::new();
+        let mut init_block: Option<NodeId> = None;
         self.skip_newlines();
         if self.eat_sym("{") {
             self.push_scope();
@@ -407,9 +408,10 @@ impl Parser {
                 } else if self.is_kw("val") || self.is_kw("var") {
                     members.push(self.parse_var_decl()?);
                 } else if self.is_kw("init") {
-                    // init 块：跳过（构造参数已声明成员）
+                    // init 块：捕获块体，语句合并入仓颉构造器。
                     self.bump();
-                    self.parse_block()?;
+                    let blk = self.parse_block()?;
+                    init_block = Some(blk);
                 } else if self.is_kw("companion") || self.is_kw("class") || self.is_kw("object") {
                     self.bump();
                     if self.is_sym("{") {
@@ -438,6 +440,7 @@ impl Parser {
             interfaces,
             super_args,
             generics,
+            init_block,
         }))
     }
 
