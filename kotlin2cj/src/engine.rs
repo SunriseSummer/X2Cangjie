@@ -139,9 +139,20 @@ impl Engine {
                     return Some(format!("({}, {})", l, r));
                 }
                 if op == "?:" {
-                    let la = self.atom(lhs)?;
                     let ra = self.atom(rhs)?;
+                    // Kotlin `map[key] ?: default` → 仓颉 `map.get(key) ?? default`
+                    // （下标读取在仓颉返回 V 且越界抛异常，.get 返回 Option 才能 coalesce）
+                    if let Kind::Index { base, index } = self.g.kind(lhs).clone() {
+                        let b = self.atom(base)?;
+                        let i = self.t(index)?;
+                        return Some(format!("{}.get({}) ?? {}", b, i, ra));
+                    }
+                    let la = self.atom(lhs)?;
                     return Some(format!("{} ?? {}", la, ra));
+                }
+                if op == "in" || op == "!in" {
+                    let inner = self.render_in(lhs, rhs)?;
+                    return Some(if op == "!in" { format!("!({})", inner) } else { inner });
                 }
                 let la = self.atom(lhs)?;
                 let ra = self.atom(rhs)?;
@@ -195,7 +206,11 @@ impl Engine {
             Kind::Lambda { params, body } => {
                 let inner = self.render_block_inner(body, 0)?;
                 let head = if params.is_empty() {
-                    "=>".to_string()
+                    if self.uses_it(body) {
+                        "it =>".to_string()
+                    } else {
+                        "=>".to_string()
+                    }
                 } else {
                     let ps: Vec<String> = params.iter().map(|p| crate::parser::safe_name(p)).collect();
                     format!("{} =>", ps.join(", "))
@@ -234,6 +249,7 @@ impl Engine {
                 Some(v) => Some(format!("return {}", self.t(v)?)),
                 None => Some("return".to_string()),
             },
+            Kind::Throw { value } => Some(format!("throw {}", self.t(value)?)),
             Kind::VarDecl { mutable, name_node, ty, init } => {
                 let name = self.t(name_node)?;
                 if init.is_none() && ty.is_none() {
@@ -288,6 +304,21 @@ impl Engine {
                 let vn = self.loop_var_name(var)?;
                 Some(format!("for ({} in {}) {}", vn, self.t(iter)?, self.render_block(body)?))
             }
+            Kind::Try { body, catches, finally } => {
+                let mut s = format!("try {}", self.render_block(body)?);
+                for c in &catches {
+                    s.push_str(&format!(
+                        " catch ({}: {}) {}",
+                        c.name,
+                        c.ty,
+                        self.render_block(c.body)?
+                    ));
+                }
+                if let Some(f) = finally {
+                    s.push_str(&format!(" finally {}", self.render_block(f)?));
+                }
+                Some(s)
+            }
             Kind::When { subject, arms } => self.render_when(subject, &arms),
             Kind::Block { .. } => self.render_block(id),
 
@@ -341,6 +372,14 @@ impl Engine {
                     Some(format!("class {} {{}}", name))
                 } else {
                     Some(format!("class {} {{\n{}}}", name, body))
+                }
+            }
+            Kind::Enum { name, entries } => {
+                if entries.is_empty() {
+                    Some(format!("enum {} {{ | {} }}", name, name))
+                } else {
+                    let body = entries.join(" | ");
+                    Some(format!("@Derive[Equatable]\nenum {} {{\n{}| {}\n}}", name, IND, body))
                 }
             }
             Kind::Program { items } => self.render_program(&items),
@@ -429,15 +468,57 @@ impl Engine {
     }
 
     fn render_call(&self, callee: NodeId, args: &[NodeId]) -> Option<String> {
+        // recv.removeAt(i) → recv.remove(at: i)
+        if let Kind::Member { base, name } = self.g.kind(callee) {
+            if name == "removeAt" && args.len() == 1 {
+                let b = self.atom(*base)?;
+                let i = self.t(args[0])?;
+                return Some(format!("{}.remove(at: {})", b, i));
+            }
+        }
         let c = self.atom(callee)?;
         let a: Vec<String> = args.iter().map(|x| self.t(*x)).collect::<Option<_>>()?;
         Some(format!("{}({})", c, a.join(", ")))
     }
 
+    /// 成员检查 `x in rhs`：区间转比较，集合转 contains。
+    fn render_in(&self, lhs: NodeId, rhs: NodeId) -> Option<String> {
+        let l = self.atom(lhs)?;
+        if let Kind::Range { lo, hi, inclusive, down, .. } = self.g.kind(rhs).clone() {
+            let lo_s = self.atom(lo)?;
+            let hi_s = self.atom(hi)?;
+            if down {
+                return Some(format!("{} <= {} && {} >= {}", l, lo_s, l, hi_s));
+            }
+            let upper = if inclusive { "<=" } else { "<" };
+            return Some(format!("{} >= {} && {} {} {}", l, lo_s, l, upper, hi_s));
+        }
+        let r = self.atom(rhs)?;
+        Some(format!("{}.contains({})", r, l))
+    }
+
+    /// 判断子树中是否使用了隐式 lambda 参数 `it`。
+    fn uses_it(&self, id: NodeId) -> bool {
+        if let Kind::NameRef { original, .. } = self.g.kind(id) {
+            if original == "it" {
+                return true;
+            }
+        }
+        // Lambda 内部若有自己的 it 绑定，这里仍可能误判，但 kotlin 中嵌套 it 罕见。
+        for c in self.g.children_of(id) {
+            if self.uses_it(c) {
+                return true;
+            }
+        }
+        false
+    }
+
     fn render_program(&self, items: &[NodeId]) -> Option<String> {
+        let mut globals = Vec::new();
         let mut decls = Vec::new();
         let mut loose = Vec::new();
         let mut has_main = false;
+        let mut has_enum = false;
         for it in items {
             match self.g.kind(*it) {
                 Kind::Func { is_main, .. } => {
@@ -447,10 +528,23 @@ impl Engine {
                     decls.push(self.t(*it)?);
                 }
                 Kind::Class { .. } => decls.push(self.t(*it)?),
+                Kind::Enum { .. } => {
+                    has_enum = true;
+                    decls.push(self.t(*it)?);
+                }
+                // 顶层变量声明 → 全局常量/变量，置于 main 之前以便函数引用。
+                Kind::VarDecl { .. } => globals.push(self.t(*it)?),
                 _ => loose.push(self.t(*it)?),
             }
         }
-        let mut body = decls.join("\n\n");
+        let mut sections: Vec<String> = Vec::new();
+        if !globals.is_empty() {
+            sections.push(globals.join("\n"));
+        }
+        if !decls.is_empty() {
+            sections.push(decls.join("\n\n"));
+        }
+        let mut body = sections.join("\n\n");
         if !loose.is_empty() && !has_main {
             let main_body = loose.join("\n");
             body.push_str(&format!("\n\nmain() {{\n{}\n}}", indent(&main_body, 1)));
@@ -458,10 +552,16 @@ impl Engine {
             body.push_str("\n\n");
             body.push_str(&loose.join("\n"));
         }
-        // 按需注入集合导入
+        // 按需注入导入
         let mut header = String::new();
         if body.contains("ArrayList") || body.contains("HashMap") || body.contains("HashSet") {
-            header.push_str("import std.collection.*\n\n");
+            header.push_str("import std.collection.*\n");
+        }
+        if has_enum {
+            header.push_str("import std.deriving.*\n");
+        }
+        if !header.is_empty() {
+            header.push('\n');
         }
         Some(format!("{}{}\n", header, body))
     }

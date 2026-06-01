@@ -117,6 +117,8 @@ impl Parser {
         self.skip_modifiers();
         if self.is_kw("fun") {
             self.parse_fun()
+        } else if self.is_kw("enum") {
+            self.parse_enum()
         } else if self.is_kw("class") || self.is_kw("data") || self.is_kw("object") {
             self.parse_class()
         } else {
@@ -196,6 +198,62 @@ impl Parser {
         let is_main = name == "main";
         let ret = if is_main { None } else { ret };
         Ok(self.g.add(Kind::Func { name: safe_name(&name), params, ret, body, is_main }))
+    }
+
+    // ---- 枚举 ----
+    fn parse_enum(&mut self) -> PResult<NodeId> {
+        self.eat_kw("enum");
+        // `enum class Name { A, B, C }`
+        self.eat_kw("class");
+        let name = self.expect_ident()?;
+        self.skip_newlines();
+        self.expect_sym("{")?;
+        self.skip_seps();
+        let mut entries = Vec::new();
+        // 解析具名枚举项，直到 `}` 或成员分隔 `;`
+        while !self.is_sym("}") && !self.is_sym(";") && !self.at_eof() {
+            let entry = self.expect_ident()?;
+            entries.push(entry);
+            // 忽略枚举项可能携带的构造实参，如 RED(0xFF)
+            if self.is_sym("(") {
+                self.skip_balanced_parens();
+            }
+            self.skip_newlines();
+            if !self.eat_sym(",") {
+                break;
+            }
+            self.skip_seps();
+        }
+        // 跳过枚举体其余部分（成员函数等暂不支持）
+        let mut depth = 1;
+        while depth > 0 && !self.at_eof() {
+            if self.is_sym("{") {
+                depth += 1;
+            } else if self.is_sym("}") {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            self.bump();
+        }
+        self.expect_sym("}")?;
+        Ok(self.g.add(Kind::Enum { name: safe_name(&name), entries }))
+    }
+
+    fn skip_balanced_parens(&mut self) {
+        if !self.eat_sym("(") {
+            return;
+        }
+        let mut depth = 1;
+        while depth > 0 && !self.at_eof() {
+            if self.is_sym("(") {
+                depth += 1;
+            } else if self.is_sym(")") {
+                depth -= 1;
+            }
+            self.bump();
+        }
     }
 
     // ---- 类 ----
@@ -301,11 +359,19 @@ impl Parser {
             let e = self.parse_expr()?;
             return Ok(self.g.add(Kind::Return { value: Some(e) }));
         }
+        if self.is_kw("throw") {
+            self.bump();
+            let e = self.parse_expr()?;
+            return Ok(self.g.add(Kind::Throw { value: e }));
+        }
         if self.is_kw("while") {
             return self.parse_while();
         }
         if self.is_kw("do") {
             return self.parse_do_while();
+        }
+        if self.is_kw("try") {
+            return self.parse_try();
         }
         if self.is_kw("for") {
             return self.parse_for();
@@ -384,6 +450,47 @@ impl Parser {
         let cond = self.parse_expr()?;
         self.expect_sym(")")?;
         Ok(self.g.add(Kind::DoWhile { body, cond }))
+    }
+
+    fn parse_try(&mut self) -> PResult<NodeId> {
+        self.eat_kw("try");
+        self.skip_newlines();
+        let body = self.parse_block()?;
+        let mut catches = Vec::new();
+        let mut finally = None;
+        loop {
+            self.skip_newlines_for_kw("catch");
+            self.skip_newlines_for_kw("finally");
+            if self.eat_kw("catch") {
+                self.expect_sym("(")?;
+                let name = self.expect_ident()?;
+                self.expect_sym(":")?;
+                let ty = self.parse_type()?;
+                self.expect_sym(")")?;
+                self.skip_newlines();
+                self.push_scope();
+                let nn = self.g.add(Kind::Name { original: name.clone() });
+                self.declare(&name, nn);
+                let cbody = self.parse_block()?;
+                self.pop_scope();
+                catches.push(CatchClause { name: safe_name(&name), ty, body: cbody });
+            } else if self.eat_kw("finally") {
+                self.skip_newlines();
+                finally = Some(self.parse_block()?);
+                break;
+            } else {
+                break;
+            }
+        }
+        Ok(self.g.add(Kind::Try { body, catches, finally }))
+    }
+
+    fn skip_newlines_for_kw(&mut self, kw: &str) {
+        let save = self.pos;
+        self.skip_newlines();
+        if !self.is_kw(kw) {
+            self.pos = save;
+        }
     }
 
     fn parse_for(&mut self) -> PResult<NodeId> {
@@ -487,19 +594,67 @@ impl Parser {
         self.parse_binary_level(&["==", "!="], Self::parse_comparison)
     }
     fn parse_comparison(&mut self) -> PResult<NodeId> {
-        self.parse_binary_level(&["<", "<=", ">", ">="], Self::parse_elvis)
+        self.parse_binary_level(&["<", "<=", ">", ">="], Self::parse_named_checks)
+    }
+    /// Kotlin 的 `in` / `!in` 成员检查（优先级介于比较与 elvis 之间）。
+    fn parse_named_checks(&mut self) -> PResult<NodeId> {
+        let mut lhs = self.parse_elvis()?;
+        loop {
+            let negate = if self.is_sym("!") && self.peek_next_is_kw("in") {
+                self.bump(); // !
+                true
+            } else {
+                false
+            };
+            if self.is_kw("in") {
+                self.bump();
+                self.skip_newlines();
+                let rhs = self.parse_elvis()?;
+                let op = if negate { "!in" } else { "in" };
+                lhs = self.g.add(Kind::Binary { op: op.into(), lhs, rhs });
+            } else {
+                if negate {
+                    // 回退：把消费掉的 `!` 当作错误，理论上不会到这里
+                }
+                break;
+            }
+        }
+        Ok(lhs)
     }
     fn parse_elvis(&mut self) -> PResult<NodeId> {
         self.parse_binary_level(&["?:"], Self::parse_to)
     }
 
     fn parse_to(&mut self) -> PResult<NodeId> {
-        let lhs = self.parse_range()?;
-        if self.is_kw("to") {
-            self.bump();
-            self.skip_newlines();
-            let rhs = self.parse_range()?;
-            return Ok(self.g.add(Kind::Binary { op: "to".into(), lhs, rhs }));
+        let mut lhs = self.parse_range()?;
+        loop {
+            if self.is_kw("to") {
+                self.bump();
+                self.skip_newlines();
+                let rhs = self.parse_range()?;
+                lhs = self.g.add(Kind::Binary { op: "to".into(), lhs, rhs });
+                continue;
+            }
+            // 命名中缀位运算：and / or / xor / shl / shr / ushr
+            let mapped = match self.peek() {
+                Tok::Ident(x) => match x.as_str() {
+                    "and" => Some("&"),
+                    "or" => Some("|"),
+                    "xor" => Some("^"),
+                    "shl" => Some("<<"),
+                    "shr" | "ushr" => Some(">>"),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(op) = mapped {
+                self.bump();
+                self.skip_newlines();
+                let rhs = self.parse_range()?;
+                lhs = self.g.add(Kind::Binary { op: op.into(), lhs, rhs });
+                continue;
+            }
+            break;
         }
         Ok(lhs)
     }
@@ -570,6 +725,15 @@ impl Parser {
                     let args = self.parse_args()?;
                     let m = self.g.add(Kind::Member { base: e, name });
                     e = self.g.add(Kind::Call { callee: m, args });
+                } else if self.is_sym("{") {
+                    // 无括号尾随 lambda：recv.method { ... }
+                    let lam = self.parse_lambda()?;
+                    if name == "forEach" {
+                        e = self.build_for_each(e, lam);
+                    } else {
+                        let m = self.g.add(Kind::Member { base: e, name });
+                        e = self.g.add(Kind::Call { callee: m, args: vec![lam] });
+                    }
                 } else {
                     e = self.g.add(Kind::Member { base: e, name });
                 }
@@ -592,8 +756,30 @@ impl Parser {
         Ok(e)
     }
 
+    fn build_for_each(&mut self, recv: NodeId, lam: NodeId) -> NodeId {
+        let (params, body) = if let Kind::Lambda { params, body } = self.g.kind(lam) {
+            (params.clone(), *body)
+        } else {
+            (Vec::new(), lam)
+        };
+        let var_name = params.first().cloned().unwrap_or_else(|| "it".to_string());
+        let nn = self.g.add(Kind::Name { original: var_name });
+        let var = self.g.add(Kind::VarDecl {
+            mutable: false,
+            name_node: nn,
+            ty: None,
+            init: None,
+        });
+        self.g.add(Kind::ForEach { var, iter: recv, body })
+    }
+
     fn peek_next_is_bang(&self) -> bool {
         self.pos + 1 < self.toks.len() && matches!(&self.toks[self.pos + 1].tok, Tok::Sym(s) if s == "!")
+    }
+
+    fn peek_next_is_kw(&self, kw: &str) -> bool {
+        self.pos + 1 < self.toks.len()
+            && matches!(&self.toks[self.pos + 1].tok, Tok::Ident(s) if s == kw)
     }
 
     /// builder 名后紧跟 `(` 或 `<`（泛型实参）。

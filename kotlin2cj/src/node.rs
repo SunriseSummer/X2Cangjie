@@ -34,6 +34,11 @@ pub enum Kind {
         ctor_params: Vec<CtorParam>,
         members: Vec<NodeId>,
     },
+    /// 枚举类（仅简单具名常量项）。
+    Enum {
+        name: String,
+        entries: Vec<String>,
+    },
     /// 局部变量 / 顶层变量 / 属性声明。
     VarDecl {
         mutable: bool,
@@ -51,11 +56,15 @@ pub enum Kind {
     ExprStmt { expr: NodeId },
     Assign { target: NodeId, op: String, value: NodeId },
     Return { value: Option<NodeId> },
+    /// `throw expr`
+    Throw { value: NodeId },
     If { cond: NodeId, then_b: NodeId, else_b: Option<NodeId> },
     While { cond: NodeId, body: NodeId },
     DoWhile { body: NodeId, cond: NodeId },
     ForRange { var: NodeId, range: NodeId, body: NodeId },
     ForEach { var: NodeId, iter: NodeId, body: NodeId },
+    /// `try { } catch (e: T) { } ... finally { }`
+    Try { body: NodeId, catches: Vec<CatchClause>, finally: Option<NodeId> },
     /// `repeat(n) { ... }` → `for (_ in 0..n) { ... }`
     Repeat { count: NodeId, body: NodeId },
     /// 解构循环变量 `(k, v)`，其名字节点用于在作用域内建立引用依赖。
@@ -101,6 +110,14 @@ pub enum CtorParamKind {
 pub struct WhenArm {
     /// None 表示 else 分支。
     pub patterns: Option<Vec<NodeId>>,
+    pub body: NodeId,
+}
+
+/// try 的一个 catch 子句。
+#[derive(Debug, Clone)]
+pub struct CatchClause {
+    pub name: String,
+    pub ty: String,
     pub body: NodeId,
 }
 
@@ -186,6 +203,7 @@ impl Graph {
             }
             Kind::Param { name_node, .. } => v.push(*name_node),
             Kind::Class { members, .. } => v.extend(members),
+            Kind::Enum { .. } => {}
             Kind::VarDecl { name_node, init, .. } => {
                 v.push(*name_node);
                 if let Some(i) = init {
@@ -204,6 +222,7 @@ impl Graph {
                     v.push(*val);
                 }
             }
+            Kind::Throw { value } => v.push(*value),
             Kind::If { cond, then_b, else_b } => {
                 v.push(*cond);
                 v.push(*then_b);
@@ -228,6 +247,15 @@ impl Graph {
                 v.push(*var);
                 v.push(*iter);
                 v.push(*body);
+            }
+            Kind::Try { body, catches, finally } => {
+                v.push(*body);
+                for c in catches {
+                    v.push(c.body);
+                }
+                if let Some(f) = finally {
+                    v.push(*f);
+                }
             }
             Kind::Repeat { count, body } => {
                 v.push(*count);
