@@ -242,6 +242,7 @@ impl Engine {
             }
             Kind::Enum { name, entries, params } => self.render_enum(&name, &entries, &params),
             Kind::TypeAlias { name, target_type } => {
+                // Alias is expanded at parse time (parse_type); keep original as documentation comment
                 Some(format!("// typealias {} = {}", name, target_type))
             }
             Kind::TypeCast { expr, ty, safe } => {

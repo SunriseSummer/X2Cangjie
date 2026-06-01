@@ -241,7 +241,8 @@ impl Parser {
             let recv = format!("{}{}", map_type(&name), generic_suffix);
             receiver_type = Some(recv);
             name = self.expect_ident()?;
-            // Generic params on extension function receiver go on the receiver, not the func
+            // Extension function generics in Kotlin bind to the receiver type, not the
+            // function itself. Clear to prevent duplication in rendered `extend` block.
             generic_params.clear();
         }
         self.push_scope();

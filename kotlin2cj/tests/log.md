@@ -109,7 +109,7 @@
 | 182_generic_func | ✅ | ✅ | ✅ |  |
 | 183_typealias | ✅ | ✅ | ✅ |  |
 | 184_scope_also | ✅ | ✅ | ✅ |  |
-| 185_type_cast | ✅ | ✅ | ✅ |  |
+| 185_string_ops | ✅ | ✅ | ✅ |  |
 | 186_combined_p1p2 | ✅ | ✅ | ✅ |  |
 | 18_break_continue | ✅ | ✅ | ✅ |  |
 | 19_string_ops | ✅ | ✅ | ✅ |  |
