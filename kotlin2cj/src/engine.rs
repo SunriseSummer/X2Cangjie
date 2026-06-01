@@ -934,6 +934,29 @@ impl Engine {
                         self.as_iter(*base)?
                     ));
                 }
+                // 字符串 take/drop/repeat：用切片与重复运算符（ASCII 友好）。
+                "repeat" if args.len() == 1 && self.looks_string(*base) => {
+                    return Some(format!("({} * {})", b, self.t(args[0])?));
+                }
+                "take" if args.len() == 1 && self.looks_string(*base) => {
+                    return Some(format!("{}[0..{}]", b, self.t(args[0])?));
+                }
+                "drop" if args.len() == 1 && self.looks_string(*base) => {
+                    return Some(format!("{}[{}..{}.size]", b, self.t(args[0])?, b));
+                }
+                // 集合 take/drop → 迭代器 take/skip 后急切收集，可继续链接。
+                "take" if args.len() == 1 && !self.provably_non_collection(*base) => {
+                    return Some(format!(
+                        "collectArrayList({}.take({}))",
+                        self.as_iter(*base)?, self.t(args[0])?
+                    ));
+                }
+                "drop" if args.len() == 1 && !self.provably_non_collection(*base) => {
+                    return Some(format!(
+                        "collectArrayList({}.skip({}))",
+                        self.as_iter(*base)?, self.t(args[0])?
+                    ));
+                }
                 // xs.toList()/toMutableList() / (a..b).toList() → 收集为 ArrayList。
                 "toList" | "toMutableList" if args.is_empty() && !self.provably_non_collection(*base) => {
                     return Some(format!("collectArrayList({})", self.atom(*base)?));
