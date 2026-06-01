@@ -92,7 +92,7 @@ pub enum Kind {
     /// 集合字面量构造（listOf / mapOf / setOf 等），记录显式元素类型以支持空集合。
     CollLit { ctor: String, elem: Option<String>, args: Vec<NodeId> },
     Index { base: NodeId, index: NodeId },
-    Member { base: NodeId, name: String },
+    Member { base: NodeId, name: String, safe: bool },
     Lambda { params: Vec<String>, body: NodeId },
     /// `recv?.let { it -> ... }` → `if (let Some(it) <- recv) { ... }`。
     SafeLet { recv: NodeId, var: String, body: NodeId },

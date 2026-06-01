@@ -777,11 +777,12 @@ impl Parser {
                 }
             }
             if self.is_sym(".") || self.is_sym("?.") {
+                let safe = self.is_sym("?.");
                 self.bump();
                 let name = self.expect_ident()?;
                 if self.is_sym("(") {
                     let args = self.parse_args()?;
-                    let m = self.g.add(Kind::Member { base: e, name });
+                    let m = self.g.add(Kind::Member { base: e, name, safe });
                     e = self.g.add(Kind::Call { callee: m, args });
                 } else if self.is_sym("{") {
                     // 无括号尾随 lambda：recv.method { ... }
@@ -792,11 +793,11 @@ impl Parser {
                         // recv?.let { it -> ... } / recv.let { ... }
                         e = self.build_safe_let(e, lam);
                     } else {
-                        let m = self.g.add(Kind::Member { base: e, name });
+                        let m = self.g.add(Kind::Member { base: e, name, safe });
                         e = self.g.add(Kind::Call { callee: m, args: vec![lam] });
                     }
                 } else {
-                    e = self.g.add(Kind::Member { base: e, name });
+                    e = self.g.add(Kind::Member { base: e, name, safe });
                 }
             } else if self.is_sym("(") {
                 let args = self.parse_args()?;

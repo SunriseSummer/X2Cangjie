@@ -178,8 +178,18 @@ impl Engine {
                 let i = self.t(index)?;
                 Some(format!("{}[{}]", b, i))
             }
-            Kind::Member { base, name } => {
-                let b = self.atom(base)?;
+            Kind::Member { base, name, safe } => {
+                // 安全调用 `?.`：下标读取改用 .get 得到 Option，并保留 `?.`。
+                let (b, dot) = if safe {
+                    let bs = if let Kind::Index { base: ib, index } = self.g.kind(base) {
+                        format!("{}.get({})", self.atom(*ib)?, self.t(*index)?)
+                    } else {
+                        self.atom(base)?
+                    };
+                    (bs, "?.")
+                } else {
+                    (self.atom(base)?, ".")
+                };
                 let mapped = match name.as_str() {
                     "length" => "size",
                     "toUpperCase" | "uppercase" => "toAsciiUpper",
@@ -188,11 +198,11 @@ impl Engine {
                     "trimStart" => "trimAsciiStart",
                     "trimEnd" => "trimAsciiEnd",
                     // Kotlin 的 `map.keys` / `map.values` 属性 → 仓颉方法。
-                    "keys" => return Some(format!("{}.keys()", b)),
-                    "values" => return Some(format!("{}.values()", b)),
+                    "keys" => return Some(format!("{}{}keys()", b, dot)),
+                    "values" => return Some(format!("{}{}values()", b, dot)),
                     other => other,
                 };
-                Some(format!("{}.{}", b, mapped))
+                Some(format!("{}{}{}", b, dot, mapped))
             }
             Kind::Call { callee, args } => self.render_call(callee, &args),
             Kind::CollLit { ctor, elem, args } => {
@@ -525,9 +535,16 @@ impl Engine {
                 let a: Vec<String> = args.iter().map(|x| self.t(*x)).collect::<Option<_>>()?;
                 return Some(format!("({})", a.join(", ")));
             }
+            // maxOf(a, b) / minOf(a, b) → 内联条件表达式（不依赖标准库符号）。
+            if (original == "maxOf" || original == "minOf") && args.len() == 2 {
+                let a = self.t(args[0])?;
+                let b = self.t(args[1])?;
+                let cmp = if original == "maxOf" { ">" } else { "<" };
+                return Some(format!("(if ({} {} {}) {{ {} }} else {{ {} }})", a, cmp, b, a, b));
+            }
         }
         // 成员方法的特殊映射。
-        if let Kind::Member { base, name } = self.g.kind(callee) {
+        if let Kind::Member { base, name, .. } = self.g.kind(callee) {
             let b = self.atom(*base)?;
             match name.as_str() {
                 // recv.removeAt(i) → recv.remove(at: i)
