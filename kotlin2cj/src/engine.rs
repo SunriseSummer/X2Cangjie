@@ -321,6 +321,11 @@ impl Engine {
                 // 可空智能转换：`if (x != null) { ... x ... }` → `if (let Some(x) <- x) { ... }`
                 // （仓颉 if 不做 narrowing，借助 if-let 绑定解包后的同名变量）。
                 if let Some((bind, recv, negated)) = self.null_check(cond) {
+                    // 保守：若分支体内对该变量再赋值（如 `best = sc`），if-let 绑定为不可变，
+                    // 智能转换会破坏语义，退回普通条件渲染。
+                    let reassigned = self.block_assigns(then_b, &bind)
+                        || else_b.map_or(false, |e| self.block_assigns(e, &bind));
+                    if !reassigned {
                     let tb = self.render_block(then_b)?;
                     let head = format!("if (let Some({}) <- {})", bind, recv);
                     if negated {
@@ -340,6 +345,7 @@ impl Engine {
                             }
                             None => return Some(format!("{} {}", head, tb)),
                         }
+                    }
                     }
                 }
                 let c = self.t(cond)?;
@@ -990,6 +996,18 @@ impl Engine {
 
     /// 识别 `name != null` / `name == null` 形式的空值判定，返回
     /// (绑定名, 接收者表达式, 是否为 `== null`)。仅在一侧是简单标识符、另一侧是 null 时成立。
+    /// 块（递归）内是否存在对名为 `bind` 的变量的赋值。
+    fn block_assigns(&self, id: NodeId, bind: &str) -> bool {
+        if let Kind::Assign { target, .. } = self.g.kind(id) {
+            if let Kind::NameRef { original, .. } = self.g.kind(*target) {
+                if crate::parser::safe_name(original) == bind {
+                    return true;
+                }
+            }
+        }
+        self.g.children_of(id).iter().any(|c| self.block_assigns(*c, bind))
+    }
+
     fn null_check(&self, cond: NodeId) -> Option<(String, String, bool)> {
         if let Kind::Binary { op, lhs, rhs } = self.g.kind(cond) {
             if op != "==" && op != "!=" {
@@ -1183,6 +1201,10 @@ impl Engine {
     fn looks_string(&self, id: NodeId) -> bool {
         match self.g.kind(id) {
             Kind::StrTemplate { .. } => true,
+            // 字符串拼接 `a + b` 的结果仍是字符串：任一侧为字符串即可。
+            Kind::Binary { op, lhs, rhs } if op == "+" => {
+                self.looks_string(*lhs) || self.looks_string(*rhs)
+            }
             Kind::NameRef { decl: Some(d), .. } => {
                 let d = *d;
                 for node in &self.g.nodes {
