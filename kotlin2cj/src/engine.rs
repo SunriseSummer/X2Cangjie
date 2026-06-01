@@ -47,6 +47,94 @@ impl Engine {
         self.avalanche_sizes.push(avalanche);
     }
 
+    /// SOC 粒子驱动松弛：逐个「添沙」（激活叶子节点），每粒沙让级联完全结束后
+    /// 再添下一粒，独立记录每次雪崩规模——用于检验幂律分布。
+    pub fn relax_soc(&mut self) -> Vec<usize> {
+        let n = self.g.nodes.len();
+        // 收集叶子节点（无子节点的节点）作为「沙粒」。
+        let mut leaves: Vec<NodeId> = Vec::new();
+        for id in 0..n {
+            if self.g.children_of(id).is_empty() {
+                leaves.push(id);
+            }
+        }
+        // 按拓扑序排列叶子以保证确定性（也可 shuffle 以测试随机性）。
+        let mut grain_avalanches: Vec<usize> = Vec::new();
+        let mut total = 0usize;
+        for &leaf in &leaves {
+            let mut queue: VecDeque<NodeId> = VecDeque::new();
+            queue.push_back(leaf);
+            let mut avalanche = 0;
+            while let Some(id) = queue.pop_front() {
+                if self.step(id, &mut queue) {
+                    avalanche += 1;
+                }
+            }
+            if avalanche > 0 {
+                grain_avalanches.push(avalanche);
+                total += avalanche;
+            }
+        }
+        // 最终确保非叶子节点也全部收敛。
+        let mut queue: VecDeque<NodeId> = (0..n).collect();
+        let mut mop_up = 0;
+        while let Some(id) = queue.pop_front() {
+            if self.step(id, &mut queue) {
+                mop_up += 1;
+            }
+        }
+        if mop_up > 0 {
+            grain_avalanches.push(mop_up);
+            total += mop_up;
+        }
+        self.last_avalanche = total;
+        self.avalanche_sizes.extend(&grain_avalanches);
+        grain_avalanches
+    }
+
+    /// 全量扰动：对所有有依赖者的声明逐一重命名再恢复，收集雪崩分布。
+    pub fn perturb_all_names(&mut self) -> Vec<usize> {
+        let n = self.g.nodes.len();
+        let mut avals = Vec::new();
+        let mut targets: Vec<(NodeId, String)> = Vec::new();
+        for id in 0..n {
+            if let Kind::Name { ref original } = self.g.nodes[id].kind {
+                if !self.g.nodes[id].dependents.is_empty() {
+                    targets.push((id, original.clone()));
+                }
+            }
+        }
+        for (id, orig) in &targets {
+            // perturb
+            let test_name = format!("{}_test", orig);
+            if let Kind::Name { original } = &mut self.g.nodes[*id].kind {
+                *original = test_name;
+            }
+            self.g.nodes[*id].state.target = None;
+            let mut queue: VecDeque<NodeId> = VecDeque::new();
+            queue.push_back(*id);
+            let mut avalanche = 0;
+            while let Some(nid) = queue.pop_front() {
+                if self.step(nid, &mut queue) {
+                    avalanche += 1;
+                }
+            }
+            avals.push(avalanche);
+            // restore
+            if let Kind::Name { original } = &mut self.g.nodes[*id].kind {
+                *original = orig.clone();
+            }
+            self.g.nodes[*id].state.target = None;
+            let mut queue: VecDeque<NodeId> = VecDeque::new();
+            queue.push_back(*id);
+            while let Some(nid) = queue.pop_front() {
+                self.step(nid, &mut queue);
+            }
+        }
+        self.avalanche_sizes.extend(&avals);
+        avals
+    }
+
     /// 对单个节点应用局部规则；若目标发生变化则把邻居重新入队。
     fn step(&mut self, id: NodeId, queue: &mut VecDeque<NodeId>) -> bool {
         let rendered = self.render(id);
