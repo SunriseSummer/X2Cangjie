@@ -1,0 +1,21 @@
+=== Queue Demo ===
+Queue[10, 20, 30]
+Peek: 10
+Dequeue: 10
+Dequeue: 20
+Queue[30]
+Queue[30, 40, 50]
+Size: 3
+
+=== Stack Demo ===
+Stack[1, 2, 3]
+Peek: 3
+Pop: 3
+Pop: 2
+Stack[1]
+Stack[1, 4, 5]
+Size: 3
+
+=== Error Handling ===
+Caught: Queue is empty
+Caught: Stack is empty

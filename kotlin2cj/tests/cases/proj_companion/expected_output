@@ -1,0 +1,12 @@
+Color(r=255, g=0, b=0, hex=#FF0000)
+Color(r=0, g=255, b=0, hex=#00FF00)
+Color(r=0, g=0, b=255, hex=#0000FF)
+Color(r=255, g=255, b=255, hex=#FFFFFF)
+Color(r=0, g=0, b=0, hex=#000000)
+Red brightness: 85
+White brightness: 255
+Black brightness: 0
+100C = 212F
+32F = 0C
+0C = 32F
+10km = 6 miles

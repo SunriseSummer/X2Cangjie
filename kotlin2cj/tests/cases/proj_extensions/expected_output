@@ -1,0 +1,12 @@
+4 is even: true
+7 is even: false
+3 is odd: true
+8 is odd: false
+5! = 120
+0! = 1
+6! = 720
+'ab' * 3 = ababab
+Count 'l' in 'hello world': 3
+Count 'z' in 'hello': 0
+Average of [10,20,30,40,50]: 30
+Average of []: 0

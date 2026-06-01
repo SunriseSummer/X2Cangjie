@@ -1,0 +1,32 @@
+Register services:
+  Registry: 'auth' registered
+  Registry: 'database' registered
+  Registry: 'cache' registered
+  Registry: 'auth' already registered
+
+All services:
+  auth(v1): STOPPED
+  cache(v1): STOPPED
+  database(v2): STOPPED
+
+Start some services:
+  Service 'auth' v1 started
+  Service 'database' v2 started
+  Service 'missing' not found
+
+All services:
+  auth(v1): RUNNING
+  cache(v1): STOPPED
+  database(v2): RUNNING
+Running: 2, Total: 3
+
+Stop auth:
+  Service 'auth' v1 stopped
+
+Unregister cache:
+  Registry: 'cache' unregistered
+
+All services:
+  auth(v1): STOPPED
+  database(v2): RUNNING
+Running: 1, Total: 2

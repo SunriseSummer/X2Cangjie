@@ -1,0 +1,17 @@
+Current: IDLE
+Current: RUNNING
+Current: PAUSED
+Current: RUNNING
+Current: STOPPED
+Current: STOPPED
+Current: IDLE
+Current: RUNNING
+
+Transition log:
+  IDLE + START -> RUNNING
+  RUNNING + PAUSE -> PAUSED
+  PAUSED + RESUME -> RUNNING
+  RUNNING + STOP -> STOPPED
+  STOPPED + START -> STOPPED
+  STOPPED + RESET -> IDLE
+  IDLE + START -> RUNNING

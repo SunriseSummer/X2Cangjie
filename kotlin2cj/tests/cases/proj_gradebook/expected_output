@@ -1,0 +1,6 @@
+=== Grade Report ===
+Alice (ID=1): avg=91, hi=95, lo=88, grade=A
+Bob (ID=2): avg=71, hi=78, lo=65, grade=C
+Carol (ID=3): avg=54, hi=60, lo=48, grade=F
+
+Class size: 3
