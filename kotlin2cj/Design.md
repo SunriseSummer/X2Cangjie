@@ -66,8 +66,10 @@ worklist（活动节点队列）不断弹出「被唤醒」的节点、就地应
 | `lexer.rs` | 词法分析；把字符串模板 `"...$x...${e}..."` 拆为字面量/插值片段，使每个插值成为独立子图 |
 | `node.rs` | 翻译图的数据结构：节点种类 `Kind`、SOC 状态 `State`、语法/依赖边、`children_of` |
 | `parser.rs` | Kotlin 子集递归下降解析；Kotlin→仓颉**类型映射**；标识符引用的作用域解析（建立依赖边）；关键字转义 |
-| `engine.rs` | **自组织引擎**：worklist 松弛、局部渲染规则、雪崩统计、重命名扰动；译文装配 |
-| `main.rs` | CLI：翻译文件、`--stats` 自组织统计、`--demo-avalanche` 雪崩演示 |
+| `engine.rs` | **自组织引擎核心**：worklist 松弛（含双向上下文传播）、粒子驱动松弛、兄弟一致性级联、雪崩统计、重命名扰动 |
+| `render.rs` | **渲染规则**：从 engine.rs 拆分，包含所有 AST→仓颉代码的局部翻译规则（render/render_binary/render_call/render_class 等） |
+| `heuristics.rs` | **类型启发式**：从 engine.rs 拆分，包含 looks_string/looks_char/looks_numeric/provably_non_collection/is_nullable_expr 等类型推断辅助 |
+| `main.rs` | CLI：翻译文件、`--stats` 自组织统计、`--demo-avalanche` 雪崩演示、`--soc-analysis` SOC 指标分析 |
 
 ---
 
