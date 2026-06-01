@@ -400,7 +400,8 @@ impl Engine {
                 Some(format!("do {} while ({})", self.render_block(body)?, self.t(cond)?))
             }
             Kind::Repeat { count, body } => {
-                Some(format!("for (_ in 0..{}) {}", self.atom(count)?, self.render_block(body)?))
+                let var = if self.uses_it(body) { "it" } else { "_" };
+                Some(format!("for ({} in 0..{}) {}", var, self.atom(count)?, self.render_block(body)?))
             }
             Kind::Destructure { names } => {
                 let ns: Vec<String> = names.iter().map(|n| self.t(*n)).collect::<Option<_>>()?;
@@ -814,6 +815,20 @@ impl Engine {
                 "toChar" if args.is_empty() => {
                     return Some(format!("Rune(UInt32({}))", b));
                 }
+                // 字符串补齐：Kotlin padStart/padEnd(length, padChar) → 仓颉 padStart/padEnd(width, padding: "c")。
+                "padStart" | "padEnd" if self.looks_string(*base) && (args.len() == 1 || args.len() == 2) => {
+                    let width = self.t(args[0])?;
+                    let pad = if args.len() == 2 {
+                        if let Kind::CharLit(c) = self.g.kind(args[1]) {
+                            format!("\"{}\"", c)
+                        } else {
+                            format!("({}).toString()", self.t(args[1])?)
+                        }
+                    } else {
+                        "\" \"".to_string()
+                    };
+                    return Some(format!("{}.{}({}, padding: {})", b, name, width, pad));
+                }
                 // 字符串 indexOf：仓颉返回 Option<Int64>，Kotlin 返回 Int（缺省 -1）。
                 "indexOf" if args.len() == 1 && self.looks_string(*base) => {
                     return Some(format!("({}.indexOf({}) ?? -1)", b, self.t(args[0])?));
@@ -905,10 +920,17 @@ impl Engine {
                             sep
                         ));
                     }
-                    return Some(format!(
+                    // 位置实参 prefix/postfix（Kotlin: joinToString(sep, prefix, postfix)）。
+                    let joined = format!(
                         "String.join(collectArray<String>({}.map({{e => e.toString()}})), delimiter: {})",
                         self.as_iter(*base)?, sep
-                    ));
+                    );
+                    if args.len() >= 2 {
+                        let prefix = self.t(args[1])?;
+                        let postfix = if args.len() >= 3 { self.t(args[2])? } else { "\"\"".to_string() };
+                        return Some(format!("({} + {} + {})", prefix, joined, postfix));
+                    }
+                    return Some(joined);
                 }
                 // 排序：Kotlin 的 sorted*/reversed 返回新列表（不改原集合），
                 // 用立即调用闭包先拷贝再就地排序，整体作为表达式产出新 ArrayList。
@@ -1512,7 +1534,9 @@ impl Engine {
             Kind::NameRef { decl: Some(d), .. } => {
                 for node in &self.g.nodes {
                     match &node.kind {
-                        Kind::VarDecl { name_node, ty, init, .. } if name_node == d => {
+                        Kind::VarDecl { name_node, ty, init, .. }
+                            if name_node == d && (ty.is_some() || init.is_some()) =>
+                        {
                             if let Some(t) = ty {
                                 return t.trim_start_matches('?').starts_with('(');
                             }
@@ -1524,7 +1548,43 @@ impl Engine {
                         Kind::Param { name_node, ty, .. } if name_node == d => {
                             return ty.trim_start_matches('?').starts_with('(');
                         }
+                        // 循环变量遍历「元组列表」：元素为元组则循环变量也是元组。
+                        Kind::ForEach { var, iter, .. } => {
+                            if let Kind::VarDecl { name_node, .. } = self.g.kind(*var) {
+                                if name_node == d && self.elem_looks_tuple(*iter) {
+                                    return true;
+                                }
+                            }
+                        }
                         _ => {}
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// 判断某可迭代表达式的元素是否为元组（用于循环变量的元组识别）。
+    fn elem_looks_tuple(&self, iter: NodeId) -> bool {
+        match self.g.kind(iter) {
+            Kind::CollLit { args, .. } => {
+                args.first().map(|a| self.looks_tuple(*a)).unwrap_or(false)
+            }
+            Kind::Call { callee, args } => {
+                if matches!(self.g.kind(*callee), Kind::NameRef { original, .. }
+                    if original == "listOf" || original == "mutableListOf" || original == "arrayListOf")
+                {
+                    return args.first().map(|a| self.looks_tuple(*a)).unwrap_or(false);
+                }
+                false
+            }
+            Kind::NameRef { decl: Some(d), .. } => {
+                for node in &self.g.nodes {
+                    if let Kind::VarDecl { name_node, init: Some(i), .. } = &node.kind {
+                        if name_node == d {
+                            return self.elem_looks_tuple(*i);
+                        }
                     }
                 }
                 false
