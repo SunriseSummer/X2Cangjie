@@ -1,0 +1,4 @@
+Circle(r=5.000000): area=78.539750
+Rectangle(4.000000x6.000000): area=24.000000
+Triangle(b=3.000000,h=8.000000): area=12.000000
+Total shapes: 3

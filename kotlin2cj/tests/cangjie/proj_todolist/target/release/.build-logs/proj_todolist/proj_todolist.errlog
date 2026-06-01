@@ -1,0 +1,9 @@
+[33mwarning[0m: unused import 'std.collection.*'
+ [36m==>[0m /tmp/workspace/SunriseSummer/X2Cangjie/kotlin2cj/tests/cangjie/proj_todolist/src/main.cj:3:1:
+  [36m| [0m
+[36m3[0m [36m| [0mimport std.collection.*[0m
+  [36m| [0m[33m^^^^^^^^^^^^^^^^^^^^^^^ unused import[0m
+  [36m| [0m
+  [36m#[0m [0mnote[0m: this warning can be suppressed by setting the compiler option `-Woff unused`
+
+1 warning generated, 1 warning printed.

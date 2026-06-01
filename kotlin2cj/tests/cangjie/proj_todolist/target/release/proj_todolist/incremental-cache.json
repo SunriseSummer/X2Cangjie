@@ -1,0 +1,14 @@
+{
+  "packageInformation": {
+    "proj_todolist": {
+      "rootPackageName": "proj_todolist",
+      "fileNameHash": "8190769348770083271",
+      "timeStamp": 1780323371,
+      "isBuilt": true,
+      "exeName": "main",
+      "hasSubPkgs": false
+    }
+  },
+  "jsonHash": "8444728674699090299",
+  "rootPackageName": "proj_todolist"
+}

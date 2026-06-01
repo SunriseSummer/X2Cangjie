@@ -1,0 +1,14 @@
+{
+  "packageInformation": {
+    "proj_calculator": {
+      "rootPackageName": "proj_calculator",
+      "fileNameHash": "1529913514470888405",
+      "timeStamp": 1780323369,
+      "isBuilt": true,
+      "exeName": "main",
+      "hasSubPkgs": false
+    }
+  },
+  "jsonHash": "7807575101428671733",
+  "rootPackageName": "proj_calculator"
+}
