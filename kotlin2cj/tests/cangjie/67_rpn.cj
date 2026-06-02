@@ -3,7 +3,7 @@ import std.convert.*
 
 func evalRpn(expr: String): Int64 {
     let stack = ArrayList<Int64>()
-    let tokens = expr.split(" ")
+    let tokens = collectArrayList(expr.split(" ").iterator())
     for (tok in tokens) {
         if (ArrayList(["+", "-", "*", "/"]).contains(tok)) {
             let b = stack.remove(at: stack.size - 1)

@@ -31,11 +31,11 @@ abstract class Observer {
 
 class Logger <: Observer {
     let log = ArrayList<String>()
-    public func onEvent(e: Event) {
+    public override func onEvent(e: Event) {
         match (e) {
             case e: ClickEvent => log.add("Click at (${e.x}, ${e.y})")
             case e: KeyEvent => log.add("Key: ${e.key}")
-            case _ => ()}
+            case _ => throw Exception("")}
     }
     func dump() {
         for (entry in log) {
@@ -47,11 +47,11 @@ class Logger <: Observer {
 class Counter <: Observer {
     var clicks = 0
     var keys = 0
-    public func onEvent(e: Event) {
+    public override func onEvent(e: Event) {
         match (e) {
             case e: ClickEvent => clicks += 1
             case e: KeyEvent => keys += 1
-            case _ => ()}
+            case _ => throw Exception("")}
     }
     func report() {
         println("  Clicks: ${clicks}, Keys: ${keys}")

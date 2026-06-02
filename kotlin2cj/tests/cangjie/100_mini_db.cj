@@ -11,7 +11,7 @@ class Row <: ToString {
     func set(col: Int64, v: String) {
         values[col] = v
     }
-    public func toString(): String {
+    public override func toString(): String {
         return String.join(collectArray<String>(values.iterator().map({e => e.toString()})), delimiter: " | ")
     }
 }

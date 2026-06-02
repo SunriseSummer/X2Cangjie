@@ -9,7 +9,7 @@ class Student <: ToString {
         this.grade = grade
         this.age = age
     }
-    public func toString(): String {
+    public override func toString(): String {
         return "${name}(g=${grade},a=${age})"
     }
 }

@@ -4,7 +4,7 @@ main() {
     let s = "hello,world,foo"
     println(s[0..5])
     println(s[6..])
-    let parts = s.split(",")
+    let parts = collectArrayList(s.split(",").iterator())
     println(parts.size)
     println(parts[0])
     println(parts[parts.size - 1])

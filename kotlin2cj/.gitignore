@@ -1,3 +1,6 @@
 /target
 /tests/generated
-/tests/cangjie
+__pycache__/
+*.pyc
+/tests/cangjie/*/target/
+/tests/cangjie/*/cjpm.lock

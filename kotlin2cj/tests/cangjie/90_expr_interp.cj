@@ -11,10 +11,10 @@ class Num <: Expr {
     init(value: Int64) {
         this.value = value
     }
-    public func eval(): Int64 {
+    public override func eval(): Int64 {
         return value
     }
-    public func show(): String {
+    public override func show(): String {
         return value.toString()
     }
 }
@@ -26,10 +26,10 @@ class Add <: Expr {
         this.left = left
         this.right = right
     }
-    public func eval(): Int64 {
+    public override func eval(): Int64 {
         return left.eval() + right.eval()
     }
-    public func show(): String {
+    public override func show(): String {
         return "(${left.show()} + ${right.show()})"
     }
 }
@@ -41,10 +41,10 @@ class Mul <: Expr {
         this.left = left
         this.right = right
     }
-    public func eval(): Int64 {
+    public override func eval(): Int64 {
         return left.eval() * right.eval()
     }
-    public func show(): String {
+    public override func show(): String {
         return "(${left.show()} * ${right.show()})"
     }
 }
@@ -54,10 +54,10 @@ class Neg <: Expr {
     init(inner: Expr) {
         this.inner = inner
     }
-    public func eval(): Int64 {
+    public override func eval(): Int64 {
         return -inner.eval()
     }
-    public func show(): String {
+    public override func show(): String {
         return "-${inner.show()}"
     }
 }

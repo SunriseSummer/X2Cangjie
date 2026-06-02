@@ -183,7 +183,7 @@ class Inventory {
 
 func wordCount(text: String): HashMap<String, Int64> {
     let counts = HashMap<String, Int64>()
-    let words = text.split(" ")
+    let words = collectArrayList(text.split(" ").iterator())
     for (w in words) {
         if (!(w.isEmpty())) {
             counts[w] = (counts.get(w) ?? 0) + 1
@@ -193,7 +193,7 @@ func wordCount(text: String): HashMap<String, Int64> {
 }
 
 func reverseWords(text: String): String {
-    let words = text.split(" ")
+    let words = collectArrayList(text.split(" ").iterator())
     let out = ArrayList<String>()
     var i = words.size - 1
     while (i >= 0) {

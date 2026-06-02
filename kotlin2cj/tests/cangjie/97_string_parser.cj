@@ -11,7 +11,7 @@ class Record <: ToString {
     func size(): Int64 {
         return fields.size
     }
-    public func toString(): String {
+    public override func toString(): String {
         return String.join(collectArray<String>(fields.iterator().map({e => e.toString()})), delimiter: "|")
     }
 }

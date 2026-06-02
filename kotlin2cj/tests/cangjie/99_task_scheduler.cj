@@ -11,7 +11,7 @@ class Task <: ToString {
         this.priority = priority
         this.duration = duration
     }
-    public func toString(): String {
+    public override func toString(): String {
         return "Task(${name},p=${priority},d=${duration})"
     }
 }
