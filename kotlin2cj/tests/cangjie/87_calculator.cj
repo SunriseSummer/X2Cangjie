@@ -131,7 +131,8 @@ class ShuntingYard {
                     if (!(opstack.isEmpty())) {
                         opstack.remove(at: opstack.size - 1)
                     }
-                case TokType.ASSIGN => opstack.add(t)}
+                case TokType.ASSIGN => opstack.add(t)
+                case _ => ()}
         }
         while (!(opstack.isEmpty())) {
             output.add(opstack[opstack.size - 1])
@@ -426,7 +427,7 @@ main() {
     println("=== Word Frequencies ===")
     let text = "the cat sat on the mat the cat ran"
     let freq = HashMap<String, Int64>()
-    for (w in text.split(" ")) {
+    for (w in collectArrayList(text.split(" ").iterator())) {
         freq[w] = (freq.get(w) ?? 0) + 1
     }
     let keys = ArrayList<String>()

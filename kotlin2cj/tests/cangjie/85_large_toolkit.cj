@@ -243,7 +243,7 @@ func repeatString(s: String, n: Int64): String {
 }
 
 func countWords(s: String): Int64 {
-    let parts = s.split(" ")
+    let parts = collectArrayList(s.split(" ").iterator())
     var c = 0
     for (p in parts) {
         if (!(p.isEmpty())) {
@@ -289,7 +289,7 @@ func caesarShift(s: String, shift: Int64): String {
 
 func acronym(s: String): String {
     let sb = StringBuilder()
-    for (w in s.split(" ")) {
+    for (w in collectArrayList(s.split(" ").iterator())) {
         if (!(w.isEmpty())) {
             sb.append(w[0..1].toAsciiUpper())
         }
@@ -564,10 +564,10 @@ class Square <: Shape {
     init(side: Int64) {
         this.side = side
     }
-    public func area(): Int64 {
+    public override func area(): Int64 {
         return side * side
     }
-    public func name(): String {
+    public override func name(): String {
         return "Square"
     }
 }
@@ -579,10 +579,10 @@ class Rectangle <: Shape {
         this.w = w
         this.h = h
     }
-    public func area(): Int64 {
+    public override func area(): Int64 {
         return w * h
     }
-    public func name(): String {
+    public override func name(): String {
         return "Rectangle"
     }
 }
@@ -593,7 +593,7 @@ abstract class Animal {
         this.name = name
     }
     public func sound(): String
-    func describe(): String {
+    public open func describe(): String {
         return (name + " says ") + sound().toString()
     }
 }
@@ -602,7 +602,7 @@ class Dog <: Animal {
     init(name: String) {
         super(name)
     }
-    public func sound(): String {
+    public override func sound(): String {
         return "Woof"
     }
 }
@@ -611,7 +611,7 @@ class Cat <: Animal {
     init(name: String) {
         super(name)
     }
-    public func sound(): String {
+    public override func sound(): String {
         return "Meow"
     }
 }
@@ -866,7 +866,7 @@ func totalBalance(accounts: ArrayList<Account>): Int64 {
 
 func wordFrequency(text: String): HashMap<String, Int64> {
     let m = HashMap<String, Int64>()
-    for (w in text.split(" ")) {
+    for (w in collectArrayList(text.split(" ").iterator())) {
         if (!(w.isEmpty())) {
             m[w] = (m.get(w) ?? 0) + 1
         }
@@ -876,7 +876,7 @@ func wordFrequency(text: String): HashMap<String, Int64> {
 
 func longestWord(text: String): String {
     var best = ""
-    for (w in text.split(" ")) {
+    for (w in collectArrayList(text.split(" ").iterator())) {
         if (w.size > best.size) {
             best = w
         }
@@ -886,7 +886,7 @@ func longestWord(text: String): String {
 
 func titleCase(text: String): String {
     let out = ArrayList<String>()
-    for (w in text.split(" ")) {
+    for (w in collectArrayList(text.split(" ").iterator())) {
         if (!(w.isEmpty())) {
             out.add(toUpperFirst(w))
         }

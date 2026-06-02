@@ -100,7 +100,7 @@ abstract class Bonus <: Describable {
         this.label = label
     }
     public func amount(base: Int64): Int64
-    public func describe(): String {
+    public open override func describe(): String {
         return "${label} bonus"
     }
 }
@@ -111,7 +111,7 @@ class FlatBonus <: Bonus {
         super(label)
         this.value = value
     }
-    public func amount(base: Int64): Int64 {
+    public override func amount(base: Int64): Int64 {
         return value
     }
 }
@@ -122,7 +122,7 @@ class PercentBonus <: Bonus {
         super(label)
         this.percent = percent
     }
-    public func amount(base: Int64): Int64 {
+    public override func amount(base: Int64): Int64 {
         return (base * percent) / 100
     }
 }
