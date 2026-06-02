@@ -4,6 +4,9 @@
 //! - 本模块定义声明式映射表（类型、成员属性、成员方法、全局函数、import 等）
 //! - render_calls.rs 对复杂/高频 API 保留特殊处理逻辑
 //! - 新增映射只需修改本文件的表数据即可
+//!
+//! 注：映射表数据已就绪，当前由 render.rs / render_calls.rs 内联处理；
+//! 后续重构将统一切换到本模块的数据驱动查表。
 
 /// Kotlin 类型 → 仓颉类型映射。
 pub struct TypeMapping {

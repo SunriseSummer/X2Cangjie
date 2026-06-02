@@ -14,6 +14,7 @@ mod project;
 mod render;
 mod render_calls;
 mod parser;
+#[allow(dead_code)]
 mod stdlib_map;
 
 use std::process::ExitCode;

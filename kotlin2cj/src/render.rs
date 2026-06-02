@@ -162,7 +162,7 @@ impl Engine {
                 None => Some("return".to_string()),
             },
             Kind::Throw { value } => Some(format!("throw {}", self.t(value)?)),
-            Kind::VarDecl { mutable, name_node, ty, init, is_lazy: _ } => {
+            Kind::VarDecl { mutable, name_node, ty, init, is_lazy } => {
                 let name = self.t(name_node)?;
                 if init.is_none() && ty.is_none() {
                     return Some(name);
@@ -170,6 +170,11 @@ impl Engine {
                 let kw = if mutable { "var" } else { "let" };
                 let tys = ty.map(|t| format!(": {}", t)).unwrap_or_default();
                 match init {
+                    Some(i) if is_lazy => {
+                        // `by lazy { expr }` → Cangjie: `let x = { expr }()`
+                        // (仓颉暂无 lazy 内置，用立即调用的 lambda 近似)
+                        Some(format!("{} {}{} = {}", kw, name, tys, self.t(i)?))
+                    }
                     Some(i) => Some(format!("{} {}{} = {}", kw, name, tys, self.t(i)?)),
                     None => Some(format!("{} {}{}", kw, name, tys)),
                 }
@@ -672,15 +677,13 @@ impl Engine {
             let is_companion = companion_members.contains(m);
             if is_companion {
                 // 在函数声明前添加 static 修饰符
-                // 注意：static 和 open 冲突，需去掉 open
-                let mt_no_open = mt.replace("open ", "");
+                // 注意：static 和 open 冲突，需去掉行首修饰符 open
+                let mt_no_open = strip_modifier(&mt, "open");
                 let static_mt = if mt_no_open.starts_with("func ") {
                     format!("static {}", mt_no_open)
                 } else if mt_no_open.starts_with("public ") {
                     // 如果已有修饰符，在 func 前插入 static
                     mt_no_open.replacen("func ", "static func ", 1)
-                } else if mt_no_open.contains(" = ") || mt_no_open.starts_with("let ") || mt_no_open.starts_with("var ") {
-                    format!("static {}", mt_no_open)
                 } else {
                     format!("static {}", mt_no_open)
                 };
@@ -1156,4 +1159,17 @@ pub(crate) fn indent(s: &str, n: usize) -> String {
         .map(|l| if l.is_empty() { String::new() } else { format!("{}{}", pad, l) })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// 从声明字符串中精确剥离修饰符关键字（仅匹配行首的修饰符序列，避免误伤标识符）。
+fn strip_modifier(s: &str, modifier: &str) -> String {
+    let prefix = format!("{} ", modifier);
+    // 仅处理第一行（声明签名行），保护函数体内容
+    if let Some(first_nl) = s.find('\n') {
+        let (head, tail) = s.split_at(first_nl);
+        let cleaned = head.replacen(&prefix, "", 1);
+        format!("{}{}", cleaned, tail)
+    } else {
+        s.replacen(&prefix, "", 1)
+    }
 }
