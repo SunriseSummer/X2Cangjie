@@ -1,0 +1,14 @@
+{
+  "packageInformation": {
+    "proj_dsa": {
+      "rootPackageName": "proj_dsa",
+      "fileNameHash": "2667320846802835047",
+      "timeStamp": 1780368658,
+      "isBuilt": false,
+      "exeName": "main",
+      "hasSubPkgs": false
+    }
+  },
+  "jsonHash": "-3231147938910253190",
+  "rootPackageName": "proj_dsa"
+}
