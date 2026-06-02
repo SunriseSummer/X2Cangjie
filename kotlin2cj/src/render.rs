@@ -369,6 +369,16 @@ impl Engine {
     // ============ 成员访问 ============
 
     fn render_member(&self, base: NodeId, name: &str, safe: bool) -> Option<String> {
+        // super.method() → super.method() (no backtick escaping for super keyword)
+        if let Kind::NameRef { original, .. } = self.g.kind(base) {
+            if original == "`super`" || original == "super" {
+                let mapped = match name {
+                    "length" => "size",
+                    other => other,
+                };
+                return Some(format!("super.{}", crate::parser::safe_name(mapped)));
+            }
+        }
         // Singleton object member access: `ObjectName.member` → `ObjectName.INSTANCE.member`
         if let Kind::NameRef { original, .. } = self.g.kind(base) {
             if self.is_singleton_object(original) {
@@ -550,7 +560,7 @@ impl Engine {
                 if let Kind::Func { name: fname, params, ret, .. } = self.g.kind(*m) {
                     let ps: Vec<String> =
                         params.iter().map(|p| self.t(*p)).collect::<Option<_>>()?;
-                    let r = ret.clone().map(|r| format!(": {}", r)).unwrap_or_default();
+                    let r = ret.clone().map(|r| format!(": {}", r)).unwrap_or_else(|| ": Unit".to_string());
                     ibody.push_str(&format!(
                         "{}func {}({}){}\n",
                         IND,
@@ -662,15 +672,17 @@ impl Engine {
             let is_companion = companion_members.contains(m);
             if is_companion {
                 // 在函数声明前添加 static 修饰符
-                let static_mt = if mt.starts_with("func ") {
-                    format!("static {}", mt)
-                } else if mt.starts_with("public ") || mt.starts_with("open ") {
+                // 注意：static 和 open 冲突，需去掉 open
+                let mt_no_open = mt.replace("open ", "");
+                let static_mt = if mt_no_open.starts_with("func ") {
+                    format!("static {}", mt_no_open)
+                } else if mt_no_open.starts_with("public ") {
                     // 如果已有修饰符，在 func 前插入 static
-                    mt.replacen("func ", "static func ", 1)
-                } else if mt.contains(" = ") || mt.starts_with("let ") || mt.starts_with("var ") {
-                    format!("static {}", mt)
+                    mt_no_open.replacen("func ", "static func ", 1)
+                } else if mt_no_open.contains(" = ") || mt_no_open.starts_with("let ") || mt_no_open.starts_with("var ") {
+                    format!("static {}", mt_no_open)
                 } else {
-                    format!("static {}", mt)
+                    format!("static {}", mt_no_open)
                 };
                 body.push_str(&indent(&static_mt, 1));
             } else {

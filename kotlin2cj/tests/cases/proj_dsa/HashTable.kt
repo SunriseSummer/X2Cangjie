@@ -1,153 +1,110 @@
-data class HashEntry<V>(val key: String, var value: V)
-
-class HashTable<V>(private val capacity: Int = 7) {
-    private val buckets = ArrayList<ArrayList<HashEntry<V>>>()
+class HashTable {
+    private val capacity: Int = 16
+    private val keys = ArrayList<ArrayList<String>>()
+    private val vals = ArrayList<ArrayList<Long>>()
     private var count: Int = 0
 
     init {
-        var index = 0
-        while (index < capacity) {
-            buckets.add(ArrayList<HashEntry<V>>())
-            index++
+        var i = 0
+        while (i < capacity) {
+            keys.add(ArrayList<String>())
+            vals.add(ArrayList<Long>())
+            i++
         }
     }
 
     private fun hash(key: String): Int {
-        var total = 0
-        for (ch in key) {
-            total += ch.code
+        var h = 0
+        var i = 0
+        while (i < key.length) {
+            h = h * 31 + key[i].code
+            i++
         }
-        return total % capacity
+        if (h < 0) h = -h
+        return h % capacity
     }
 
-    fun put(key: String, value: V): V? {
-        val bucket = buckets[hash(key)]
-        for (entry in bucket) {
-            if (entry.key == key) {
-                val oldValue = entry.value
-                entry.value = value
-                return oldValue
+    fun put(key: String, value: Long) {
+        val idx = hash(key)
+        val bucket = keys[idx]
+        var i = 0
+        while (i < bucket.size) {
+            if (bucket[i] == key) {
+                vals[idx][i] = value
+                return
             }
+            i++
         }
-        bucket.add(HashEntry(key, value))
+        bucket.add(key)
+        vals[idx].add(value)
         count++
-        return null
     }
 
-    fun get(key: String): V? {
-        val bucket = buckets[hash(key)]
-        for (entry in bucket) {
-            if (entry.key == key) {
-                return entry.value
+    fun get(key: String): Long? {
+        val idx = hash(key)
+        val bucket = keys[idx]
+        var i = 0
+        while (i < bucket.size) {
+            if (bucket[i] == key) {
+                return vals[idx][i]
             }
+            i++
         }
         return null
     }
 
-    fun remove(key: String): V? {
-        val bucket = buckets[hash(key)]
-        var index = 0
-        while (index < bucket.size) {
-            if (bucket[index].key == key) {
-                val value = bucket[index].value
-                bucket.removeAt(index)
-                count--
-                return value
-            }
-            index++
-        }
-        return null
-    }
-
-    fun containsKey(key: String): Boolean {
+    fun hasKey(key: String): Boolean {
         return get(key) != null
     }
 
-    fun keys(): ArrayList<String> {
-        val result = ArrayList<String>()
-        for (bucket in buckets) {
-            for (entry in bucket) {
-                result.add(entry.key)
+    fun remove(key: String): Boolean {
+        val idx = hash(key)
+        val bucket = keys[idx]
+        var i = 0
+        while (i < bucket.size) {
+            if (bucket[i] == key) {
+                bucket.removeAt(i)
+                vals[idx].removeAt(i)
+                count--
+                return true
             }
+            i++
         }
-        return result
-    }
-
-    fun values(): ArrayList<V> {
-        val result = ArrayList<V>()
-        for (bucket in buckets) {
-            for (entry in bucket) {
-                result.add(entry.value)
-            }
-        }
-        return result
-    }
-
-    fun entries(): ArrayList<HashEntry<V>> {
-        val result = ArrayList<HashEntry<V>>()
-        for (bucket in buckets) {
-            for (entry in bucket) {
-                result.add(HashEntry(entry.key, entry.value))
-            }
-        }
-        return result
+        return false
     }
 
     fun size(): Int {
         return count
     }
 
-    fun isEmpty(): Boolean {
-        return count == 0
-    }
-
-    fun loadFactor(): Double {
-        if (capacity == 0) {
-            return 0.0
-        }
-        return count.toDouble() / capacity.toDouble()
-    }
-
-    fun bucketView(index: Int): String {
-        if (index < 0 || index >= buckets.size) {
-            return "[]"
-        }
-        val builder = StringBuilder()
-        builder.append("[")
-        var entryIndex = 0
-        while (entryIndex < buckets[index].size) {
-            if (entryIndex > 0) {
-                builder.append(", ")
+    fun allKeys(): ArrayList<String> {
+        val result = ArrayList<String>()
+        var i = 0
+        while (i < capacity) {
+            for (key in keys[i]) {
+                result.add(key)
             }
-            val entry = buckets[index][entryIndex]
-            builder.append(entry.key)
-            builder.append("=")
-            builder.append(entry.value)
-            entryIndex++
+            i++
         }
-        builder.append("]")
-        return builder.toString()
-    }
-
-    fun clear() {
-        for (bucket in buckets) {
-            bucket.clear()
-        }
-        count = 0
+        return result
     }
 
     override fun toString(): String {
         val builder = StringBuilder()
         builder.append("HashTable{")
-        var index = 0
-        while (index < buckets.size) {
-            if (index > 0) {
-                builder.append(", ")
+        var first = true
+        var i = 0
+        while (i < capacity) {
+            var j = 0
+            while (j < keys[i].size) {
+                if (!first) builder.append(", ")
+                builder.append(keys[i][j])
+                builder.append("=")
+                builder.append(vals[i][j].toString())
+                first = false
+                j++
             }
-            builder.append(index)
-            builder.append(":")
-            builder.append(bucketView(index))
-            index++
+            i++
         }
         builder.append("}")
         return builder.toString()

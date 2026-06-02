@@ -1,5 +1,0 @@
-[package]
-  cjc-version = "1.0.5"
-  name = "proj_patterns"
-  version = "1.0.0"
-  output-type = "executable"

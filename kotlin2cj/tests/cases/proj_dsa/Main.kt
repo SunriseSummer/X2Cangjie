@@ -1,422 +1,172 @@
-data class SortScenario(val name: String, val values: ArrayList<Int>)
-
-enum class DemoSection(val title: String) {
-    LINKED_LIST("LinkedList Demo"),
-    STACK("Stack Demo"),
-    QUEUE("Queue Demo"),
-    BST("BinarySearchTree Demo"),
-    SORTING("Sorting Demo"),
-    GRAPH("Graph Demo"),
-    HASH_TABLE("HashTable Demo"),
-    PRIORITY_QUEUE("PriorityQueue Demo"),
-    SUMMARY("Project Summary")
+fun printSection(title: String) {
+    println("=== $title ===")
 }
 
-data class DemoResult(val section: String, val checks: Int)
-
-fun LinkedList<Int>.sumValues(): Int {
-    var total = 0
-    for (value in this.toArrayList()) {
-        total += value
+fun printList(list: ArrayList<Long>): String {
+    val builder = StringBuilder()
+    builder.append("[")
+    var i = 0
+    while (i < list.size) {
+        if (i > 0) builder.append(", ")
+        builder.append(list[i].toString())
+        i++
     }
-    return total
+    builder.append("]")
+    return builder.toString()
 }
 
-fun ArrayList<Int>.pipeJoined(): String {
-    return this.joinToString(" | ")
-}
-
-fun printSection(section: DemoSection) {
-    println("")
-    println("=== ${section.title} ===")
-}
-
-fun demoLinkedList(): DemoResult {
-    printSection(DemoSection.LINKED_LIST)
-
-    val list = LinkedList<Int>()
-    println("Initial list: $list")
-    println("Initially empty: ${list.isEmpty()}")
-
-    list.addFirst(3)
-    list.addFirst(2)
-    list.addLast(5)
-    list.addAt(2, 4)
-    list.addAt(0, 1)
-    println("After inserts: $list")
-    println("Join with pipes: ${list.toArrayList().pipeJoined()}")
-    println("Size after inserts: ${list.size()}")
-    println("Contains 4: ${list.contains(4)}")
-    println("Contains 9: ${list.contains(9)}")
-    println("Find 5 -> ${list.find(5)?.value}")
-    println("Index of 4: ${list.indexOf(4)}")
-    println("Value at index 3: ${list.get(3)}")
-
-    val replaced = list.set(3, 40)
-    println("Set index 3 to 40: $replaced")
-    println("After set: $list")
-    println("List sum: ${list.sumValues()}")
-
-    val removedFirst = list.removeFirst()
-    val removedLast = list.removeLast()
-    println("Removed first: $removedFirst")
-    println("Removed last: $removedLast")
-    println("After end removals: $list")
-
-    val removedValue = list.remove(40)
-    println("Removed value 40: $removedValue")
-    println("After removing 40: $list")
-
-    list.addLast(7)
-    list.addLast(8)
-    list.addAt(1, 9)
-    println("After more inserts: $list")
-
-    val removedAt = list.removeAt(2)
-    println("Removed at index 2: $removedAt")
-    println("Before reverse: $list")
-    list.reverse()
-    println("After reverse: $list")
-    println("As array list: ${list.toArrayList()}")
-
-    val copied = list.copy()
-    copied.addLast(99)
-    println("Copied list changed: $copied")
-    println("Original remains: $list")
-
-    list.clear()
-    println("After clear: $list")
-    println("Size after clear: ${list.size()}")
-    println("Empty after clear: ${list.isEmpty()}")
-
-    return DemoResult(DemoSection.LINKED_LIST.title, 18)
-}
-
-fun demoStack(): DemoResult {
-    printSection(DemoSection.STACK)
-
-    val stack = Stack<String>()
-    println("Initial stack: $stack")
-    println("Initially empty: ${stack.isEmpty()}")
-
-    stack.push("red")
-    stack.push("green")
-    stack.push("blue")
-    println("After pushes: $stack")
+fun main() {
+    // Stack tests
+    printSection("Stack")
+    val stack = IntStack()
+    stack.push(10L)
+    stack.push(20L)
+    stack.push(30L)
+    println("Stack: $stack")
     println("Peek: ${stack.peek()}")
-    println("Contains green: ${stack.contains("green")}")
-    println("Contains black: ${stack.contains("black")}")
-
-    val extra = ArrayList<String>()
-    extra.add("white")
-    extra.add("gold")
-    stack.pushAll(extra)
-    println("After pushAll: $stack")
-    println("Reverse copy: ${stack.reverseCopy()}")
+    println("Pop: ${stack.pop()}")
+    println("Pop: ${stack.pop()}")
+    println("Stack after pops: $stack")
     println("Size: ${stack.size()}")
+    println("Empty: ${stack.isEmpty()}")
+    stack.push(40L)
+    stack.push(50L)
+    println("After push 40, 50: $stack")
 
-    println("Pop 1: ${stack.pop()}")
-    println("Pop 2: ${stack.pop()}")
-    println("Stack now: $stack")
-    println("As array list: ${stack.toArrayList()}")
-    println("Peek after pops: ${stack.peek()}")
-
-    stack.clear()
-    println("After clear: $stack")
-    println("Empty after clear: ${stack.isEmpty()}")
-    println("Pop on empty: ${stack.pop()}")
-
-    return DemoResult(DemoSection.STACK.title, 12)
-}
-
-fun demoQueue(): DemoResult {
-    printSection(DemoSection.QUEUE)
-
-    val queue = Queue<Int>()
-    println("Initial queue: $queue")
-    println("Initially empty: ${queue.isEmpty()}")
-
-    queue.enqueue(10)
-    queue.enqueue(20)
-    queue.enqueue(30)
-    println("After enqueues: $queue")
+    // Queue tests
+    printSection("Queue")
+    val queue = IntQueue()
+    queue.enqueue(1L)
+    queue.enqueue(2L)
+    queue.enqueue(3L)
+    queue.enqueue(4L)
+    println("Queue: $queue")
     println("Peek: ${queue.peek()}")
-    println("Contains 20: ${queue.contains(20)}")
-    println("Contains 99: ${queue.contains(99)}")
-
-    val more = ArrayList<Int>()
-    more.add(40)
-    more.add(50)
-    queue.enqueueAll(more)
-    println("After enqueueAll: $queue")
-
-    println("Dequeue 1: ${queue.dequeue()}")
-    println("Dequeue 2: ${queue.dequeue()}")
-    println("Queue now: $queue")
-
-    queue.rotate()
-    println("After rotate: $queue")
-    println("As array list: ${queue.toArrayList()}")
+    println("Dequeue: ${queue.dequeue()}")
+    println("Dequeue: ${queue.dequeue()}")
+    println("Queue after dequeues: $queue")
     println("Size: ${queue.size()}")
+    queue.enqueue(5L)
+    println("After enqueue 5: $queue")
 
-    queue.clear()
-    println("After clear: $queue")
-    println("Empty after clear: ${queue.isEmpty()}")
-    println("Dequeue on empty: ${queue.dequeue()}")
+    // MinHeap tests
+    printSection("MinHeap")
+    val heap = MinHeap()
+    val heapValues = arrayListOf(42L, 15L, 8L, 23L, 4L, 16L, 31L)
+    for (v in heapValues) {
+        heap.insert(v)
+    }
+    println("Heap size: ${heap.size()}")
+    println("Min: ${heap.peek()}")
+    val extracted = ArrayList<Long>()
+    while (!heap.isEmpty()) {
+        extracted.add(heap.extractMin())
+    }
+    println("Extracted in order: ${printList(extracted)}")
 
-    return DemoResult(DemoSection.QUEUE.title, 11)
-}
+    // BST tests
+    printSection("BST")
+    val bst = BST()
+    val bstValues = arrayListOf(50L, 30L, 70L, 20L, 40L, 60L, 80L, 10L, 35L, 45L)
+    for (v in bstValues) {
+        bst.insert(v)
+    }
+    println("BST: $bst")
+    println("Contains 40: ${bst.contains(40L)}")
+    println("Contains 55: ${bst.contains(55L)}")
+    println("Min: ${bst.min()}")
+    println("Max: ${bst.max()}")
+    println("Height: ${bst.height()}")
+    println("Inorder: ${printList(bst.inorder())}")
 
-fun demoBinarySearchTree(): DemoResult {
-    printSection(DemoSection.BST)
+    // Sorting tests
+    printSection("Sorting")
+    val sorter = Sorting()
+    val unsorted = arrayListOf(64L, 34L, 25L, 12L, 22L, 11L, 90L, 1L)
+    println("Original: ${printList(unsorted)}")
+    println("Bubble sort: ${printList(sorter.bubbleSort(unsorted))}")
+    println("Selection sort: ${printList(sorter.selectionSort(unsorted))}")
+    println("Insertion sort: ${printList(sorter.insertionSort(unsorted))}")
+    println("Merge sort: ${printList(sorter.mergeSort(unsorted))}")
 
-    val tree = BinarySearchTree()
-    val values = ArrayList<Int>()
-    values.add(50)
-    values.add(30)
-    values.add(70)
-    values.add(20)
-    values.add(40)
-    values.add(60)
-    values.add(80)
-    values.add(35)
-    values.add(45)
-    values.add(65)
-    tree.insertAll(values)
-
-    println("Tree inorder: ${tree.inorder()}")
-    println("Tree preorder: ${tree.preorder()}")
-    println("Tree postorder: ${tree.postorder()}")
-    println("Tree level order: ${tree.levelOrder()}")
-    println("Contains 45: ${tree.contains(45)}")
-    println("Contains 99: ${tree.contains(99)}")
-    println("Search 60 -> ${tree.search(60)?.value}")
-    println("Min value: ${tree.min()}")
-    println("Max value: ${tree.max()}")
-    println("Height: ${tree.height()}")
-    println("Leaf count: ${tree.countLeaves()}")
-    println("Size: ${tree.size()}")
-    println("Sum: ${tree.sum()}")
-
-    println("Delete leaf 20: ${tree.delete(20)}")
-    println("Inorder after deleting 20: ${tree.inorder()}")
-    println("Delete one-child node 60: ${tree.delete(60)}")
-    println("Inorder after deleting 60: ${tree.inorder()}")
-    println("Delete two-child node 30: ${tree.delete(30)}")
-    println("Inorder after deleting 30: ${tree.inorder()}")
-    println("Delete missing 999: ${tree.delete(999)}")
-    println("Level order after deletions: ${tree.levelOrder()}")
-    println("Height after deletions: ${tree.height()}")
-    println("Leaf count after deletions: ${tree.countLeaves()}")
-    println("Sum after deletions: ${tree.sum()}")
-
-    tree.clear()
-    println("After clear inorder: ${tree.inorder()}")
-    println("Empty after clear: ${tree.isEmpty()}")
-
-    return DemoResult(DemoSection.BST.title, 18)
-}
-
-fun printSortResult(sorter: BaseSorter, scenario: SortScenario) {
-    val sorted = sorter.sort(scenario.values)
-    println("${sorter.name()} on ${scenario.name}: ${sorted}")
-    println("${sorter.name()} sorted check: ${sorter.isSorted(sorted)}")
-}
-
-fun demoSorting(): DemoResult {
-    printSection(DemoSection.SORTING)
-
-    val scenarioAValues = ArrayList<Int>()
-    scenarioAValues.add(9)
-    scenarioAValues.add(4)
-    scenarioAValues.add(7)
-    scenarioAValues.add(1)
-    scenarioAValues.add(3)
-    scenarioAValues.add(8)
-    scenarioAValues.add(2)
-    val scenarioA = SortScenario("scenarioA", scenarioAValues)
-
-    val scenarioBValues = ArrayList<Int>()
-    scenarioBValues.add(5)
-    scenarioBValues.add(1)
-    scenarioBValues.add(5)
-    scenarioBValues.add(2)
-    scenarioBValues.add(9)
-    scenarioBValues.add(2)
-    scenarioBValues.add(0)
-    val scenarioB = SortScenario("scenarioB", scenarioBValues)
-
-    println("Original scenarioA: ${scenarioA.values}")
-    println("Original scenarioB: ${scenarioB.values}")
-
-    val bubble = BubbleSort()
-    val insertion = InsertionSort()
-    val selection = SelectionSort()
-    val merge = MergeSort()
-    val quick = QuickSort()
-
-    printSortResult(bubble, scenarioA)
-    printSortResult(bubble, scenarioB)
-    printSortResult(insertion, scenarioA)
-    printSortResult(insertion, scenarioB)
-    printSortResult(selection, scenarioA)
-    printSortResult(selection, scenarioB)
-    printSortResult(merge, scenarioA)
-    printSortResult(merge, scenarioB)
-    printSortResult(quick, scenarioA)
-    printSortResult(quick, scenarioB)
-
-    println("ScenarioA unchanged: ${scenarioA.values}")
-    println("ScenarioB unchanged: ${scenarioB.values}")
-
-    return DemoResult(DemoSection.SORTING.title, 12)
-}
-
-fun demoGraph(): DemoResult {
-    printSection(DemoSection.GRAPH)
-
+    // Graph tests
+    printSection("Graph")
     val graph = Graph()
     graph.addEdge("A", "B")
     graph.addEdge("A", "C")
     graph.addEdge("B", "D")
+    graph.addEdge("C", "D")
+    graph.addEdge("D", "E")
     graph.addEdge("B", "E")
-    graph.addEdge("C", "F")
-    graph.addEdge("E", "G")
-    graph.addEdge("F", "G")
-    graph.addVertex("H")
-
-    println("Graph structure:\n${graph}")
-    println("Vertices sorted: ${graph.vertices().sorted()}")
-    println("Vertex count: ${graph.vertexCount()}")
-    println("Edge count: ${graph.getEdgeCount()}")
-    println("Neighbors of B: ${graph.neighbors("B")}")
-    println("Degree of G: ${graph.degree("G")}")
-    println("Contains vertex H: ${graph.containsVertex("H")}")
-    println("Contains edge A-C: ${graph.containsEdge("A", "C")}")
+    println("Graph:\n$graph")
+    println("Vertices: ${graph.vertexCount()}")
+    println("Neighbors of A: ${graph.neighbors("A")}")
+    println("Neighbors of D: ${graph.neighbors("D")}")
     println("BFS from A: ${graph.bfs("A")}")
     println("DFS from A: ${graph.dfs("A")}")
-    println("Has path A-G: ${graph.hasPath("A", "G")}")
-    println("Has path H-A: ${graph.hasPath("H", "A")}")
-    println("Shortest path A-G: ${graph.shortestPath("A", "G")}")
-    println("Shortest path D-F: ${graph.shortestPath("D", "F")}")
-    println("Shortest path H-A: ${graph.shortestPath("H", "A")}")
 
-    println("Remove edge F-G: ${graph.removeEdge("F", "G")}")
-    println("Has path F-G after edge removal: ${graph.hasPath("F", "G")}")
-    println("Remove vertex C: ${graph.removeVertex("C")}")
-    println("Graph after removing C:\n${graph}")
-    println("Vertices sorted after removal: ${graph.vertices().sorted()}")
-    println("Edge count after removal: ${graph.getEdgeCount()}")
-
-    return DemoResult(DemoSection.GRAPH.title, 18)
-}
-
-fun demoHashTable(): DemoResult {
-    printSection(DemoSection.HASH_TABLE)
-
-    val table = HashTable<Int>(5)
-    println("Initially empty: ${table.isEmpty()}")
-
-    table.put("ab", 10)
-    table.put("ba", 20)
-    table.put("cab", 30)
-    table.put("dog", 40)
-    table.put("god", 50)
-    println("Table after inserts: $table")
+    // HashTable tests
+    printSection("HashTable")
+    val table = HashTable()
+    table.put("apple", 5L)
+    table.put("banana", 3L)
+    table.put("cherry", 8L)
+    table.put("date", 2L)
+    table.put("elderberry", 7L)
     println("Size: ${table.size()}")
-    println("Get ab: ${table.get("ab")}")
-    println("Get ba: ${table.get("ba")}")
-    println("Get missing: ${table.get("missing")}")
-    println("Contains cab: ${table.containsKey("cab")}")
-    println("Contains cat: ${table.containsKey("cat")}")
-    println("Bucket 0: ${table.bucketView(0)}")
-    println("Bucket 3: ${table.bucketView(3)}")
-    println("Keys sorted: ${table.keys().sorted()}")
-    println("Values sorted: ${table.values().sorted()}")
-    println("Load factor: ${table.loadFactor()}")
+    val apple1 = table.get("apple")
+    val apple1Str = if (apple1 != null) apple1.toString() else "null"
+    println("Get apple: $apple1Str")
+    val banana1 = table.get("banana")
+    val banana1Str = if (banana1 != null) banana1.toString() else "null"
+    println("Get banana: $banana1Str")
+    val fig1 = table.get("fig")
+    val fig1Str = if (fig1 != null) fig1.toString() else "null"
+    println("Get fig: $fig1Str")
+    println("Contains cherry: ${table.hasKey("cherry")}")
+    println("Contains fig: ${table.hasKey("fig")}")
+    table.put("apple", 10L)
+    val apple2 = table.get("apple")
+    val apple2Str = if (apple2 != null) apple2.toString() else "null"
+    println("Updated apple: $apple2Str")
+    table.remove("date")
+    println("After remove date, size: ${table.size()}")
+    println("Contains date: ${table.hasKey("date")}")
 
-    println("Update ba old value: ${table.put("ba", 22)}")
-    println("Table after update: $table")
-    println("Remove cab: ${table.remove("cab")}")
-    println("Remove missing: ${table.remove("missing")}")
-    println("Table after removals: $table")
-    println("Entries snapshot size: ${table.entries().size}")
-
-    table.clear()
-    println("After clear size: ${table.size()}")
-    println("After clear empty: ${table.isEmpty()}")
-
-    return DemoResult(DemoSection.HASH_TABLE.title, 16)
-}
-
-fun demoPriorityQueue(): DemoResult {
-    printSection(DemoSection.PRIORITY_QUEUE)
-
-    val queue = PriorityQueue()
-    println("Initially empty: ${queue.isEmpty()}")
-
-    queue.enqueue(9)
-    queue.enqueue(4)
-    queue.enqueue(7)
-    queue.enqueue(1)
-    queue.enqueue(6)
-    queue.enqueue(2)
-    println("Queue after enqueues: $queue")
-    println("Peek: ${queue.peek()}")
-    println("Contains 7: ${queue.contains(7)}")
-    println("Contains 99: ${queue.contains(99)}")
-    println("Validate heap: ${queue.validateHeap()}")
-    println("Array view: ${queue.toArrayList()}")
-
-    println("Dequeue 1: ${queue.dequeue()}")
-    println("Dequeue 2: ${queue.dequeue()}")
-    println("Queue after dequeues: $queue")
-    println("Peek after dequeues: ${queue.peek()}")
-    println("Validate heap after dequeues: ${queue.validateHeap()}")
-
-    val fromListValues = ArrayList<Int>()
-    fromListValues.add(12)
-    fromListValues.add(3)
-    fromListValues.add(17)
-    fromListValues.add(8)
-    fromListValues.add(5)
-    val built = PriorityQueue.fromList(fromListValues)
-    println("Built from list: $built")
-    println("Built queue peek: ${built.peek()}")
-    println("Built queue validate: ${built.validateHeap()}")
-    println("Built queue dequeue: ${built.dequeue()}")
-    println("Built queue after dequeue: $built")
-
-    queue.clear()
-    println("After clear empty: ${queue.isEmpty()}")
-
-    return DemoResult(DemoSection.PRIORITY_QUEUE.title, 14)
-}
-
-fun demoSummary(results: ArrayList<DemoResult>) {
-    printSection(DemoSection.SUMMARY)
-
-    var totalChecks = 0
-    for (result in results) {
-        println("${result.section}: ${result.checks} checks")
-        totalChecks += result.checks
+    // Combined test: sort heap-extracted values
+    printSection("Combined")
+    val heap2 = MinHeap()
+    val randomVals = arrayListOf(99L, 3L, 45L, 67L, 12L, 89L, 1L, 34L)
+    for (v in randomVals) {
+        heap2.insert(v)
     }
-    println("Total sections: ${results.size}")
-    println("Total checks: $totalChecks")
-}
+    val heapExtracted = ArrayList<Long>()
+    while (!heap2.isEmpty()) {
+        heapExtracted.add(heap2.extractMin())
+    }
+    println("Heap sort result: ${printList(heapExtracted)}")
 
-fun main() {
-    println("Kotlin DSA Project Demo")
-    println("Deterministic data structures and algorithms output")
+    // Stack-based expression evaluation
+    val evalStack = IntStack()
+    // Evaluate: 3 4 + 2 * = (3+4)*2 = 14
+    evalStack.push(3L)
+    evalStack.push(4L)
+    val a = evalStack.pop()
+    val b = evalStack.pop()
+    evalStack.push(a + b)
+    evalStack.push(2L)
+    val c = evalStack.pop()
+    val d = evalStack.pop()
+    evalStack.push(c * d)
+    println("RPN (3 4 + 2 *) = ${evalStack.pop()}")
 
-    val results = ArrayList<DemoResult>()
-    results.add(demoLinkedList())
-    results.add(demoStack())
-    results.add(demoQueue())
-    results.add(demoBinarySearchTree())
-    results.add(demoSorting())
-    results.add(demoGraph())
-    results.add(demoHashTable())
-    results.add(demoPriorityQueue())
-    demoSummary(results)
+    // BFS shortest path via graph
+    val pathGraph = Graph()
+    pathGraph.addEdge("start", "mid1")
+    pathGraph.addEdge("start", "mid2")
+    pathGraph.addEdge("mid1", "end")
+    pathGraph.addEdge("mid2", "mid3")
+    pathGraph.addEdge("mid3", "end")
+    println("BFS from start: ${pathGraph.bfs("start")}")
+    println("DFS from start: ${pathGraph.dfs("start")}")
 }

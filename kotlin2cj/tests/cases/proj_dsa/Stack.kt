@@ -1,77 +1,36 @@
-class Stack<T> {
-    private val items = ArrayList<T>()
+class IntStack {
+    private val items = ArrayList<Long>()
 
-    fun push(value: T) {
+    fun push(value: Long) {
         items.add(value)
     }
 
-    fun pushAll(values: ArrayList<T>) {
-        for (value in values) {
-            push(value)
-        }
+    fun pop(): Long {
+        val last = items[items.size - 1]
+        items.removeAt(items.size - 1)
+        return last
     }
 
-    fun pop(): T? {
-        if (items.isEmpty()) {
-            return null
-        }
-        val lastIndex = items.size - 1
-        val value = items[lastIndex]
-        items.removeAt(lastIndex)
-        return value
-    }
-
-    fun peek(): T? {
-        if (items.isEmpty()) {
-            return null
-        }
+    fun peek(): Long {
         return items[items.size - 1]
     }
 
     fun isEmpty(): Boolean {
-        return items.isEmpty()
+        return items.size == 0
     }
 
     fun size(): Int {
         return items.size
     }
 
-    fun clear() {
-        items.clear()
-    }
-
-    fun contains(value: T): Boolean {
-        return items.contains(value)
-    }
-
-    fun toArrayList(): ArrayList<T> {
-        val copied = ArrayList<T>()
-        for (item in items) {
-            copied.add(item)
-        }
-        return copied
-    }
-
-    fun reverseCopy(): ArrayList<T> {
-        val copied = ArrayList<T>()
-        var index = items.size - 1
-        while (index >= 0) {
-            copied.add(items[index])
-            index--
-        }
-        return copied
-    }
-
     override fun toString(): String {
         val builder = StringBuilder()
         builder.append("Stack[")
-        var index = 0
-        while (index < items.size) {
-            if (index > 0) {
-                builder.append(", ")
-            }
-            builder.append(items[index])
-            index++
+        var i = 0
+        while (i < items.size) {
+            if (i > 0) builder.append(", ")
+            builder.append(items[i].toString())
+            i++
         }
         builder.append("]")
         return builder.toString()

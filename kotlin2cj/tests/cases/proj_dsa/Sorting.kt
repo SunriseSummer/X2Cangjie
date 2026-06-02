@@ -1,210 +1,105 @@
-interface Sorter {
-    fun name(): String
-    fun sort(list: ArrayList<Int>): ArrayList<Int>
-}
-
-abstract class BaseSorter : Sorter {
-    protected fun copyInput(list: ArrayList<Int>): ArrayList<Int> {
-        val copied = ArrayList<Int>()
-        for (value in list) {
-            copied.add(value)
-        }
-        return copied
-    }
-
-    protected fun swap(list: ArrayList<Int>, first: Int, second: Int) {
-        val temp = list[first]
-        list[first] = list[second]
-        list[second] = temp
-    }
-
-    fun isSorted(list: ArrayList<Int>): Boolean {
-        if (list.size <= 1) {
-            return true
-        }
-        var index = 1
-        while (index < list.size) {
-            if (list[index - 1] > list[index]) {
-                return false
-            }
-            index++
-        }
-        return true
-    }
-
-    override fun toString(): String {
-        return name()
-    }
-}
-
-class BubbleSort : BaseSorter() {
-    override fun name(): String {
-        return "BubbleSort"
-    }
-
-    override fun sort(list: ArrayList<Int>): ArrayList<Int> {
-        val result = copyInput(list)
-        var end = result.size - 1
-        while (end > 0) {
-            var index = 0
-            var swapped = false
-            while (index < end) {
-                if (result[index] > result[index + 1]) {
-                    swap(result, index, index + 1)
-                    swapped = true
+class Sorting {
+    fun bubbleSort(arr: ArrayList<Long>): ArrayList<Long> {
+        val result = ArrayList<Long>()
+        for (v in arr) result.add(v)
+        var n = result.size
+        var i = 0
+        while (i < n - 1) {
+            var j = 0
+            while (j < n - 1 - i) {
+                if (result[j] > result[j + 1]) {
+                    val temp = result[j]
+                    result[j] = result[j + 1]
+                    result[j + 1] = temp
                 }
-                index++
+                j++
             }
-            if (!swapped) {
-                break
-            }
-            end--
+            i++
         }
         return result
     }
-}
 
-class InsertionSort : BaseSorter() {
-    override fun name(): String {
-        return "InsertionSort"
-    }
-
-    override fun sort(list: ArrayList<Int>): ArrayList<Int> {
-        val result = copyInput(list)
-        var index = 1
-        while (index < result.size) {
-            val value = result[index]
-            var position = index - 1
-            while (position >= 0 && result[position] > value) {
-                result[position + 1] = result[position]
-                position--
-            }
-            result[position + 1] = value
-            index++
-        }
-        return result
-    }
-}
-
-class SelectionSort : BaseSorter() {
-    override fun name(): String {
-        return "SelectionSort"
-    }
-
-    override fun sort(list: ArrayList<Int>): ArrayList<Int> {
-        val result = copyInput(list)
-        var index = 0
-        while (index < result.size) {
-            var minIndex = index
-            var scan = index + 1
-            while (scan < result.size) {
-                if (result[scan] < result[minIndex]) {
-                    minIndex = scan
+    fun selectionSort(arr: ArrayList<Long>): ArrayList<Long> {
+        val result = ArrayList<Long>()
+        for (v in arr) result.add(v)
+        var n = result.size
+        var i = 0
+        while (i < n - 1) {
+            var minIdx = i
+            var j = i + 1
+            while (j < n) {
+                if (result[j] < result[minIdx]) {
+                    minIdx = j
                 }
-                scan++
+                j++
             }
-            if (minIndex != index) {
-                swap(result, index, minIndex)
+            if (minIdx != i) {
+                val temp = result[i]
+                result[i] = result[minIdx]
+                result[minIdx] = temp
             }
-            index++
+            i++
         }
         return result
     }
-}
 
-class MergeSort : BaseSorter() {
-    override fun name(): String {
-        return "MergeSort"
+    fun insertionSort(arr: ArrayList<Long>): ArrayList<Long> {
+        val result = ArrayList<Long>()
+        for (v in arr) result.add(v)
+        var i = 1
+        while (i < result.size) {
+            val key = result[i]
+            var j = i - 1
+            while (j >= 0 && result[j] > key) {
+                result[j + 1] = result[j]
+                j--
+            }
+            result[j + 1] = key
+            i++
+        }
+        return result
     }
 
-    override fun sort(list: ArrayList<Int>): ArrayList<Int> {
-        val copied = copyInput(list)
-        return mergeSort(copied)
+    fun mergeSort(arr: ArrayList<Long>): ArrayList<Long> {
+        if (arr.size <= 1) return arr
+        val mid = arr.size / 2
+        val leftArr = ArrayList<Long>()
+        val rightArr = ArrayList<Long>()
+        var i = 0
+        while (i < mid) {
+            leftArr.add(arr[i])
+            i++
+        }
+        while (i < arr.size) {
+            rightArr.add(arr[i])
+            i++
+        }
+        val sortedLeft = mergeSort(leftArr)
+        val sortedRight = mergeSort(rightArr)
+        return merge(sortedLeft, sortedRight)
     }
 
-    private fun mergeSort(list: ArrayList<Int>): ArrayList<Int> {
-        if (list.size <= 1) {
-            return list
-        }
-
-        val middle = list.size / 2
-        val left = ArrayList<Int>()
-        val right = ArrayList<Int>()
-
-        var index = 0
-        while (index < middle) {
-            left.add(list[index])
-            index++
-        }
-        while (index < list.size) {
-            right.add(list[index])
-            index++
-        }
-
-        return merge(mergeSort(left), mergeSort(right))
-    }
-
-    private fun merge(left: ArrayList<Int>, right: ArrayList<Int>): ArrayList<Int> {
-        val result = ArrayList<Int>()
-        var leftIndex = 0
-        var rightIndex = 0
-
-        while (leftIndex < left.size && rightIndex < right.size) {
-            if (left[leftIndex] <= right[rightIndex]) {
-                result.add(left[leftIndex])
-                leftIndex++
+    private fun merge(left: ArrayList<Long>, right: ArrayList<Long>): ArrayList<Long> {
+        val result = ArrayList<Long>()
+        var i = 0
+        var j = 0
+        while (i < left.size && j < right.size) {
+            if (left[i] <= right[j]) {
+                result.add(left[i])
+                i++
             } else {
-                result.add(right[rightIndex])
-                rightIndex++
+                result.add(right[j])
+                j++
             }
         }
-
-        while (leftIndex < left.size) {
-            result.add(left[leftIndex])
-            leftIndex++
+        while (i < left.size) {
+            result.add(left[i])
+            i++
         }
-
-        while (rightIndex < right.size) {
-            result.add(right[rightIndex])
-            rightIndex++
+        while (j < right.size) {
+            result.add(right[j])
+            j++
         }
-
         return result
-    }
-}
-
-class QuickSort : BaseSorter() {
-    override fun name(): String {
-        return "QuickSort"
-    }
-
-    override fun sort(list: ArrayList<Int>): ArrayList<Int> {
-        val result = copyInput(list)
-        quickSort(result, 0, result.size - 1)
-        return result
-    }
-
-    private fun quickSort(list: ArrayList<Int>, low: Int, high: Int) {
-        if (low >= high) {
-            return
-        }
-        val pivotIndex = partition(list, low, high)
-        quickSort(list, low, pivotIndex - 1)
-        quickSort(list, pivotIndex + 1, high)
-    }
-
-    private fun partition(list: ArrayList<Int>, low: Int, high: Int): Int {
-        val pivot = list[high]
-        var smaller = low
-        var scan = low
-        while (scan < high) {
-            if (list[scan] <= pivot) {
-                swap(list, smaller, scan)
-                smaller++
-            }
-            scan++
-        }
-        swap(list, smaller, high)
-        return smaller
     }
 }

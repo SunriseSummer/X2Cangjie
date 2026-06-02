@@ -1,76 +1,39 @@
-class Queue<T> {
-    private val items = ArrayList<T>()
+class IntQueue {
+    private val items = ArrayList<Long>()
+    private var head: Int = 0
 
-    fun enqueue(value: T) {
+    fun enqueue(value: Long) {
         items.add(value)
     }
 
-    fun enqueueAll(values: ArrayList<T>) {
-        for (value in values) {
-            enqueue(value)
-        }
-    }
-
-    fun dequeue(): T? {
-        if (items.isEmpty()) {
-            return null
-        }
-        val value = items[0]
-        items.removeAt(0)
+    fun dequeue(): Long {
+        val value = items[head]
+        head++
         return value
     }
 
-    fun peek(): T? {
-        if (items.isEmpty()) {
-            return null
-        }
-        return items[0]
+    fun peek(): Long {
+        return items[head]
     }
 
     fun isEmpty(): Boolean {
-        return items.isEmpty()
+        return head >= items.size
     }
 
     fun size(): Int {
-        return items.size
-    }
-
-    fun clear() {
-        items.clear()
-    }
-
-    fun contains(value: T): Boolean {
-        return items.contains(value)
-    }
-
-    fun rotate() {
-        if (items.size <= 1) {
-            return
-        }
-        val front = dequeue()
-        if (front != null) {
-            enqueue(front)
-        }
-    }
-
-    fun toArrayList(): ArrayList<T> {
-        val copied = ArrayList<T>()
-        for (item in items) {
-            copied.add(item)
-        }
-        return copied
+        return items.size - head
     }
 
     override fun toString(): String {
         val builder = StringBuilder()
         builder.append("Queue[")
-        var index = 0
-        while (index < items.size) {
-            if (index > 0) {
-                builder.append(", ")
-            }
-            builder.append(items[index])
-            index++
+        var i = head
+        var first = true
+        while (i < items.size) {
+            if (!first) builder.append(", ")
+            builder.append(items[i].toString())
+            first = false
+            i++
         }
         builder.append("]")
         return builder.toString()

@@ -2,15 +2,15 @@
 
 - 项目用例总数: 32
 - 翻译成功: 32/32
-- cjpm 编译通过: 30/32
-- 运行输出匹配: 30/32
+- cjpm 编译通过: 32/32
+- 运行输出匹配: 32/32
 
 | 项目 | 翻译 | 编译 | 运行 | 备注 |
 |------|------|------|------|------|
 | proj_bank | ✅ | ✅ | ✅ |  |
 | proj_calculator | ✅ | ✅ | ✅ |  |
 | proj_companion | ✅ | ✅ | ✅ |  |
-| proj_dsa | ✅ | ❌ | ❌ | [33mwarning[0m: possibly confusing line terminator |
+| proj_dsa | ✅ | ✅ | ✅ |  |
 | proj_ecommerce | ✅ | ✅ | ✅ |  |
 | proj_eventbus | ✅ | ✅ | ✅ |  |
 | proj_exception | ✅ | ✅ | ✅ |  |
@@ -24,7 +24,7 @@
 | proj_linkedlist | ✅ | ✅ | ✅ |  |
 | proj_matrix | ✅ | ✅ | ✅ |  |
 | proj_multiclass | ✅ | ✅ | ✅ |  |
-| proj_patterns | ✅ | ❌ | ❌ | [31merror[0m: 'static' and 'open' modifiers conflict on function declaration |
+| proj_patterns | ✅ | ✅ | ✅ |  |
 | proj_pipeline | ✅ | ✅ | ✅ |  |
 | proj_queue | ✅ | ✅ | ✅ |  |
 | proj_recipe | ✅ | ✅ | ✅ |  |
