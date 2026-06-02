@@ -3,7 +3,7 @@
 > 完整列出 kotlin2cj 翻译器对 Kotlin 语言特性的支持情况。
 > ✅ 已支持 · ⚠️ 部分支持 · ❌ 未支持
 >
-> **翻译器版本**：186+32 用例基线（186/186 单文件 + 32/32 项目级全通过）
+> **翻译器版本**：187+33 用例基线（187/187 单文件 + 33/33 项目级全通过）
 > **更新日期**：2026-06-02
 
 ---
@@ -226,7 +226,7 @@
 | `== null` / `!= null` 表达式 | ✅ | `x == null` | `x.isNone()` | 值位置自动转换 |
 | `?.` 链式安全调用 | ✅ | `a?.b?.c` | 嵌套 `if let` | |
 | 可空成员字段检测 | ✅ | `node.prev?.value` | 精确判断字段可空性 | |
-| 空安全集合 `filterNotNull` | ⚠️ | `list.filterNotNull()` | 部分支持 | |
+| 空安全集合 `filterNotNull` | ✅ | `list.filterNotNull()` | 完整支持 | P3 新增 |
 
 ---
 
@@ -297,6 +297,20 @@
 | `distinct` | ✅ | `.distinct()` | | P2 新增 |
 | `groupBy { }` | ✅ | `.groupBy { it.key }` | | P2 新增 |
 | `associate { }` | ✅ | `.associate { it to v }` | | P2 新增 |
+| `associateBy { }` | ✅ | `.associateBy { it.key }` | | P3 新增 |
+| `associateWith { }` | ✅ | `.associateWith { f(it) }` | | P3 新增 |
+| `mapIndexed { }` | ✅ | `.mapIndexed { i, v -> }` | | P3 新增 |
+| `filterNot { }` | ✅ | `.filterNot { cond }` | | P3 新增 |
+| `filterNotNull` | ✅ | `.filterNotNull()` | | P3 新增 |
+| `flatten` | ✅ | `.flatten()` | | P3 新增 |
+| `mapValues { }` | ✅ | `.mapValues { }` | | P3 新增 |
+| `mapKeys { }` | ✅ | `.mapKeys { }` | | P3 新增 |
+| `indexOfFirst { }` | ✅ | `.indexOfFirst { }` | | P3 新增 |
+| `indexOfLast { }` | ✅ | `.indexOfLast { }` | | P3 新增 |
+| `find { }` | ✅ | `.find { }` | | P3 新增 |
+| `findLast { }` | ✅ | `.findLast { }` | | P3 新增 |
+| `forEach { }` | ✅ | `.forEach { }` | for 循环 | P3 新增 |
+| `forEachIndexed { }` | ✅ | `.forEachIndexed { i, v -> }` | | P3 新增 |
 | `toList` / `toMutableList` | ✅ | | | |
 | `average` | ✅ | `.average()` | | |
 | `asSequence()` | ❌ | `.asSequence()` | — | 所有操作均为即时求值 |
