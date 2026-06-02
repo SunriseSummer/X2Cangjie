@@ -515,7 +515,6 @@ fn add_public_visibility(code: &str) -> String {
 fn compute_cross_imports(
     root_pkg: &str,
     my_subdir: &Option<String>,
-    _all_subdirs: &HashSet<String>,
     code: &str,
     name_to_subdir: &HashMap<String, String>,
 ) -> Vec<String> {
@@ -799,7 +798,7 @@ pub fn convert_project(input_dir: &Path, output_dir: &Path) -> Result<ProjectRes
             // 计算跨子包 import（基于代码中实际引用的类型）
             let code_text = blocks.join("\n");
             let cross_imports = if has_subpackages {
-                compute_cross_imports(&cangjie_pkg, &subdir, &all_subdirs, &code_text, &name_to_subdir)
+                compute_cross_imports(&cangjie_pkg, &subdir, &code_text, &name_to_subdir)
             } else {
                 Vec::new()
             };
