@@ -52,19 +52,6 @@ extend String {
     }
 }
 
-extend ArrayList<Int64> {
-    func computeAvg(): Int64 {
-        if (this.size == 0) {
-            return 0
-        }
-        var sum = 0
-        for (n in this) {
-            sum += n
-        }
-        return sum / this.size
-    }
-}
-
 main() {
     println("4 is even: ${4.isEven()}")
     println("7 is even: ${7.isEven()}")

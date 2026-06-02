@@ -362,8 +362,7 @@ fn kt_to_cj_filename(kt_path: &Path) -> String {
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("file");
-    // 转为小写蛇形：MyClass.kt -> my_class.cj (Cangjie 文件名惯例)
-    // 但为了简洁，保持原名，只改扩展名
+    // 保持原名小写，只改扩展名
     format!("{}.cj", stem.to_lowercase())
 }
 
@@ -503,9 +502,27 @@ pub fn convert_project(input_dir: &Path, output_dir: &Path) -> Result<ProjectRes
                 if let Some(path) = name_to_file.get(&block.name) {
                     file_blocks.entry(path.clone()).or_default().push(block.text.clone());
                 } else {
-                    // 未知声明（如 extend 块的目标类型可能对应另一个文件）
-                    // 尝试匹配 extend 的目标类型
-                    file_blocks.entry(fallback_file.clone()).or_default().push(block.text.clone());
+                    // 对于 extend 块，尝试提取目标类型名并映射到对应文件
+                    let first_line = block.text.lines().next().unwrap_or("");
+                    let extend_target = if first_line.trim_start().starts_with("extend ") {
+                        let tokens: Vec<&str> = first_line.split_whitespace().collect();
+                        tokens.get(1).map(|t| {
+                            t.split('<').next().unwrap_or(t)
+                                .split('{').next().unwrap_or(t)
+                                .to_string()
+                        })
+                    } else {
+                        None
+                    };
+                    if let Some(ref target_name) = extend_target {
+                        if let Some(path) = name_to_file.get(target_name) {
+                            file_blocks.entry(path.clone()).or_default().push(block.text.clone());
+                        } else {
+                            file_blocks.entry(fallback_file.clone()).or_default().push(block.text.clone());
+                        }
+                    } else {
+                        file_blocks.entry(fallback_file.clone()).or_default().push(block.text.clone());
+                    }
                 }
             } else {
                 // 无名块（全局变量等）归入 fallback 文件

@@ -2,8 +2,8 @@
 
 - 项目用例总数: 33
 - 翻译成功: 33/33
-- cjpm 编译通过: 33/33
-- 运行输出匹配: 33/33
+- cjpm 编译通过: 30/33
+- 运行输出匹配: 30/33
 
 | 项目 | 翻译 | 编译 | 运行 | 备注 |
 |------|------|------|------|------|
@@ -20,12 +20,12 @@
 | proj_gameworld | ✅ | ✅ | ✅ |  |
 | proj_gradebook | ✅ | ✅ | ✅ |  |
 | proj_hospital | ✅ | ✅ | ✅ |  |
-| proj_inventory | ✅ | ✅ | ✅ |  |
+| proj_inventory | ✅ | ❌ | ❌ | [31merror[0m: Deriving is only supported for classes, enums and structs |
 | proj_library | ✅ | ✅ | ✅ |  |
 | proj_linkedlist | ✅ | ✅ | ✅ |  |
 | proj_matrix | ✅ | ✅ | ✅ |  |
 | proj_multiclass | ✅ | ✅ | ✅ |  |
-| proj_patterns | ✅ | ✅ | ✅ |  |
+| proj_patterns | ✅ | ❌ | ❌ | [31merror[0m: Deriving is only supported for classes, enums and structs |
 | proj_pipeline | ✅ | ✅ | ✅ |  |
 | proj_queue | ✅ | ✅ | ✅ |  |
 | proj_recipe | ✅ | ✅ | ✅ |  |
@@ -33,7 +33,7 @@
 | proj_school | ✅ | ✅ | ✅ |  |
 | proj_sealed_expr | ✅ | ✅ | ✅ |  |
 | proj_shapes | ✅ | ✅ | ✅ |  |
-| proj_statemachine | ✅ | ✅ | ✅ |  |
+| proj_statemachine | ✅ | ❌ | ❌ | [31merror[0m: Deriving is only supported for classes, enums and structs |
 | proj_statistics | ✅ | ✅ | ✅ |  |
 | proj_stringops | ✅ | ✅ | ✅ |  |
 | proj_taskrunner | ✅ | ✅ | ✅ |  |
