@@ -1,0 +1,51 @@
+=== Observer ===
+Subscribers: 2
+All logs:
+[AllLogger] received: User logged in
+[AllLogger] received: File not found error
+[AllLogger] received: Data saved
+[AllLogger] received: Connection error occurred
+Error filter matches: 2
+  [ErrorFilter] matched 'error' in: File not found error
+  [ErrorFilter] matched 'error' in: Connection error occurred
+=== Strategy ===
+Strategy: Add
+10 + 5 = 15
+Strategy: Subtract
+10 - 5 = 5
+Strategy: Multiply
+10 * 5 = 50
+=== Command ===
+Appended: 'Hello'
+Text: 'Hello'
+Appended: ' World'
+Text: 'Hello World'
+Appended: '!'
+Text: 'Hello World!'
+History: [Append('Hello'), Append(' World'), Append('!')]
+Undone append: '!'
+Text after undo: 'Hello World'
+Undone append: ' World'
+Text after undo: 'Hello'
+Cleared text (was: 'Hello')
+Text: ''
+Restored text: 'Hello'
+Text after undo: 'Hello'
+=== Factory ===
+Unknown shape: null
+Circle(radius=5): area=78, perimeter=31
+Rectangle(width=4, height=6): area=24, perimeter=20
+Triangle(base=3, height=4): area=6, perimeter=12
+=== Decorator ===
+Simple coffee costs 5
+Simple coffee + milk costs 7
+Simple coffee + milk + sugar + whip costs 11
+=== State ===
+Initial: RED (Stop)
+RED -> GREEN (Go)
+GREEN -> YELLOW (Caution)
+YELLOW -> RED (Stop)
+RED -> GREEN (Go)
+GREEN -> YELLOW (Caution)
+YELLOW -> RED (Stop)
+Log entries: 6

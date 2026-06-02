@@ -162,7 +162,7 @@ impl Engine {
                 None => Some("return".to_string()),
             },
             Kind::Throw { value } => Some(format!("throw {}", self.t(value)?)),
-            Kind::VarDecl { mutable, name_node, ty, init, is_lazy: _ } => {
+            Kind::VarDecl { mutable, name_node, ty, init, is_lazy } => {
                 let name = self.t(name_node)?;
                 if init.is_none() && ty.is_none() {
                     return Some(name);
@@ -170,6 +170,11 @@ impl Engine {
                 let kw = if mutable { "var" } else { "let" };
                 let tys = ty.map(|t| format!(": {}", t)).unwrap_or_default();
                 match init {
+                    Some(i) if is_lazy => {
+                        // `by lazy { expr }` → Cangjie: `let x = { expr }()`
+                        // (仓颉暂无 lazy 内置，用立即调用的 lambda 近似)
+                        Some(format!("{} {}{} = {}", kw, name, tys, self.t(i)?))
+                    }
                     Some(i) => Some(format!("{} {}{} = {}", kw, name, tys, self.t(i)?)),
                     None => Some(format!("{} {}{}", kw, name, tys)),
                 }
@@ -271,6 +276,10 @@ impl Engine {
                 if is_map_index {
                     return Some(e);
                 }
+                // Call expressions with !! always need unwrapping (user code knows the return is nullable)
+                if matches!(self.g.kind(expr), Kind::Call { .. }) {
+                    return Some(format!("{}.getOrThrow()", e));
+                }
                 // Member access on nullable fields
                 if let Kind::Member { base, name, .. } = self.g.kind(expr) {
                     // Check if this member field is nullable in the class declaration
@@ -365,6 +374,16 @@ impl Engine {
     // ============ 成员访问 ============
 
     fn render_member(&self, base: NodeId, name: &str, safe: bool) -> Option<String> {
+        // super.method() → super.method() (no backtick escaping for super keyword)
+        if let Kind::NameRef { original, .. } = self.g.kind(base) {
+            if original == "`super`" || original == "super" {
+                let mapped = match name {
+                    "length" => "size",
+                    other => other,
+                };
+                return Some(format!("super.{}", crate::parser::safe_name(mapped)));
+            }
+        }
         // Singleton object member access: `ObjectName.member` → `ObjectName.INSTANCE.member`
         if let Kind::NameRef { original, .. } = self.g.kind(base) {
             if self.is_singleton_object(original) {
@@ -400,17 +419,25 @@ impl Engine {
             "code" if !safe && self.looks_char(base) => {
                 return Some(format!("Int64(UInt32({}))", b));
             }
-            "first" if !safe && self.looks_tuple(base) => return Some(format!("{}[0]", b)),
-            "second" if !safe && self.looks_tuple(base) => return Some(format!("{}[1]", b)),
-            "third" if !safe && self.looks_tuple(base) => return Some(format!("{}[2]", b)),
-            "toUpperCase" | "uppercase" => "toAsciiUpper",
-            "toLowerCase" | "lowercase" => "toAsciiLower",
-            "trim" => "trimAscii",
-            "trimStart" => "trimAsciiStart",
-            "trimEnd" => "trimAsciiEnd",
+            "first" if !safe && (self.looks_tuple(base) || !self.provably_non_collection(base)) => return Some(format!("{}[0]", b)),
+            "second" if !safe && (self.looks_tuple(base) || !self.provably_non_collection(base)) => return Some(format!("{}[1]", b)),
+            "third" if !safe && (self.looks_tuple(base) || !self.provably_non_collection(base)) => return Some(format!("{}[2]", b)),
             "keys" => return Some(format!("{}{}keys()", b, dot)),
             "values" => return Some(format!("{}{}values()", b, dot)),
-            other => other,
+            other => {
+                // 数据驱动查表：从 stdlib_map 查找简单方法重命名
+                let receiver_hint = if self.looks_string(base) {
+                    "string"
+                } else if self.looks_char(base) {
+                    "char"
+                } else {
+                    "any"
+                };
+                // 先按精确接收者类型查找，再按 "any" 回退
+                crate::stdlib_map::lookup_method(other, receiver_hint)
+                    .or_else(|| crate::stdlib_map::lookup_method_any(other))
+                    .unwrap_or(other)
+            }
         };
         Some(format!("{}{}{}", b, dot, crate::parser::safe_name(mapped)))
     }
@@ -541,67 +568,76 @@ impl Engine {
         };
         let name_gen = format!("{}{}", name, gen_suffix);
         if is_interface {
-            let mut ibody = String::new();
-            for m in members {
-                if let Kind::Func { name: fname, params, ret, .. } = self.g.kind(*m) {
-                    let ps: Vec<String> =
-                        params.iter().map(|p| self.t(*p)).collect::<Option<_>>()?;
-                    let r = ret.clone().map(|r| format!(": {}", r)).unwrap_or_default();
-                    ibody.push_str(&format!(
-                        "{}func {}({}){}\n",
-                        IND,
-                        fname,
-                        ps.join(", "),
-                        r
-                    ));
-                }
-            }
-            let sup = if interfaces.is_empty() {
-                String::new()
-            } else {
-                format!(" <: {}", interfaces.join(" & "))
-            };
-            if ibody.is_empty() {
-                return Some(format!("interface {}{} {{}}", name_gen, sup));
-            }
-            return Some(format!("interface {}{} {{\n{}}}", name_gen, sup, ibody));
+            self.render_interface(name, &name_gen, members, interfaces)
+        } else if is_singleton {
+            self.render_singleton(name, &name_gen, members, &superclass, interfaces)
+        } else {
+            self.render_regular_class(name, &name_gen, ctor_params, members, superclass, is_open, is_data, is_abstract, interfaces, super_args, init_block, companion_members)
         }
-        // object 单例 → class with private init + static instance
-        if is_singleton {
-            let mut sbody = String::new();
-            sbody.push_str(&format!("{}private init() {{}}\n", IND));
-            sbody.push_str(&format!("{}public static let INSTANCE = {}()\n", IND, name));
-            for m in members {
-                let mt = self.t(*m)?;
-                sbody.push_str(&indent(&mt, 1));
-                sbody.push('\n');
+    }
+
+    /// 渲染 interface 声明。
+    fn render_interface(&self, _name: &str, name_gen: &str, members: &[NodeId], interfaces: &[String]) -> Option<String> {
+        let mut ibody = String::new();
+        for m in members {
+            if let Kind::Func { name: fname, params, ret, .. } = self.g.kind(*m) {
+                let ps: Vec<String> =
+                    params.iter().map(|p| self.t(*p)).collect::<Option<_>>()?;
+                let r = ret.clone().map(|r| format!(": {}", r)).unwrap_or_else(|| ": Unit".to_string());
+                ibody.push_str(&format!(
+                    "{}func {}({}){}\n",
+                    IND,
+                    fname,
+                    ps.join(", "),
+                    r
+                ));
             }
-            let mut ifaces: Vec<String> = Vec::new();
-            if let Some(s) = &superclass {
-                ifaces.push(s.clone());
-            }
-            ifaces.extend(interfaces.iter().cloned());
-            // Auto-add ToString interface if object has a toString() method
-            if !ifaces.contains(&"ToString".to_string()) {
-                let has_to_string = members.iter().any(|&m| {
-                    if let Kind::Func { name: fn_name, is_override, .. } = self.g.kind(m) {
-                        fn_name == "toString" && *is_override
-                    } else {
-                        false
-                    }
-                });
-                if has_to_string {
-                    ifaces.push("ToString".to_string());
-                }
-            }
-            let sup = if ifaces.is_empty() {
-                String::new()
-            } else {
-                format!(" <: {}", ifaces.join(" & "))
-            };
-            return Some(format!("class {}{} {{\n{}}}", name_gen, sup, sbody));
         }
+        let sup = if interfaces.is_empty() {
+            String::new()
+        } else {
+            format!(" <: {}", interfaces.join(" & "))
+        };
+        if ibody.is_empty() {
+            Some(format!("interface {}{} {{}}", name_gen, sup))
+        } else {
+            Some(format!("interface {}{} {{\n{}}}", name_gen, sup, ibody))
+        }
+    }
+
+    /// 渲染 object 单例声明 → class with private init + static INSTANCE。
+    fn render_singleton(&self, name: &str, name_gen: &str, members: &[NodeId], superclass: &Option<String>, interfaces: &[String]) -> Option<String> {
+        let mut sbody = String::new();
+        sbody.push_str(&format!("{}private init() {{}}\n", IND));
+        sbody.push_str(&format!("{}public static let INSTANCE = {}()\n", IND, name));
+        for m in members {
+            let mt = self.t(*m)?;
+            sbody.push_str(&indent(&mt, 1));
+            sbody.push('\n');
+        }
+        let mut ifaces: Vec<String> = Vec::new();
+        if let Some(s) = superclass {
+            ifaces.push(s.clone());
+        }
+        ifaces.extend(interfaces.iter().cloned());
+        if !ifaces.contains(&"ToString".to_string()) {
+            if self.has_override_tostring(members) {
+                ifaces.push("ToString".to_string());
+            }
+        }
+        let sup = if ifaces.is_empty() {
+            String::new()
+        } else {
+            format!(" <: {}", ifaces.join(" & "))
+        };
+        Some(format!("class {}{} {{\n{}}}", name_gen, sup, sbody))
+    }
+
+    /// 渲染普通 class / abstract class / open class / data class。
+    #[allow(clippy::too_many_arguments)]
+    fn render_regular_class(&self, name: &str, name_gen: &str, ctor_params: &[CtorParam], members: &[NodeId], superclass: Option<String>, is_open: bool, is_data: bool, is_abstract: bool, interfaces: &[String], super_args: &[NodeId], init_block: Option<NodeId>, companion_members: &[NodeId]) -> Option<String> {
         let mut body = String::new();
+        // 成员字段声明
         for p in ctor_params {
             match p.kind {
                 CtorParamKind::Val => {
@@ -613,6 +649,7 @@ impl Engine {
                 CtorParamKind::Plain => {}
             }
         }
+        // 构造器
         let super_call: Option<String> = if super_args.is_empty() {
             None
         } else {
@@ -623,7 +660,14 @@ impl Engine {
         if !ctor_params.is_empty() || super_call.is_some() || init_block.is_some() {
             let ps: Vec<String> = ctor_params
                 .iter()
-                .map(|p| format!("{}: {}", p.name, p.ty))
+                .map(|p| {
+                    if let Some(def_id) = p.default {
+                        let def_val = self.t(def_id).unwrap_or_else(|| "None".to_string());
+                        format!("{}!: {} = {}", p.name, p.ty, def_val)
+                    } else {
+                        format!("{}: {}", p.name, p.ty)
+                    }
+                })
                 .collect();
             body.push_str(&format!("{}init({}) {{\n", IND, ps.join(", ")));
             if let Some(sc) = &super_call {
@@ -645,21 +689,18 @@ impl Engine {
             }
             body.push_str(&format!("{}}}\n", IND));
         }
+        // 成员方法
         for m in members {
             let mt = self.t(*m)?;
-            // companion object 成员渲染为 static
             let is_companion = companion_members.contains(m);
             if is_companion {
-                // 在函数声明前添加 static 修饰符
-                let static_mt = if mt.starts_with("func ") {
-                    format!("static {}", mt)
-                } else if mt.starts_with("public ") || mt.starts_with("open ") {
-                    // 如果已有修饰符，在 func 前插入 static
-                    mt.replacen("func ", "static func ", 1)
-                } else if mt.contains(" = ") || mt.starts_with("let ") || mt.starts_with("var ") {
-                    format!("static {}", mt)
+                let mt_no_open = strip_modifier(&mt, "open");
+                let static_mt = if mt_no_open.starts_with("func ") {
+                    format!("static {}", mt_no_open)
+                } else if mt_no_open.starts_with("public ") {
+                    mt_no_open.replacen("func ", "static func ", 1)
                 } else {
-                    format!("static {}", mt)
+                    format!("static {}", mt_no_open)
                 };
                 body.push_str(&indent(&static_mt, 1));
             } else {
@@ -667,6 +708,7 @@ impl Engine {
             }
             body.push('\n');
         }
+        // data class 自动 toString
         let has_user_tostring = members.iter().any(|m| {
             matches!(self.g.kind(*m), Kind::Func { name, .. } if name == "toString")
         });
@@ -681,6 +723,7 @@ impl Engine {
                 IND, IND, IND, name, fields.join(", "), IND
             ));
         }
+        // 类关键字与继承
         let kw = if is_abstract {
             "abstract class"
         } else if is_open {
@@ -696,16 +739,8 @@ impl Engine {
         if is_data {
             ifaces.push("ToString".to_string());
         }
-        // Auto-add ToString interface if class has a toString() method
         if !is_data && !ifaces.contains(&"ToString".to_string()) {
-            let has_to_string = members.iter().any(|&m| {
-                if let Kind::Func { name: fn_name, is_override, .. } = self.g.kind(m) {
-                    fn_name == "toString" && *is_override
-                } else {
-                    false
-                }
-            });
-            if has_to_string {
+            if self.has_override_tostring(members) {
                 ifaces.push("ToString".to_string());
             }
         }
@@ -719,6 +754,17 @@ impl Engine {
         } else {
             Some(format!("{} {}{} {{\n{}}}", kw, name_gen, sup, body))
         }
+    }
+
+    /// 检查成员列表中是否有 override toString() 方法。
+    fn has_override_tostring(&self, members: &[NodeId]) -> bool {
+        members.iter().any(|&m| {
+            if let Kind::Func { name: fn_name, is_override, .. } = self.g.kind(m) {
+                fn_name == "toString" && *is_override
+            } else {
+                false
+            }
+        })
     }
 
     // ============ 枚举渲染 ============
@@ -1002,14 +1048,12 @@ impl Engine {
         }
     }
 
-    /// 查找名为 `fname` 的用户函数，返回其参数（安全名, 是否有默认值）列表。
+    /// 查找名为 `fname` 的用户函数或类构造器，返回其参数（安全名, 是否有默认值）列表。
     pub(crate) fn fn_named_params(&self, fname: &str) -> Option<Vec<(String, bool)>> {
         let target = crate::parser::safe_name(fname);
-        for node in &self.g.nodes {
-            if let Kind::Func { name, params, .. } = &node.kind {
-                if *name != target {
-                    continue;
-                }
+        // 先查函数索引
+        if let Some(&fid) = self.func_index.get(&target) {
+            if let Kind::Func { params, .. } = &self.g.nodes[fid].kind {
                 let mut out = Vec::new();
                 let mut any_default = false;
                 for p in params {
@@ -1028,6 +1072,21 @@ impl Engine {
                     return Some(out);
                 }
                 return None;
+            }
+        }
+        // 再查类索引（构造器默认参数）
+        if let Some(&cid) = self.class_index.get(&target) {
+            if let Kind::Class { ctor_params, .. } = &self.g.nodes[cid].kind {
+                let mut out = Vec::new();
+                let mut any_default = false;
+                for p in ctor_params {
+                    let has = p.default.is_some();
+                    any_default = any_default || has;
+                    out.push((p.name.clone(), has));
+                }
+                if any_default {
+                    return Some(out);
+                }
             }
         }
         None
@@ -1118,4 +1177,17 @@ pub(crate) fn indent(s: &str, n: usize) -> String {
         .map(|l| if l.is_empty() { String::new() } else { format!("{}{}", pad, l) })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// 从声明字符串中精确剥离修饰符关键字（仅匹配行首的修饰符序列，避免误伤标识符）。
+fn strip_modifier(s: &str, modifier: &str) -> String {
+    let prefix = format!("{} ", modifier);
+    // 仅处理第一行（声明签名行），保护函数体内容
+    if let Some(first_nl) = s.find('\n') {
+        let (head, tail) = s.split_at(first_nl);
+        let cleaned = head.replacen(&prefix, "", 1);
+        format!("{}{}", cleaned, tail)
+    } else {
+        s.replacen(&prefix, "", 1)
+    }
 }

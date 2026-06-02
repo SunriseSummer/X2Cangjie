@@ -23,11 +23,9 @@ impl Engine {
 
     /// 名为 `name` 的成员函数（自由函数或类方法）的返回类型是否为集合。
     pub(crate) fn func_ret_is_coll(&self, name: &str) -> bool {
-        for node in &self.g.nodes {
-            if let Kind::Func { name: fname, ret: Some(r), .. } = &node.kind {
-                if fname == name {
-                    return Self::is_coll_type(r);
-                }
+        if let Some(&fid) = self.func_index.get(name) {
+            if let Kind::Func { ret: Some(r), .. } = &self.g.nodes[fid].kind {
+                return Self::is_coll_type(r);
             }
         }
         false
@@ -39,16 +37,15 @@ impl Engine {
     }
 
     fn expr_type_name_depth(&self, id: NodeId, depth: usize) -> Option<String> {
-        if depth > 10 { return None; } // Prevent deep recursion on long assignment chains
+        if depth > 10 { return None; }
         if let Kind::NameRef { decl: Some(d), .. } = self.g.kind(id) {
-            for node in &self.g.nodes {
-                match &node.kind {
-                    Kind::VarDecl { name_node, ty, init, .. } if name_node == d => {
+            if let Some(&decl_id) = self.decl_index.get(d) {
+                match &self.g.nodes[decl_id].kind {
+                    Kind::VarDecl { ty, init, .. } => {
                         if let Some(t) = ty {
                             return Some(t.clone());
                         }
                         if let Some(i) = init {
-                            // Recurse: if init is a NameRef, propagate its type
                             if let Kind::NameRef { .. } = self.g.kind(*i) {
                                 return self.expr_type_name_depth(*i, depth + 1);
                             }
@@ -62,7 +59,7 @@ impl Engine {
                         }
                         return None;
                     }
-                    Kind::Param { name_node, ty, .. } if name_node == d => {
+                    Kind::Param { ty, .. } => {
                         return Some(ty.clone());
                     }
                     _ => {}
@@ -91,23 +88,19 @@ impl Engine {
             // Check member VarDecls in the class that matches base's type
             if let Some(base_ty) = self.expr_type_name(*base) {
                 let clean_ty = base_ty.trim_start_matches('?');
-                for node in &self.g.nodes {
-                    if let Kind::Class { name: cn, ctor_params, members, .. } = &node.kind {
-                        if *cn == clean_ty {
-                            // Check constructor params
-                            for cp in ctor_params {
-                                if cp.name == *name {
-                                    return cp.ty.starts_with('?');
-                                }
+                if let Some(&cid) = self.class_index.get(clean_ty) {
+                    if let Kind::Class { ctor_params, members, .. } = &self.g.nodes[cid].kind {
+                        for cp in ctor_params {
+                            if cp.name == *name {
+                                return cp.ty.starts_with('?');
                             }
-                            // Check member VarDecls
-                            for m in members {
-                                if let Kind::VarDecl { name_node, ty, .. } = self.g.kind(*m) {
-                                    if let Kind::Name { original } = self.g.kind(*name_node) {
-                                        if crate::parser::safe_name(original) == *name {
-                                            if let Some(t) = ty {
-                                                return t.starts_with('?');
-                                            }
+                        }
+                        for m in members {
+                            if let Kind::VarDecl { name_node, ty, .. } = self.g.kind(*m) {
+                                if let Kind::Name { original } = self.g.kind(*name_node) {
+                                    if crate::parser::safe_name(original) == *name {
+                                        if let Some(t) = ty {
+                                            return t.starts_with('?');
                                         }
                                     }
                                 }
@@ -122,25 +115,21 @@ impl Engine {
 
     /// 检查 base.field 中 field 是否在类声明中为可空类型。
     pub(crate) fn is_nullable_member_field(&self, base: NodeId, field: &str) -> bool {
-        // Check field_type_by_name across all classes
         if let Some(ty) = self.field_type_by_name(field) {
             if ty.starts_with('?') {
                 return true;
             }
         }
-        // Check member VarDecls in the base's type class
         if let Some(base_ty) = self.expr_type_name(base) {
             let clean_ty = base_ty.trim_start_matches('?');
-            for node in &self.g.nodes {
-                if let Kind::Class { name: cn, members, .. } = &node.kind {
-                    if *cn == clean_ty {
-                        for m in members {
-                            if let Kind::VarDecl { name_node, ty, .. } = self.g.kind(*m) {
-                                if let Kind::Name { original } = self.g.kind(*name_node) {
-                                    if crate::parser::safe_name(original) == field {
-                                        if let Some(t) = ty {
-                                            return t.starts_with('?');
-                                        }
+            if let Some(&cid) = self.class_index.get(clean_ty) {
+                if let Kind::Class { members, .. } = &self.g.nodes[cid].kind {
+                    for m in members {
+                        if let Kind::VarDecl { name_node, ty, .. } = self.g.kind(*m) {
+                            if let Kind::Name { original } = self.g.kind(*name_node) {
+                                if crate::parser::safe_name(original) == field {
+                                    if let Some(t) = ty {
+                                        return t.starts_with('?');
                                     }
                                 }
                             }
@@ -199,7 +188,7 @@ impl Engine {
 
     /// 图中是否存在名为 `name` 的类声明。
     pub(crate) fn is_class_name(&self, name: &str) -> bool {
-        self.g.nodes.iter().any(|n| matches!(&n.kind, Kind::Class { name: cn, .. } if cn == name))
+        self.class_index.contains_key(name)
     }
 
     /// 判断函数节点是否位于 open 或 abstract 类中（需要 open 修饰符）。
@@ -221,18 +210,20 @@ impl Engine {
 
     /// 查找名为 `name` 的枚举声明，返回其所有枚举项名。
     pub(crate) fn enum_entries(&self, name: &str) -> Option<Vec<String>> {
-        self.g.nodes.iter().find_map(|n| match &n.kind {
-            Kind::Enum { name: en, entries, .. } if en == name && !entries.is_empty() => {
-                Some(entries.iter().map(|e| e.name.clone()).collect())
+        if let Some(&eid) = self.enum_index.get(name) {
+            if let Kind::Enum { entries, .. } = &self.g.nodes[eid].kind {
+                if !entries.is_empty() {
+                    return Some(entries.iter().map(|e| e.name.clone()).collect());
+                }
             }
-            _ => None,
-        })
+        }
+        None
     }
 
     /// 按字段名在所有类的主构造器参数中查找其（已映射的）类型。
     pub(crate) fn field_type_by_name(&self, name: &str) -> Option<String> {
-        for node in &self.g.nodes {
-            if let Kind::Class { ctor_params, .. } = &node.kind {
+        for (_, &cid) in &self.class_index {
+            if let Kind::Class { ctor_params, .. } = &self.g.nodes[cid].kind {
                 for cp in ctor_params {
                     if cp.name == name && cp.kind != crate::node::CtorParamKind::Plain {
                         return Some(cp.ty.clone());
@@ -245,7 +236,7 @@ impl Engine {
 
     /// 图中是否存在名为 `name` 的用户函数声明。
     pub(crate) fn is_user_func(&self, name: &str) -> bool {
-        self.g.nodes.iter().any(|n| matches!(&n.kind, Kind::Func { name: fname, .. } if fname == name))
+        self.func_index.contains_key(name)
     }
 
     /// 子树 `id` 中是否出现对标识符 `name` 的引用（用于识别递归函数）。
@@ -301,11 +292,8 @@ impl Engine {
             Some(t) => t.trim_start_matches('?').to_string(),
             None => return false,
         };
-        for node in &self.g.nodes {
-            if let Kind::Class { name, ctor_params, members, .. } = &node.kind {
-                if *name != cn {
-                    continue;
-                }
+        if let Some(&cid) = self.class_index.get(cn.as_str()) {
+            if let Kind::Class { ctor_params, members, .. } = &self.g.nodes[cid].kind {
                 for p in ctor_params {
                     if p.name == field {
                         return Self::is_coll_type(&p.ty);
@@ -352,9 +340,9 @@ impl Engine {
                 false
             }
             Kind::NameRef { decl: Some(d), .. } => {
-                for node in &self.g.nodes {
-                    match &node.kind {
-                        Kind::VarDecl { name_node, ty, init, .. } if name_node == d => {
+                if let Some(&decl_id) = self.decl_index.get(d) {
+                    match &self.g.nodes[decl_id].kind {
+                        Kind::VarDecl { ty, init, .. } => {
                             if let Some(t) = ty {
                                 return Self::is_coll_type(t);
                             }
@@ -363,7 +351,7 @@ impl Engine {
                             }
                             return false;
                         }
-                        Kind::Param { name_node, ty, .. } if name_node == d => {
+                        Kind::Param { ty, .. } => {
                             return Self::is_coll_type(ty);
                         }
                         _ => {}
@@ -380,11 +368,8 @@ impl Engine {
     pub(crate) fn member_field_collection(&self, base: NodeId, field: &str) -> Option<bool> {
         let cn = self.expr_type_name(base)?;
         let cn = cn.trim_start_matches('?').to_string();
-        for node in &self.g.nodes {
-            if let Kind::Class { name, ctor_params, members, .. } = &node.kind {
-                if *name != cn {
-                    continue;
-                }
+        if let Some(&cid) = self.class_index.get(cn.as_str()) {
+            if let Kind::Class { ctor_params, members, .. } = &self.g.nodes[cid].kind {
                 for p in ctor_params {
                     if p.name == field {
                         return Some(Self::is_coll_type(&p.ty));
@@ -434,9 +419,9 @@ impl Engine {
             }
             Kind::NameRef { decl: Some(d), .. } => {
                 let d = *d;
-                for node in &self.g.nodes {
-                    match &node.kind {
-                        Kind::VarDecl { name_node, ty, init, .. } if *name_node == d => {
+                if let Some(&decl_id) = self.decl_index.get(&d) {
+                    match &self.g.nodes[decl_id].kind {
+                        Kind::VarDecl { ty, init, .. } => {
                             if let Some(t) = ty {
                                 return !Self::is_coll_type(t);
                             }
@@ -445,7 +430,7 @@ impl Engine {
                             }
                             return false;
                         }
-                        Kind::Param { name_node, ty, .. } if *name_node == d => {
+                        Kind::Param { ty, .. } => {
                             return !Self::is_coll_type(ty);
                         }
                         _ => {}
@@ -466,21 +451,18 @@ impl Engine {
             Kind::Index { base, .. } => self.looks_string(*base),
             Kind::NameRef { decl: Some(d), .. } => {
                 let d = *d;
-                for node in &self.g.nodes {
-                    if let Kind::ForEach { var, iter, .. } = &node.kind {
-                        if let Kind::VarDecl { name_node, .. } = self.g.kind(*var) {
-                            if *name_node == d && self.looks_string(*iter) {
-                                return true;
-                            }
+                // 检查 ForEach 循环变量（decl_index 中 ForEach 节点映射）
+                if let Some(&decl_id) = self.decl_index.get(&d) {
+                    if let Kind::ForEach { iter, .. } = &self.g.nodes[decl_id].kind {
+                        if self.looks_string(*iter) {
+                            return true;
                         }
                     }
-                    if let Kind::Param { name_node, ty, .. } = &node.kind {
-                        if *name_node == d {
+                    match &self.g.nodes[decl_id].kind {
+                        Kind::Param { ty, .. } => {
                             return ty == "Char" || ty == "Rune";
                         }
-                    }
-                    if let Kind::VarDecl { name_node, ty, init, .. } = &node.kind {
-                        if *name_node == d {
+                        Kind::VarDecl { ty, init, .. } => {
                             if let Some(t) = ty {
                                 return t == "Char" || t == "Rune";
                             }
@@ -489,6 +471,7 @@ impl Engine {
                                     || matches!(self.g.kind(*i), Kind::Index { base, .. } if self.looks_string(*base));
                             }
                         }
+                        _ => {}
                     }
                 }
                 false
@@ -523,18 +506,15 @@ impl Engine {
             }
             Kind::NameRef { decl: Some(d), .. } => {
                 let d = *d;
-                for node in &self.g.nodes {
-                    if let Kind::ForEach { var, iter, .. } = &node.kind {
-                        if let Kind::VarDecl { name_node, .. } = self.g.kind(*var) {
-                            if *name_node == d && self.iter_elem_is_string(*iter) {
-                                return true;
-                            }
+                // 检查 ForEach 循环变量
+                if let Some(&decl_id) = self.decl_index.get(&d) {
+                    if let Kind::ForEach { iter, .. } = &self.g.nodes[decl_id].kind {
+                        if self.iter_elem_is_string(*iter) {
+                            return true;
                         }
                     }
-                }
-                for node in &self.g.nodes {
-                    match &node.kind {
-                        Kind::VarDecl { name_node, ty, init, .. } if *name_node == d => {
+                    match &self.g.nodes[decl_id].kind {
+                        Kind::VarDecl { ty, init, .. } => {
                             if let Some(t) = ty {
                                 return t == "String";
                             }
@@ -543,7 +523,7 @@ impl Engine {
                             }
                             return false;
                         }
-                        Kind::Param { name_node, ty, .. } if *name_node == d => {
+                        Kind::Param { ty, .. } => {
                             return ty == "String";
                         }
                         _ => {}
@@ -571,10 +551,9 @@ impl Engine {
             }
             Kind::NameRef { decl: Some(d), .. } => {
                 let d = *d;
-                for node in &self.g.nodes {
-                    if let Kind::VarDecl { name_node, ty, init, .. } = &node.kind {
-                        if *name_node == d {
-                            // Check explicit type annotation for String collection
+                if let Some(&decl_id) = self.decl_index.get(&d) {
+                    match &self.g.nodes[decl_id].kind {
+                        Kind::VarDecl { ty, init, .. } => {
                             if let Some(t) = ty {
                                 if t.contains("String") && (t.starts_with("ArrayList") || t.starts_with("Array<") || t.starts_with("HashSet")) {
                                     return true;
@@ -585,11 +564,10 @@ impl Engine {
                             }
                             return false;
                         }
-                    }
-                    if let Kind::Param { name_node, ty, .. } = &node.kind {
-                        if *name_node == d {
+                        Kind::Param { ty, .. } => {
                             return ty.contains("String") && (ty.starts_with("ArrayList") || ty.starts_with("Array<") || ty.starts_with("HashSet"));
                         }
+                        _ => {}
                     }
                 }
                 false
@@ -629,9 +607,12 @@ impl Engine {
                     if matches!(original.as_str(), "maxOf" | "minOf") {
                         return true;
                     }
-                    self.g.nodes.iter().any(|n| matches!(&n.kind,
-                        Kind::Func { name: fname, ret: Some(r), .. }
-                            if fname == original && (r == "Int64" || r == "Float64")))
+                    if let Some(&fid) = self.func_index.get(original) {
+                        if let Kind::Func { ret: Some(r), .. } = &self.g.nodes[fid].kind {
+                            return r == "Int64" || r == "Float64";
+                        }
+                    }
+                    false
                 } else {
                     false
                 }
@@ -691,11 +672,9 @@ impl Engine {
                 matches!(self.g.kind(*callee), Kind::NameRef { original, .. } if original == "Pair" || original == "Triple")
             }
             Kind::NameRef { decl: Some(d), .. } => {
-                for node in &self.g.nodes {
-                    match &node.kind {
-                        Kind::VarDecl { name_node, ty, init, .. }
-                            if name_node == d && (ty.is_some() || init.is_some()) =>
-                        {
+                if let Some(&decl_id) = self.decl_index.get(d) {
+                    match &self.g.nodes[decl_id].kind {
+                        Kind::VarDecl { ty, init, .. } if ty.is_some() || init.is_some() => {
                             if let Some(t) = ty {
                                 return t.trim_start_matches('?').starts_with('(');
                             }
@@ -704,14 +683,12 @@ impl Engine {
                             }
                             return false;
                         }
-                        Kind::Param { name_node, ty, .. } if name_node == d => {
+                        Kind::Param { ty, .. } => {
                             return ty.trim_start_matches('?').starts_with('(');
                         }
-                        Kind::ForEach { var, iter, .. } => {
-                            if let Kind::VarDecl { name_node, .. } = self.g.kind(*var) {
-                                if name_node == d && self.elem_looks_tuple(*iter) {
-                                    return true;
-                                }
+                        Kind::ForEach { iter, .. } => {
+                            if self.elem_looks_tuple(*iter) {
+                                return true;
                             }
                         }
                         _ => {}
@@ -738,11 +715,9 @@ impl Engine {
                 false
             }
             Kind::NameRef { decl: Some(d), .. } => {
-                for node in &self.g.nodes {
-                    if let Kind::VarDecl { name_node, init: Some(i), .. } = &node.kind {
-                        if name_node == d {
-                            return self.elem_looks_tuple(*i);
-                        }
+                if let Some(&decl_id) = self.decl_index.get(d) {
+                    if let Kind::VarDecl { init: Some(i), .. } = &self.g.nodes[decl_id].kind {
+                        return self.elem_looks_tuple(*i);
                     }
                 }
                 false
@@ -753,15 +728,15 @@ impl Engine {
 
     /// 检查某 Name 节点所属声明是否为浮点类型。
     pub(crate) fn decl_is_float(&self, name_node: NodeId) -> bool {
-        for node in &self.g.nodes {
-            match &node.kind {
-                Kind::VarDecl { name_node: nn, ty: Some(t), .. } if *nn == name_node => {
+        if let Some(&decl_id) = self.decl_index.get(&name_node) {
+            match &self.g.nodes[decl_id].kind {
+                Kind::VarDecl { ty: Some(t), .. } => {
                     return t == "Float64" || t == "Float32";
                 }
-                Kind::VarDecl { name_node: nn, ty: None, init: Some(i), .. } if *nn == name_node => {
+                Kind::VarDecl { ty: None, init: Some(i), .. } => {
                     return self.looks_float(*i);
                 }
-                Kind::Param { name_node: nn, ty, .. } if *nn == name_node => {
+                Kind::Param { ty, .. } => {
                     return ty == "Float64" || ty == "Float32";
                 }
                 _ => {}
@@ -772,27 +747,21 @@ impl Engine {
 
     /// 检查某 Name 节点所属声明的类型是否为数值类型。
     pub(crate) fn decl_is_numeric(&self, name_node: NodeId) -> bool {
-        for node in &self.g.nodes {
-            match &node.kind {
-                Kind::VarDecl { name_node: nn, ty: Some(t), .. } if *nn == name_node => {
+        if let Some(&decl_id) = self.decl_index.get(&name_node) {
+            match &self.g.nodes[decl_id].kind {
+                Kind::VarDecl { ty: Some(t), .. } => {
                     return t == "Int64" || t == "Float64";
                 }
-                Kind::VarDecl { name_node: nn, ty: None, init: Some(i), .. } if *nn == name_node => {
+                Kind::VarDecl { ty: None, init: Some(i), .. } => {
                     return self.looks_numeric(*i);
                 }
-                Kind::Param { name_node: nn, ty, .. } if *nn == name_node => {
+                Kind::Param { ty, .. } => {
                     return ty == "Int64" || ty == "Float64";
                 }
-                // ForEach loop variable: check if iterated collection has explicit numeric element type
-                Kind::ForEach { var, iter, .. } => {
-                    if let Kind::VarDecl { name_node: nn, .. } = self.g.kind(*var) {
-                        if *nn == name_node {
-                            // Check explicit type annotations for numeric collections
-                            if let Some(ty) = self.expr_type_name(*iter) {
-                                let inner = ty.trim_start_matches("ArrayList<").trim_end_matches('>');
-                                return inner == "Int64" || inner == "Float64" || inner == "Int" || inner == "Double";
-                            }
-                        }
+                Kind::ForEach { iter, .. } => {
+                    if let Some(ty) = self.expr_type_name(*iter) {
+                        let inner = ty.trim_start_matches("ArrayList<").trim_end_matches('>');
+                        return inner == "Int64" || inner == "Float64" || inner == "Int" || inner == "Double";
                     }
                 }
                 _ => {}
@@ -809,9 +778,9 @@ impl Engine {
             }
             Kind::NameRef { decl: Some(d), .. } => {
                 let d = *d;
-                for node in &self.g.nodes {
-                    match &node.kind {
-                        Kind::VarDecl { name_node, ty, init, .. } if *name_node == d => {
+                if let Some(&decl_id) = self.decl_index.get(&d) {
+                    match &self.g.nodes[decl_id].kind {
+                        Kind::VarDecl { ty, init, .. } => {
                             if let Some(t) = ty {
                                 return t == "StringBuilder";
                             }
@@ -820,7 +789,7 @@ impl Engine {
                             }
                             return false;
                         }
-                        Kind::Param { name_node, ty, .. } if *name_node == d => {
+                        Kind::Param { ty, .. } => {
                             return ty == "StringBuilder";
                         }
                         _ => {}
@@ -874,11 +843,9 @@ impl Engine {
 
     /// 检查名称是否为 `object` 单例声明。
     pub(crate) fn is_singleton_object(&self, name: &str) -> bool {
-        for node in &self.g.nodes {
-            if let Kind::Class { name: cn, is_singleton, .. } = &node.kind {
-                if *cn == name && *is_singleton {
-                    return true;
-                }
+        if let Some(&cid) = self.class_index.get(name) {
+            if let Kind::Class { is_singleton, .. } = &self.g.nodes[cid].kind {
+                return *is_singleton;
             }
         }
         false

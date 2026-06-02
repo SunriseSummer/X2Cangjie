@@ -156,6 +156,7 @@ pub struct CtorParam {
     pub kind: CtorParamKind,
     pub name: String,
     pub ty: String,
+    pub default: Option<NodeId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

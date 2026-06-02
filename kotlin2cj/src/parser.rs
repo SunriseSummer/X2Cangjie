@@ -336,11 +336,13 @@ impl Parser {
                 let pname = self.expect_ident()?;
                 self.expect_sym(":")?;
                 let ty = self.parse_type()?;
-                // 跳过默认值
-                if self.eat_sym("=") {
-                    self.parse_expr()?;
-                }
-                params.push(CtorParam { kind, name: safe_name(&pname), ty });
+                // 解析默认值
+                let default = if self.eat_sym("=") {
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
+                params.push(CtorParam { kind, name: safe_name(&pname), ty, default });
                 self.skip_newlines();
                 if !self.eat_sym(",") {
                     break;
@@ -503,11 +505,13 @@ impl Parser {
                 let pname = self.expect_ident()?;
                 self.expect_sym(":")?;
                 let ty = self.parse_type()?;
-                // 跳过默认值
-                if self.eat_sym("=") {
-                    self.parse_expr()?;
-                }
-                ctor_params.push(CtorParam { kind, name: safe_name(&pname), ty });
+                // 解析默认值
+                let default = if self.eat_sym("=") {
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
+                ctor_params.push(CtorParam { kind, name: safe_name(&pname), ty, default });
                 self.skip_newlines();
                 if !self.eat_sym(",") {
                     break;
@@ -1279,6 +1283,11 @@ impl Parser {
             && matches!(&self.toks[self.pos + 1].tok, Tok::Ident(s) if s == kw)
     }
 
+    fn peek_next_is_ident(&self) -> bool {
+        self.pos + 1 < self.toks.len()
+            && matches!(&self.toks[self.pos + 1].tok, Tok::Ident(_))
+    }
+
     /// builder 名后紧跟 `(` 或 `<`（泛型实参）。
     fn peek_after_ident_is_call_or_generic(&self) -> bool {
         if self.pos + 1 < self.toks.len() {
@@ -1681,6 +1690,12 @@ impl Parser {
             return Ok(s);
         }
         let mut s = self.expect_ident()?;
+        // 点号分隔的嵌套类型名 e.g. `Outer.Inner`
+        while self.is_sym(".") && self.peek_next_is_ident() {
+            self.bump(); // eat '.'
+            let part = self.expect_ident()?;
+            s = format!("{}.{}", s, part);
+        }
         if self.eat_sym("<") {
             let mut args = Vec::new();
             loop {

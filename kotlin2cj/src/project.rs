@@ -19,28 +19,6 @@ pub struct ProjectResult {
     pub files_failed: Vec<(PathBuf, String)>,
 }
 
-/// 从 Kotlin 源码中提取 package 声明。
-fn extract_package(src: &str) -> Option<String> {
-    for line in src.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("package ") {
-            return Some(trimmed["package ".len()..].trim().trim_end_matches(';').to_string());
-        }
-        // 跳过空行和注释
-        if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with("/*") {
-            continue;
-        }
-        // 遇到 import 或其他内容则停止
-        if trimmed.starts_with("import ") || trimmed.starts_with("fun ")
-            || trimmed.starts_with("class ") || trimmed.starts_with("val ")
-            || trimmed.starts_with("var ") || trimmed.starts_with("object ")
-        {
-            break;
-        }
-    }
-    None
-}
-
 /// 从 Kotlin 源码中提取 import 声明列表。
 fn extract_imports(src: &str) -> Vec<String> {
     let mut imports = Vec::new();
@@ -124,15 +102,16 @@ fn strip_auto_imports(code: &str) -> String {
     lines.join("\n")
 }
 
-/// 翻译单个文件并返回仓颉代码（剥离 import 头）。
-fn translate_file(src: &str) -> Result<String, String> {
+/// 翻译源码，返回 (完整输出含 import, 剥离 import 后的代码体)。
+fn translate_file(src: &str) -> Result<(String, String), String> {
     let toks = crate::lexer::Lexer::new(src).tokenize()?;
     let mut p = crate::parser::Parser::new(toks);
     p.parse_program()?;
     let mut eng = crate::engine::Engine::new(p.g);
     eng.relax();
-    let raw = eng.output();
-    Ok(strip_auto_imports(&raw))
+    let full = eng.output();
+    let stripped = strip_auto_imports(&full);
+    Ok((full, stripped))
 }
 
 /// 执行项目级转换。
@@ -196,24 +175,9 @@ pub fn convert_project(input_dir: &Path, output_dir: &Path) -> Result<ProjectRes
         merged_source.push('\n');
     }
 
-    // 5. 统一翻译合并后的源码
-    let raw_output = match translate_file(&merged_source) {
-        Ok(code) => code,
-        Err(e) => {
-            return Err(format!("翻译失败: {}", e));
-        }
-    };
-
-    // 也需要获取原始输出（含 import）来检测需要哪些 import
-    let full_raw = {
-        let toks = crate::lexer::Lexer::new(&merged_source).tokenize()
-            .map_err(|e| format!("词法分析失败: {}", e))?;
-        let mut p = crate::parser::Parser::new(toks);
-        p.parse_program().map_err(|e| format!("语法分析失败: {}", e))?;
-        let mut eng = crate::engine::Engine::new(p.g);
-        eng.relax();
-        eng.output()
-    };
+    // 5. 统一翻译合并后的源码（一次翻译，同时获取完整输出和剥离 import 的代码体）
+    let (full_raw, raw_output) = translate_file(&merged_source)
+        .map_err(|e| format!("翻译失败: {}", e))?;
 
     // 6. 检测需要哪些 import
     let all_imports_vec: Vec<String> = all_imports.into_iter().collect();

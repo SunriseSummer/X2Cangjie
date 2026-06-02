@@ -3,8 +3,8 @@
 > 完整列出 kotlin2cj 翻译器对 Kotlin 语言特性的支持情况。
 > ✅ 已支持 · ⚠️ 部分支持 · ❌ 未支持
 >
-> **翻译器版本**：178 用例基线（178/178 全通过）
-> **更新日期**：2026-06-01
+> **翻译器版本**：187+33 用例基线（187/187 单文件 + 33/33 项目级全通过）
+> **更新日期**：2026-06-02
 
 ---
 
@@ -226,7 +226,7 @@
 | `== null` / `!= null` 表达式 | ✅ | `x == null` | `x.isNone()` | 值位置自动转换 |
 | `?.` 链式安全调用 | ✅ | `a?.b?.c` | 嵌套 `if let` | |
 | 可空成员字段检测 | ✅ | `node.prev?.value` | 精确判断字段可空性 | |
-| 空安全集合 `filterNotNull` | ⚠️ | `list.filterNotNull()` | 部分支持 | |
+| 空安全集合 `filterNotNull` | ✅ | `list.filterNotNull()` | 完整支持 | P3 新增 |
 
 ---
 
@@ -297,6 +297,20 @@
 | `distinct` | ✅ | `.distinct()` | | P2 新增 |
 | `groupBy { }` | ✅ | `.groupBy { it.key }` | | P2 新增 |
 | `associate { }` | ✅ | `.associate { it to v }` | | P2 新增 |
+| `associateBy { }` | ✅ | `.associateBy { it.key }` | | P3 新增 |
+| `associateWith { }` | ✅ | `.associateWith { f(it) }` | | P3 新增 |
+| `mapIndexed { }` | ✅ | `.mapIndexed { i, v -> }` | | P3 新增 |
+| `filterNot { }` | ✅ | `.filterNot { cond }` | | P3 新增 |
+| `filterNotNull` | ✅ | `.filterNotNull()` | | P3 新增 |
+| `flatten` | ✅ | `.flatten()` | | P3 新增 |
+| `mapValues { }` | ✅ | `.mapValues { }` | | P3 新增 |
+| `mapKeys { }` | ✅ | `.mapKeys { }` | | P3 新增 |
+| `indexOfFirst { }` | ✅ | `.indexOfFirst { }` | | P3 新增 |
+| `indexOfLast { }` | ✅ | `.indexOfLast { }` | | P3 新增 |
+| `find { }` | ✅ | `.find { }` | | P3 新增 |
+| `findLast { }` | ✅ | `.findLast { }` | | P3 新增 |
+| `forEach { }` | ✅ | `.forEach { }` | for 循环 | P3 新增 |
+| `forEachIndexed { }` | ✅ | `.forEachIndexed { i, v -> }` | | P3 新增 |
 | `toList` / `toMutableList` | ✅ | | | |
 | `average` | ✅ | `.average()` | | |
 | `asSequence()` | ❌ | `.asSequence()` | — | 所有操作均为即时求值 |
@@ -443,7 +457,7 @@
 
 | 特性 | 状态 | 备注 |
 |:---|:---:|:---|
-| `by lazy { }` | ❌ | 委托属性机制不支持 |
+| `by lazy { }` | ✅ | IIFE 模式 `({ => expr })()` |
 | `by Delegates.observable()` | ❌ | |
 | `by Delegates.vetoable()` | ❌ | |
 | `by map` (Map 委托) | ❌ | |
@@ -483,8 +497,8 @@
 | 中缀函数 `infix` | ❌ | 关键字识别但不特殊渲染 |
 | DSL 构建器 | ❌ | 需要 lambda receiver 类型推断 |
 | 上下文接收者 `context(...)` | ❌ | Kotlin 1.6.20+ 实验特性 |
-| 多文件项目 | ❌ | 当前仅支持单文件翻译 |
-| `package` / `import` | ⚠️ | 声明被识别并跳过；不生成仓颉包结构 |
+| 多文件项目 | ✅ | 目录输入 → 合并翻译 → cjpm 项目（32/32 用例通过） |
+| `package` / `import` | ✅ | 识别并映射为仓颉 `package`/`import std.*` |
 | 解构赋值 `componentN` | ⚠️ | data class / Pair / Triple 的解构已支持 |
 | 尾随 lambda 语法 | ✅ | `f(x) { ... }` → 正常解析 |
 | 标签返回 `return@label` | ⚠️ | 部分场景 |
