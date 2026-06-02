@@ -1,0 +1,37 @@
+{
+  "bin": {},
+  "pkg-build": {
+    "/tmp/workspace/SunriseSummer/X2Cangjie/kotlin2cj/tests/cangjie/proj_inventory/src": {
+      "package": "proj_inventory",
+      "isMacro": false,
+      "accessLevel": "public",
+      "timeStamp": 1780327122,
+      "dependencies": [],
+      "std-dependencies": [
+        {
+          "orPackage": "",
+          "package": "std.collection",
+          "isStd": true,
+          "imports": [
+            {
+              "file": "/tmp/workspace/SunriseSummer/X2Cangjie/kotlin2cj/tests/cangjie/proj_inventory/src/main.cj"
+            }
+          ]
+        },
+        {
+          "orPackage": "",
+          "package": "std.deriving",
+          "isStd": true,
+          "imports": [
+            {
+              "file": "/tmp/workspace/SunriseSummer/X2Cangjie/kotlin2cj/tests/cangjie/proj_inventory/src/main.cj"
+            }
+          ]
+        }
+      ],
+      "testUsed": false,
+      "mockUsed": false
+    }
+  },
+  "pkg-test": {}
+}

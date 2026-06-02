@@ -1,0 +1,45 @@
+Hero enters Dungeon
+
+Hero's inventory (3 items):
+  - Sword
+  - Shield
+  - Potion
+
+--- Battle: Hero vs Goblin ---
+  Hero hits Goblin for 25 damage
+  Goblin hits Hero for 8 damage
+  Hero hits Goblin for 25 damage
+  Goblin defeated!
+  Hero gained 10 XP (total: 10)
+  Hero: 92/100 HP, Level 3, XP=10, Gold=5
+  Enemy Goblin: 0/30 HP, dmg=8 (defeated)
+  Hero rests and heals. Hero: 100/100 HP, Level 3, XP=10, Gold=5
+--- Battle: Hero vs Skeleton ---
+  Hero hits Skeleton for 25 damage
+  Skeleton hits Hero for 12 damage
+  Hero hits Skeleton for 25 damage
+  Skeleton defeated!
+  Hero gained 20 XP (total: 30)
+  Hero: 88/100 HP, Level 3, XP=30, Gold=15
+  Enemy Skeleton: 0/50 HP, dmg=12 (defeated)
+  Hero rests and heals. Hero: 100/100 HP, Level 3, XP=30, Gold=15
+--- Battle: Hero vs Dragon ---
+  Hero hits Dragon for 25 damage
+  Dragon hits Hero for 25 damage
+  Hero hits Dragon for 25 damage
+  Dragon hits Hero for 25 damage
+  Hero hits Dragon for 25 damage
+  Dragon hits Hero for 25 damage
+  Hero hits Dragon for 25 damage
+  Dragon defeated!
+  Hero gained 50 XP (total: 80)
+  Hero: 25/100 HP, Level 3, XP=80, Gold=45
+  Enemy Dragon: 0/80 HP, dmg=25 (defeated)
+  Hero rests and heals. Hero: 45/100 HP, Level 3, XP=80, Gold=45
+
+=== World: Dungeon ===
+Battles completed: 3
+  Hero: 45/100 HP, Level 3, XP=80, Gold=45
+
+Final: Hero: 45/100 HP, Level 3, XP=80, Gold=45
+Gold collected: 45

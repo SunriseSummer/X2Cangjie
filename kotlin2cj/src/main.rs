@@ -1,17 +1,20 @@
 //! kotlin2cj —— 基于自组织临界性（SOC）局部规则的 Kotlin→仓颉翻译器。
 //!
 //! 用法：
-//!   kotlin2cj <input.kt> [-o out.cj]   翻译单个文件
-//!   kotlin2cj <input.kt> --stats       额外打印自组织/雪崩统计
-//!   kotlin2cj --demo-avalanche <in.kt> 演示重命名引发的引用雪崩
+//!   kotlin2cj <input.kt> [-o out.cj]           翻译单个文件
+//!   kotlin2cj <project_dir> [-o output_dir]     翻译整个 Kotlin 项目为 cjpm 项目
+//!   kotlin2cj <input.kt> --stats                额外打印自组织/雪崩统计
+//!   kotlin2cj --demo-avalanche <in.kt>          演示重命名引发的引用雪崩
 
 mod engine;
 mod heuristics;
 mod lexer;
 mod node;
+mod project;
 mod render;
 mod render_calls;
 mod parser;
+mod stdlib_map;
 
 use std::process::ExitCode;
 
@@ -36,7 +39,7 @@ fn translate_soc(src: &str) -> Result<(engine::Engine, Vec<usize>), String> {
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
-        eprintln!("用法: kotlin2cj <input.kt> [-o out.cj] [--stats] [--demo-avalanche]");
+        eprintln!("用法: kotlin2cj <input.kt|project_dir> [-o out.cj|output_dir] [--stats] [--demo-avalanche]");
         return ExitCode::from(2);
     }
 
@@ -69,6 +72,40 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+
+    // 检测输入是目录还是文件
+    let input_path = std::path::Path::new(&input);
+    if input_path.is_dir() {
+        // 项目级转换
+        let out_dir = match &output {
+            Some(p) => std::path::PathBuf::from(p),
+            None => {
+                let name = input_path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("output");
+                input_path.parent().unwrap_or(std::path::Path::new(".")).join(format!("{}_cj", name))
+            }
+        };
+        match project::convert_project(input_path, &out_dir) {
+            Ok(result) => {
+                eprintln!("项目转换完成:");
+                eprintln!("  输出目录: {}", result.output_dir.display());
+                eprintln!("  成功翻译: {} 个文件", result.files_translated);
+                if !result.files_failed.is_empty() {
+                    eprintln!("  翻译失败: {} 个文件", result.files_failed.len());
+                    for (f, e) in &result.files_failed {
+                        eprintln!("    {} : {}", f.display(), e);
+                    }
+                    return ExitCode::FAILURE;
+                }
+                return ExitCode::SUCCESS;
+            }
+            Err(e) => {
+                eprintln!("项目转换失败: {}", e);
+                return ExitCode::FAILURE;
+            }
+        }
+    }
 
     let src = match std::fs::read_to_string(&input) {
         Ok(s) => s,

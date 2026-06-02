@@ -1,0 +1,11 @@
+Reverse 'hello': olleh
+Reverse 'abcde': edcba
+Vowels in 'Hello World': 3
+Vowels in 'xyz': 0
+Is 'racecar' palindrome: true
+Is 'hello' palindrome: false
+Is 'abba' palindrome: true
+Words in 'hello world foo': 3
+Words in '': 0
+Capitalize 'hello': Hello
+Capitalize empty: []

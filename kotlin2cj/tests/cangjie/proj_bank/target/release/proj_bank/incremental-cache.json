@@ -1,0 +1,14 @@
+{
+  "packageInformation": {
+    "proj_bank": {
+      "rootPackageName": "proj_bank",
+      "fileNameHash": "5559986892104609068",
+      "timeStamp": 1780327113,
+      "isBuilt": true,
+      "exeName": "main",
+      "hasSubPkgs": false
+    }
+  },
+  "jsonHash": "-8029753542224676230",
+  "rootPackageName": "proj_bank"
+}

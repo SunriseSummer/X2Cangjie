@@ -1,0 +1,10 @@
+Valid age: 25
+Caught: Age cannot be negative: -5
+Caught: Age too large: 200
+Valid name: Alice
+Caught: Name cannot be empty
+Result: 3
+Error: Division by zero
+Parsed '123': 123
+Parsed '-42': -42
+Caught: Invalid char: a

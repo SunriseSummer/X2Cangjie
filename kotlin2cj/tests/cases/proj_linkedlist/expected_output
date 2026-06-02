@@ -1,0 +1,5 @@
+List: [0, 1, 2, 3]
+Size: 4
+Reversed: [3, 2, 1, 0]
+Removed: 3
+After remove: [2, 1, 0]

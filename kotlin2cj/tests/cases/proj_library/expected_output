@@ -1,0 +1,51 @@
+Initial catalog:
+=== City Library Catalog ===
+  Design Patterns by GoF (1994) [available]
+  Clean Code by Martin (2008) [available]
+  Refactoring by Fowler (1999) [available]
+  SICP by Abelson (1985) [available]
+  TAOCP by Knuth (1968) [available]
+Available: 5/5
+
+Checkouts:
+  Alice checked out 'Design Patterns'
+  Alice checked out 'Refactoring'
+  Bob checked out 'Clean Code'
+
+After checkouts:
+=== City Library Catalog ===
+  Design Patterns by GoF (1994) [checked out]
+  Clean Code by Martin (2008) [checked out]
+  Refactoring by Fowler (1999) [checked out]
+  SICP by Abelson (1985) [available]
+  TAOCP by Knuth (1968) [available]
+Available: 2/5
+
+Returns:
+  Alice returned 'Design Patterns'
+
+After return:
+=== City Library Catalog ===
+  Design Patterns by GoF (1994) [available]
+  Clean Code by Martin (2008) [checked out]
+  Refactoring by Fowler (1999) [checked out]
+  SICP by Abelson (1985) [available]
+  TAOCP by Knuth (1968) [available]
+Available: 3/5
+
+=== Transaction Log ===
+  CHECKOUT: member=1, book=001
+  CHECKOUT: member=1, book=003
+  CHECKOUT: member=2, book=002
+  RETURN: member=1, book=001
+
+History for Alice:
+  Borrowed: Design Patterns
+  Borrowed: Refactoring
+  Returned: Design Patterns
+
+History for Bob:
+  Borrowed: Clean Code
+
+Alice borrows: 1
+Bob borrows: 1

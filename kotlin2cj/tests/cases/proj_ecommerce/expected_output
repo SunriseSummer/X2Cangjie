@@ -1,0 +1,28 @@
+Product Catalog:
+  Laptop: 999 (stock: 10)
+  Mouse: 25 (stock: 100)
+  Keyboard: 75 (stock: 50)
+  Monitor: 450 (stock: 20)
+  Headset: 60 (stock: 80)
+Total products: 5
+
+Cart for Alice:
+  Laptop x1 = 999
+  Mouse x2 = 50
+  Total: 1049
+
+Cart for Bob:
+  Keyboard x1 = 75
+  Headset x1 = 60
+  Total: 135
+
+Order #1 confirmed for Alice, earned 104 points
+Order #2 confirmed for Bob, earned 13 points
+
+--- Order Summary ---
+Order #1 [confirmed] - Alice - 2 items - total: 1049
+Order #2 [confirmed] - Bob - 2 items - total: 135
+Total orders: 2
+
+Customer(Alice, id=1, points=104)
+Customer(Bob, id=2, points=13)

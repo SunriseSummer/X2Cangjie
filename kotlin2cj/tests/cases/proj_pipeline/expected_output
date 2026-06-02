@@ -1,0 +1,29 @@
+Pipeline 'analysis' executing on 'sensors' (8 records)
+  After filter-low: 7 records
+  After scale-x2: 7 records
+  After sort-by-value: 7 records
+
+Results (7 records):
+  #1 temp=50
+  #7 temp=60
+  #3 humidity=120
+  #6 humidity=190
+  #5 pressure=1960
+  #2 pressure=2026
+  #8 pressure=2100
+
+=== Pipeline 'analysis' Stage Stats ===
+  filter-low: in=8, out=7
+  scale-x2: in=7, out=7
+  sort-by-value: in=7, out=7
+
+Pipeline 'summary' executing on 'sensors' (8 records)
+  After big-only: 5 records
+  After sort: 5 records
+
+Summary results (5 records):
+  #3 humidity=60
+  #6 humidity=95
+  #5 pressure=980
+  #2 pressure=1013
+  #8 pressure=1050

@@ -1,0 +1,34 @@
+=== Champions Cup Round Robin ===
+  Match 1: Alice vs Bob: 29-21 (Winner: Alice)
+  Match 2: Alice vs Charlie: 29-34 (Winner: Charlie)
+  Match 3: Alice vs Diana: 29-26 (Winner: Alice)
+  Match 4: Alice vs Eve: 29-18 (Winner: Alice)
+  Match 5: Bob vs Charlie: 21-34 (Winner: Charlie)
+  Match 6: Bob vs Diana: 21-26 (Winner: Diana)
+  Match 7: Bob vs Eve: 21-18 (Winner: Bob)
+  Match 8: Charlie vs Diana: 34-26 (Winner: Charlie)
+  Match 9: Charlie vs Eve: 34-18 (Winner: Charlie)
+  Match 10: Diana vs Eve: 26-18 (Winner: Diana)
+
+=== Standings ===
+  #1 Charlie (skill=9, record=4-0)
+  #2 Alice (skill=8, record=3-1)
+  #3 Diana (skill=7, record=2-2)
+  #4 Bob (skill=6, record=1-3)
+  #5 Eve (skill=5, record=0-4)
+
+Champion: Charlie with 4 wins!
+
+=== Match History (10 matches) ===
+  Alice vs Bob: 29-21 (Winner: Alice)
+  Alice vs Charlie: 29-34 (Winner: Charlie)
+  Alice vs Diana: 29-26 (Winner: Alice)
+  Alice vs Eve: 29-18 (Winner: Alice)
+  Bob vs Charlie: 21-34 (Winner: Charlie)
+  Bob vs Diana: 21-26 (Winner: Diana)
+  Bob vs Eve: 21-18 (Winner: Bob)
+  Charlie vs Diana: 34-26 (Winner: Charlie)
+  Charlie vs Eve: 34-18 (Winner: Charlie)
+  Diana vs Eve: 26-18 (Winner: Diana)
+
+Total matches played: 10

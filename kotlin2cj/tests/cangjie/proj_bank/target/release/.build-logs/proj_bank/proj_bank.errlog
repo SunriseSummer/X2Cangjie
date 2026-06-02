@@ -1,0 +1,21 @@
+[33mwarning[0m: unused function:'totalBalance'
+  [36m==>[0m /tmp/workspace/SunriseSummer/X2Cangjie/kotlin2cj/tests/cangjie/proj_bank/src/main.cj:69:5:
+   [36m| [0m
+[36m69[0m [36m| [0m      func totalBalance(): Float64 {[0m
+   [36m| [0m [33m_[0m[33m____^[0m
+[36m70[0m [36m| [0m[33m|[0m         var total = 0.0[0m
+   [36m| [0m[33m|[0m ...[0m
+[36m75[0m [36m| [0m[33m|[0m     }[0m
+   [36m| [0m[33m|[0m[33m_[0m[33m____^ unused function[0m
+   [36m| [0m
+   [36m#[0m [0mnote[0m: this warning can be suppressed by setting the compiler option `-Woff unused`
+
+[33mwarning[0m: unused variable:'alice'
+  [36m==>[0m /tmp/workspace/SunriseSummer/X2Cangjie/kotlin2cj/tests/cangjie/proj_bank/src/main.cj:80:9:
+   [36m| [0m
+[36m80[0m [36m| [0m    let alice = bank.createAccount("Alice", 1000.0)[0m
+   [36m| [0m        [33m^^^^^ unused variable[0m
+   [36m| [0m
+   [36m#[0m [0mnote[0m: this warning can be suppressed by setting the compiler option `-Woff unused`
+
+2 warnings generated, 2 warnings printed.
