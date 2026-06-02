@@ -1031,44 +1031,42 @@ impl Engine {
     /// 查找名为 `fname` 的用户函数或类构造器，返回其参数（安全名, 是否有默认值）列表。
     pub(crate) fn fn_named_params(&self, fname: &str) -> Option<Vec<(String, bool)>> {
         let target = crate::parser::safe_name(fname);
-        for node in &self.g.nodes {
-            match &node.kind {
-                Kind::Func { name, params, .. } if *name == target => {
-                    let mut out = Vec::new();
-                    let mut any_default = false;
-                    for p in params {
-                        if let Kind::Param { name_node, default, .. } = self.g.kind(*p) {
-                            let pn = if let Kind::Name { original } = self.g.kind(*name_node) {
-                                crate::parser::safe_name(original)
-                            } else {
-                                "_".to_string()
-                            };
-                            let has = default.is_some();
-                            any_default = any_default || has;
-                            out.push((pn, has));
-                        }
-                    }
-                    if any_default {
-                        return Some(out);
-                    }
-                    return None;
-                }
-                Kind::Class { name, ctor_params, .. }
-                    if *name == target =>
-                {
-                    let mut out = Vec::new();
-                    let mut any_default = false;
-                    for p in ctor_params {
-                        let has = p.default.is_some();
+        // 先查函数索引
+        if let Some(&fid) = self.func_index.get(&target) {
+            if let Kind::Func { params, .. } = &self.g.nodes[fid].kind {
+                let mut out = Vec::new();
+                let mut any_default = false;
+                for p in params {
+                    if let Kind::Param { name_node, default, .. } = self.g.kind(*p) {
+                        let pn = if let Kind::Name { original } = self.g.kind(*name_node) {
+                            crate::parser::safe_name(original)
+                        } else {
+                            "_".to_string()
+                        };
+                        let has = default.is_some();
                         any_default = any_default || has;
-                        out.push((p.name.clone(), has));
+                        out.push((pn, has));
                     }
-                    if any_default {
-                        return Some(out);
-                    }
-                    return None;
                 }
-                _ => {}
+                if any_default {
+                    return Some(out);
+                }
+                return None;
+            }
+        }
+        // 再查类索引（构造器默认参数）
+        if let Some(&cid) = self.class_index.get(&target) {
+            if let Kind::Class { ctor_params, .. } = &self.g.nodes[cid].kind {
+                let mut out = Vec::new();
+                let mut any_default = false;
+                for p in ctor_params {
+                    let has = p.default.is_some();
+                    any_default = any_default || has;
+                    out.push((p.name.clone(), has));
+                }
+                if any_default {
+                    return Some(out);
+                }
             }
         }
         None

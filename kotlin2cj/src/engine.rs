@@ -13,7 +13,7 @@
 //! 更接近临界态，同时保持翻译的确定性和合流性。
 
 use crate::node::*;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 pub struct Engine {
     pub g: Graph,
@@ -25,6 +25,15 @@ pub struct Engine {
     /// AMF: 每个节点的雪崩记忆权重——记录该节点历史上引发的级联总规模。
     /// 高权重节点是翻译图中的"应力集中点"，其邻居在后续松弛中优先评估。
     avalanche_memory: Vec<u32>,
+    /// 索引：Name 节点 ID → 声明节点 ID（VarDecl / Param / ForEach.var）。
+    /// 避免 heuristics.rs 中 19 处线性扫描，将 O(n) 查找降为 O(1)。
+    pub(crate) decl_index: HashMap<NodeId, NodeId>,
+    /// 索引：函数名 → Func 节点 ID（取首个匹配）。
+    pub(crate) func_index: HashMap<String, NodeId>,
+    /// 索引：类名 → Class 节点 ID。
+    pub(crate) class_index: HashMap<String, NodeId>,
+    /// 索引：枚举名 → Enum 节点 ID。
+    pub(crate) enum_index: HashMap<String, NodeId>,
 }
 
 impl Engine {
@@ -39,7 +48,43 @@ impl Engine {
         }
         g.link_children();
         let avalanche_memory = vec![0u32; n];
-        Engine { g, last_avalanche: 0, avalanche_sizes: Vec::new(), total_updates: 0, avalanche_memory }
+
+        // 构建名称索引
+        let mut decl_index = HashMap::new();
+        let mut func_index = HashMap::new();
+        let mut class_index = HashMap::new();
+        let mut enum_index = HashMap::new();
+        for id in 0..n {
+            match &g.nodes[id].kind {
+                Kind::VarDecl { name_node, .. } => {
+                    decl_index.insert(*name_node, id);
+                }
+                Kind::Param { name_node, .. } => {
+                    decl_index.insert(*name_node, id);
+                }
+                Kind::Func { name, .. } => {
+                    func_index.entry(name.clone()).or_insert(id);
+                }
+                Kind::Class { name, .. } => {
+                    class_index.insert(name.clone(), id);
+                }
+                Kind::Enum { name, .. } => {
+                    enum_index.insert(name.clone(), id);
+                }
+                Kind::ForEach { var, .. } => {
+                    if let Kind::VarDecl { name_node, .. } = &g.nodes[*var].kind {
+                        // ForEach 循环变量也加入声明索引（指向 ForEach 节点）
+                        decl_index.insert(*name_node, id);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Engine {
+            g, last_avalanche: 0, avalanche_sizes: Vec::new(), total_updates: 0,
+            avalanche_memory, decl_index, func_index, class_index, enum_index,
+        }
     }
 
     // ================================================================
