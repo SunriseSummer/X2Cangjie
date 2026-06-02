@@ -2,11 +2,9 @@
 //!
 //! 将 API 映射与语言特性转换（render_calls.rs / render.rs）解耦：
 //! - 本模块定义声明式映射表（类型、成员属性、成员方法、全局函数、import 等）
+//! - render.rs 的 `render_member()` 通过 `lookup_method()` 查表做简单方法重命名
 //! - render_calls.rs 对复杂/高频 API 保留特殊处理逻辑
-//! - 新增映射只需修改本文件的表数据即可
-//!
-//! 注：映射表数据已就绪，当前由 render.rs / render_calls.rs 内联处理；
-//! 后续重构将统一切换到本模块的数据驱动查表。
+//! - 新增简单映射只需修改本文件的表数据即可
 
 /// Kotlin 类型 → 仓颉类型映射。
 pub struct TypeMapping {
@@ -207,6 +205,14 @@ pub fn lookup_method(kotlin: &str, receiver: &str) -> Option<&'static str> {
     METHOD_MAP
         .iter()
         .find(|m| m.kotlin == kotlin && (m.receiver == receiver || m.receiver == "any"))
+        .map(|m| m.cangjie)
+}
+
+/// 查找方法映射（忽略接收者类型，取首个匹配）。
+pub fn lookup_method_any(kotlin: &str) -> Option<&'static str> {
+    METHOD_MAP
+        .iter()
+        .find(|m| m.kotlin == kotlin)
         .map(|m| m.cangjie)
 }
 

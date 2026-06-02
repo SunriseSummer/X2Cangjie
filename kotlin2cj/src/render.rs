@@ -422,14 +422,22 @@ impl Engine {
             "first" if !safe && (self.looks_tuple(base) || !self.provably_non_collection(base)) => return Some(format!("{}[0]", b)),
             "second" if !safe && (self.looks_tuple(base) || !self.provably_non_collection(base)) => return Some(format!("{}[1]", b)),
             "third" if !safe && (self.looks_tuple(base) || !self.provably_non_collection(base)) => return Some(format!("{}[2]", b)),
-            "toUpperCase" | "uppercase" => "toAsciiUpper",
-            "toLowerCase" | "lowercase" => "toAsciiLower",
-            "trim" => "trimAscii",
-            "trimStart" => "trimAsciiStart",
-            "trimEnd" => "trimAsciiEnd",
             "keys" => return Some(format!("{}{}keys()", b, dot)),
             "values" => return Some(format!("{}{}values()", b, dot)),
-            other => other,
+            other => {
+                // 数据驱动查表：从 stdlib_map 查找简单方法重命名
+                let receiver_hint = if self.looks_string(base) {
+                    "string"
+                } else if self.looks_char(base) {
+                    "char"
+                } else {
+                    "any"
+                };
+                // 先按精确接收者类型查找，再按 "any" 回退
+                crate::stdlib_map::lookup_method(other, receiver_hint)
+                    .or_else(|| crate::stdlib_map::lookup_method_any(other))
+                    .unwrap_or(other)
+            }
         };
         Some(format!("{}{}{}", b, dot, crate::parser::safe_name(mapped)))
     }

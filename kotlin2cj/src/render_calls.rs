@@ -94,13 +94,7 @@ impl Engine {
             "isDigit" | "isLetter" | "isWhitespace" | "isUpperCase" | "isLowerCase"
                 if args.is_empty() && self.looks_char(base) =>
             {
-                let m = match name {
-                    "isDigit" => "isAsciiNumber",
-                    "isLetter" => "isAsciiLetter",
-                    "isWhitespace" => "isAsciiWhiteSpace",
-                    "isUpperCase" => "isAsciiUpperCase",
-                    _ => "isAsciiLowerCase",
-                };
+                let m = crate::stdlib_map::lookup_method(name, "char").unwrap_or(name);
                 Some(format!("{}.{}()", b, m))
             }
             "isLetterOrDigit" if args.is_empty() && self.looks_char(base) => {
