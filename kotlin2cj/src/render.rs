@@ -271,6 +271,10 @@ impl Engine {
                 if is_map_index {
                     return Some(e);
                 }
+                // Call expressions with !! always need unwrapping (user code knows the return is nullable)
+                if matches!(self.g.kind(expr), Kind::Call { .. }) {
+                    return Some(format!("{}.getOrThrow()", e));
+                }
                 // Member access on nullable fields
                 if let Kind::Member { base, name, .. } = self.g.kind(expr) {
                     // Check if this member field is nullable in the class declaration
@@ -400,9 +404,9 @@ impl Engine {
             "code" if !safe && self.looks_char(base) => {
                 return Some(format!("Int64(UInt32({}))", b));
             }
-            "first" if !safe && self.looks_tuple(base) => return Some(format!("{}[0]", b)),
-            "second" if !safe && self.looks_tuple(base) => return Some(format!("{}[1]", b)),
-            "third" if !safe && self.looks_tuple(base) => return Some(format!("{}[2]", b)),
+            "first" if !safe && (self.looks_tuple(base) || !self.provably_non_collection(base)) => return Some(format!("{}[0]", b)),
+            "second" if !safe && (self.looks_tuple(base) || !self.provably_non_collection(base)) => return Some(format!("{}[1]", b)),
+            "third" if !safe && (self.looks_tuple(base) || !self.provably_non_collection(base)) => return Some(format!("{}[2]", b)),
             "toUpperCase" | "uppercase" => "toAsciiUpper",
             "toLowerCase" | "lowercase" => "toAsciiLower",
             "trim" => "trimAscii",
@@ -623,7 +627,14 @@ impl Engine {
         if !ctor_params.is_empty() || super_call.is_some() || init_block.is_some() {
             let ps: Vec<String> = ctor_params
                 .iter()
-                .map(|p| format!("{}: {}", p.name, p.ty))
+                .map(|p| {
+                    if let Some(def_id) = p.default {
+                        let def_val = self.t(def_id).unwrap_or_else(|| "None".to_string());
+                        format!("{}!: {} = {}", p.name, p.ty, def_val)
+                    } else {
+                        format!("{}: {}", p.name, p.ty)
+                    }
+                })
                 .collect();
             body.push_str(&format!("{}init({}) {{\n", IND, ps.join(", ")));
             if let Some(sc) = &super_call {
@@ -1002,32 +1013,47 @@ impl Engine {
         }
     }
 
-    /// 查找名为 `fname` 的用户函数，返回其参数（安全名, 是否有默认值）列表。
+    /// 查找名为 `fname` 的用户函数或类构造器，返回其参数（安全名, 是否有默认值）列表。
     pub(crate) fn fn_named_params(&self, fname: &str) -> Option<Vec<(String, bool)>> {
         let target = crate::parser::safe_name(fname);
         for node in &self.g.nodes {
-            if let Kind::Func { name, params, .. } = &node.kind {
-                if *name != target {
-                    continue;
-                }
-                let mut out = Vec::new();
-                let mut any_default = false;
-                for p in params {
-                    if let Kind::Param { name_node, default, .. } = self.g.kind(*p) {
-                        let pn = if let Kind::Name { original } = self.g.kind(*name_node) {
-                            crate::parser::safe_name(original)
-                        } else {
-                            "_".to_string()
-                        };
-                        let has = default.is_some();
-                        any_default = any_default || has;
-                        out.push((pn, has));
+            match &node.kind {
+                Kind::Func { name, params, .. } if *name == target => {
+                    let mut out = Vec::new();
+                    let mut any_default = false;
+                    for p in params {
+                        if let Kind::Param { name_node, default, .. } = self.g.kind(*p) {
+                            let pn = if let Kind::Name { original } = self.g.kind(*name_node) {
+                                crate::parser::safe_name(original)
+                            } else {
+                                "_".to_string()
+                            };
+                            let has = default.is_some();
+                            any_default = any_default || has;
+                            out.push((pn, has));
+                        }
                     }
+                    if any_default {
+                        return Some(out);
+                    }
+                    return None;
                 }
-                if any_default {
-                    return Some(out);
+                Kind::Class { name, ctor_params, .. }
+                    if *name == target =>
+                {
+                    let mut out = Vec::new();
+                    let mut any_default = false;
+                    for p in ctor_params {
+                        let has = p.default.is_some();
+                        any_default = any_default || has;
+                        out.push((p.name.clone(), has));
+                    }
+                    if any_default {
+                        return Some(out);
+                    }
+                    return None;
                 }
-                return None;
+                _ => {}
             }
         }
         None

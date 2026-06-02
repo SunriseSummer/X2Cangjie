@@ -119,7 +119,7 @@ pub static METHOD_MAP: &[MethodMapping] = &[
     MethodMapping { kotlin: "isLowerCase", cangjie: "isAsciiLowerCase", receiver: "char" },
 
     // 集合通用方法
-    MethodMapping { kotlin: "add", cangjie: "append", receiver: "collection" },
+    MethodMapping { kotlin: "add", cangjie: "add", receiver: "collection" },
     MethodMapping { kotlin: "contains", cangjie: "contains", receiver: "collection" },
     MethodMapping { kotlin: "isEmpty", cangjie: "isEmpty", receiver: "collection" },
     MethodMapping { kotlin: "remove", cangjie: "remove", receiver: "collection" },

@@ -1,0 +1,315 @@
+PROJECT proj_patterns START
+
+=== Observer Pattern ===
+bus topics=metric, alert, status
+metric -> logger, counter, filter
+alert -> logger, audit
+status -> counter
+metric listeners=3
+status listeners=1
+unknown listeners=0
+--- publish round 1 ---
+event 1: metric/sensor-A/temp=21/1
+  message 1: [console] logger logged metric from sensor-A payload=temp=21 priority=1
+  message 2: counter counted metric for sensor-A -> type=1 source=1
+  message 3: filter accepted metric from sensor-A
+event 2: metric/sensor-B/temp=19/2
+  message 1: [console] logger logged metric from sensor-B payload=temp=19 priority=2
+  message 2: counter counted metric for sensor-B -> type=2 source=1
+  message 3: filter accepted metric from sensor-B
+event 3: alert/gateway/battery low/5
+  message 1: [console] logger logged alert from gateway payload=battery low priority=5
+  message 2: audit audit alert:gateway:BATTERY_LOW
+event 4: status/gateway/online/1
+  message 1: counter counted status for gateway -> type=1 source=1
+event 5: unknown/ghost/shadow/9
+  message 1: EventBus[demo-bus] no listeners for unknown
+--- unsubscribe and publish round 2 ---
+unsubscribe filter from metric -> true
+unsubscribe ghost from metric -> false
+event metric/sensor-A/temp=22/2
+  message 1: [console] logger logged metric from sensor-A payload=temp=22 priority=2
+  message 2: counter counted metric for sensor-A -> type=3 source=2
+event alert/gateway/maintenance window/3
+  message 1: [console] logger logged alert from gateway payload=maintenance window priority=3
+  message 2: audit audit alert:gateway:MAINTENANCE_WINDOW
+event status/gateway/offline/4
+  message 1: counter counted status for gateway -> type=2 source=2
+--- observer summaries ---
+accepted metrics=accepted:sensor-A:temp=21, accepted:sensor-B:temp=19
+logger handled=5
+logger last=[console] logger logged alert from gateway payload=maintenance window priority=3
+counter handled=5
+counter types=metric=3, status=2
+counter sources=gateway=2, sensor-A=2, sensor-B=1
+filter handled=2
+filter history=filter accepted metric from sensor-A || filter accepted metric from sensor-B
+audit handled=2
+audit history=audit audit alert:gateway:BATTERY_LOW || audit audit alert:gateway:MAINTENANCE_WINDOW
+publish log=metric@sensor-A:temp=21:1 | metric@sensor-B:temp=19:2 | alert@gateway:battery low:5 | status@gateway:online:1 | unknown@ghost:shadow:9 | metric@sensor-A:temp=22:2 | alert@gateway:maintenance window:3 | status@gateway:offline:4
+
+=== Strategy Pattern ===
+description1=Bubble sort compares adjacent values and bubbles extremes toward the edge
+description2=Selection sort scans the remaining suffix and places one chosen element per pass
+--- single sorts ---
+strategy=bubble-ascending
+before=[9, 3, 7, 1, 7, 2]
+after=[1, 2, 3, 7, 7, 9]
+passes=5 swaps=10
+strategy=selection-descending
+before=[4, 4, 8, 1, 0, 6]
+after=[8, 6, 4, 4, 1, 0]
+passes=6 swaps=4
+strategy=selection-ascending
+before=[5, 2, 9, 2, 8]
+after=[2, 2, 5, 8, 9]
+passes=5 swaps=4
+--- batch sort ---
+batch 1 -> [1, 2, 3]
+batch 2 -> [1, 5, 10, 10]
+batch 3 -> [6, 8]
+--- collection calculations ---
+allNumbers=[9, 3, 7, 1, 7, 2, 4, 4, 8, 1, 0, 6, 5, 2, 9, 2, 8]
+doubled=[18, 6, 14, 2, 14, 4, 8, 8, 16, 2, 0, 12, 10, 4, 18, 4, 16]
+filtered>=5=[9, 7, 7, 8, 6, 5, 9, 8]
+ordered=[0, 1, 1, 2, 2, 2, 3, 4, 4, 5, 6, 7, 7, 8, 8, 9, 9]
+orderedByDistance=[5, 4, 4, 6, 3, 7, 7, 2, 8, 2, 2, 8, 9, 1, 1, 9, 0]
+folded=88
+reducedFiltered=59
+countEven=9 anyLarge=true allPositive=true noneNegative=true sum=78
+reportLines=bubble-ascending: [9, 3, 7, 1, 7, 2] -> [1, 2, 3, 7, 7, 9] passes=5 swaps=10 || selection-descending: [4, 4, 8, 1, 0, 6] -> [8, 6, 4, 4, 1, 0] passes=6 swaps=4 || selection-ascending: [5, 2, 9, 2, 8] -> [2, 2, 5, 8, 9] passes=5 swaps=4
+
+=== Factory Pattern ===
+--- base shapes ---
+shape 1: Circle(radius=3, area=27, perimeter=18)
+  scaled x2 -> Circle(radius=6, area=108, perimeter=36)
+shape 2: Rectangle(width=4, height=5, area=20, perimeter=18)
+  scaled x2 -> Rectangle(width=8, height=10, area=80, perimeter=36)
+shape 3: Triangle(base=6, height=4, side=5, area=12, perimeter=16)
+  scaled x2 -> Triangle(base=12, height=8, side=10, area=48, perimeter=32)
+shape 4: Circle(radius=5, area=75, perimeter=30)
+  scaled x2 -> Circle(radius=10, area=300, perimeter=60)
+shape 5: Rectangle(width=2, height=7, area=14, perimeter=18)
+  scaled x2 -> Rectangle(width=4, height=14, area=56, perimeter=36)
+shape 6: Triangle(base=8, height=6, side=5, area=24, perimeter=18)
+  scaled x2 -> Triangle(base=16, height=12, side=10, area=96, perimeter=36)
+totalArea=172
+totalPerimeter=118
+--- abstract factory showcases ---
+palette=red-theme
+summary=RED-CIRCLE, RED-RECTANGLE, GRAY-RECTANGLE
+  red Circle(radius=4, area=48, perimeter=24)
+  red Rectangle(width=3, height=6, area=18, perimeter=18)
+  gray Rectangle(width=2, height=2, area=4, perimeter=8)
+palette=blue-theme
+summary=BLUE-RECTANGLE, BLUE-TRIANGLE, GRAY-RECTANGLE
+  blue Rectangle(width=5, height=2, area=10, perimeter=14)
+  blue Triangle(base=5, height=4, side=4, area=10, perimeter=13)
+  gray Rectangle(width=2, height=2, area=4, perimeter=8)
+palette=green-theme
+summary=GREEN-TRIANGLE, GREEN-CIRCLE, GRAY-RECTANGLE
+  green Triangle(base=6, height=4, side=5, area=12, perimeter=16)
+  green Circle(radius=2, area=12, perimeter=12)
+  gray Rectangle(width=2, height=2, area=4, perimeter=8)
+--- direct colored creation ---
+directOne=purple Circle(radius=6, area=108, perimeter=36)
+directTwo=purple Triangle(base=7, height=4, side=6, area=14, perimeter=19)
+directThree=null
+
+=== Decorator Pattern ===
+order one
+drink=House Blend coffee + milk x1 + sugar x2
+cost=9
+ingredients=House Blend, water, milk, sugar, sugar
+upperIngredients=HOUSE BLEND, WATER, MILK, SUGAR, SUGAR
+sortedIngredients=House Blend, milk, sugar, sugar, water
+sugarCount=2
+order two
+drink=Dark Roast coffee + whip x2 + milk x2
+cost=15
+ingredients=Dark Roast, water, whip, whip, milk, milk
+upperIngredients=DARK ROAST, WATER, WHIP, WHIP, MILK, MILK
+sortedIngredients=Dark Roast, milk, milk, water, whip, whip
+sugarCount=0
+order three
+drink=Decaf coffee + sugar x1 + whip x1 + milk x1
+cost=11
+ingredients=Decaf, water, sugar, whip, milk
+upperIngredients=DECAF, WATER, SUGAR, WHIP, MILK
+sortedIngredients=Decaf, milk, sugar, water, whip
+sugarCount=1
+cost totals=[9, 15, 11] sum=35 max=15 min=9
+
+=== Composite Pattern ===
+--- tree list ---
++ DIR root (121)
+  + DIR src (52)
+    - FILE Main.kt (26)
+    - FILE Util.kt (26)
+  + DIR docs (24)
+    - FILE README.md (24)
+  + DIR assets (45)
+    - FILE logo.txt (10)
+    + DIR nested (35)
+      - FILE notes.txt (35)
+--- flattened paths ---
+root
+root/src
+root/src/Main.kt
+root/src/Util.kt
+root/docs
+root/docs/README.md
+root/assets
+root/assets/logo.txt
+root/assets/nested
+root/assets/nested/notes.txt
+--- find operations ---
+find Main.kt -> file size=26
+find nested -> directory size=35
+find ghost -> null
+root nodes=10 size=121
+assets children=logo.txt, nested
+remove logo.txt -> true
+remove missing.bin -> false
+assets children after remove=nested
+root nodes after remove=9 size=111
+
+=== Command Pattern ===
+--- execute commands ---
+command 1: Insert(position=5, content=-here)
+  result=insert '-here' at 5
+  text=start-here undo=1 redo=0
+command 2: Replace(target=start, replacement=BEGIN, replaceAll=false)
+  result=replace 'start' with 'BEGIN' count=1
+  text=BEGIN-here undo=2 redo=0
+command 3: Insert(position=0, content=()
+  result=insert '(' at 0
+  text=(BEGIN-here undo=3 redo=0
+command 4: Insert(position=5, content=))
+  result=insert ')' at 5
+  text=(BEGI)N-here undo=4 redo=0
+command 5: Delete(position=6, length=2)
+  result=delete 'N-' at 6
+  text=(BEGI)here undo=5 redo=0
+command 6: Replace(target=e, replacement=E, replaceAll=true)
+  result=replace 'e' with 'E' count=2
+  text=(BEGI)hErE undo=6 redo=0
+--- undo sequence ---
+undo replace restore '(BEGI)hErE'
+text=(BEGI)here undo=5 redo=1
+undo delete 'N-' at 6
+text=(BEGI)N-here undo=4 redo=2
+undo insert ')' at 5
+text=(BEGIN-here undo=3 redo=3
+--- redo sequence ---
+insert ')' at 5
+text=(BEGI)N-here undo=4 redo=2
+delete 'N-' at 6
+text=(BEGI)here undo=5 redo=1
+--- extra command after redo clear ---
+insert '!' at 10
+text=(BEGI)here! undo=6 redo=0
+redo: nothing
+text=(BEGI)here! undo=6 redo=0
+--- timeline ---
+execute:Insert(position=5, content=-here) => start-here
+execute:Replace(target=start, replacement=BEGIN, replaceAll=false) => BEGIN-here
+execute:Insert(position=0, content=() => (BEGIN-here
+execute:Insert(position=5, content=)) => (BEGI)N-here
+execute:Delete(position=6, length=2) => (BEGI)here
+execute:Replace(target=e, replacement=E, replaceAll=true) => (BEGI)hErE
+undo:Replace(target=e, replacement=E, replaceAll=true) => (BEGI)here
+undo:Delete(position=6, length=2) => (BEGI)N-here
+undo:Insert(position=5, content=)) => (BEGIN-here
+redo:Insert(position=5, content=)) => (BEGI)N-here
+redo:Delete(position=6, length=2) => (BEGI)here
+execute:Insert(position=10, content=!) => (BEGI)here!
+redo: nothing
+
+=== State Pattern ===
+initial=Idle(balance=0) stock[Water=2, Juice=1, Tea=3]
+select Water failed: no money
+status=Idle(balance=0) stock[Water=2, Juice=1, Tea=3]
+inserted 2 -> balance 2
+status=HasMoney(balance=2) stock[Water=2, Juice=1, Tea=3]
+select Water failed: need 1 more
+status=HasMoney(balance=2) stock[Water=2, Juice=1, Tea=3]
+inserted 2 -> balance 4
+status=HasMoney(balance=4) stock[Water=2, Juice=1, Tea=3]
+select Water accepted: change 1
+status=Dispensing(product=Water, change=1) stock[Water=1, Juice=1, Tea=3]
+dispensed Water change 1
+status=Idle(balance=0) stock[Water=1, Juice=1, Tea=3]
+inserted 5 -> balance 5
+select Juice accepted: change 0
+dispensed Juice change 0
+inserted 3 -> balance 3
+select Juice failed: out of stock
+refund 3
+inserted 4 -> balance 4
+select Tea accepted: change 0
+dispensed Tea change 0
+refund 0
+final=Idle(balance=0) stock[Water=1, Juice=0, Tea=2]
+--- audit ---
+1.select Water failed: no money
+2.inserted 2 -> balance 2
+3.select Water failed: need 1 more
+4.inserted 2 -> balance 4
+5.select Water accepted: change 1
+6.dispensed Water change 1
+7.inserted 5 -> balance 5
+8.select Juice accepted: change 0
+9.dispensed Juice change 0
+10.inserted 3 -> balance 3
+11.select Juice failed: out of stock
+12.refund 3
+13.inserted 4 -> balance 4
+14.select Tea accepted: change 0
+15.dispensed Tea change 0
+16.refund 0
+
+=== Visitor Pattern ===
+expression 1: expr=(2 + (3 * 4)) value=14 simplified=14 simplifiedValue=14
+expression 2: expr=((0 + 5) * 1) value=5 simplified=5 simplifiedValue=5
+expression 3: expr=((10 * 2) - (3 + 7)) value=10 simplified=10 simplifiedValue=10
+expression 4: expr=((8 - 8) + (0 * 9)) value=0 simplified=0 simplifiedValue=0
+simplifiedStrings=14, 5, 10, 0
+values=14, 5, 10, 0 sum=29 max=14 min=0
+
+=== Chain Of Responsibility Pattern ===
+message 1: DEBUG/boot/starting
+  chain 1: console handled DEBUG:boot:starting
+  chain 2: file skipped DEBUG:boot:starting
+  chain 3: error skipped DEBUG:boot:starting
+message 2: INFO/auth/login ok
+  chain 1: console handled INFO:auth:login ok
+  chain 2: file handled INFO:auth:login ok
+  chain 3: error skipped INFO:auth:login ok
+message 3: WARN/disk/usage 85
+  chain 1: console handled WARN:disk:usage 85
+  chain 2: file handled WARN:disk:usage 85
+  chain 3: error skipped WARN:disk:usage 85
+message 4: ERROR/db/connection lost
+  chain 1: console handled ERROR:db:connection lost
+  chain 2: file handled ERROR:db:connection lost
+  chain 3: error handled ERROR:db:connection lost
+--- logger summaries ---
+console stored=4 entries=console:DEBUG:boot:starting || console:INFO:auth:login ok || console:WARN:disk:usage 85 || console:ERROR:db:connection lost
+file stored=3 entries=file:INFO:auth:login ok || file:WARN:disk:usage 85 || file:ERROR:db:connection lost
+error stored=1 entries=error:ERROR:db:CONNECTION LOST
+
+=== Translator Friendly Extras ===
+raw='  Kotlin To Cangjie Patterns  '
+trimmed='Kotlin To Cangjie Patterns'
+replaced='Kotlin-To-Cangjie-Patterns'
+lower='kotlin to cangjie patterns'
+upper='KOTLIN TO CANGJIE PATTERNS'
+contains='true' starts='true' ends='true' length=26
+parts=Kotlin, To, Cangjie, Patterns
+builder=observer|strategy|factory
+nullableText=Kotlin To Cangjie Patterns safeLength=26 forced=Kotlin
+boxA=patterns=>3
+boxB=visitors=>7
+
+PROJECT proj_patterns END

@@ -219,7 +219,7 @@ impl Engine {
                 Some(format!("{}.contains({})", b, self.t(args[0])?))
             }
             "clear" if args.is_empty() => {
-                Some(format!("{}.reset()", b))
+                Some(format!("{}.clear()", b))
             }
             "getOrDefault" if args.len() == 2 => {
                 Some(format!("({}.get({}) ?? {})", b, self.t(args[0])?, self.t(args[1])?))
