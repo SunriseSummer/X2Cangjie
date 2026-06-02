@@ -1,0 +1,20 @@
+Alice enrolled in Mathematics
+Bob enrolled in Mathematics
+Course MATH101 is full!
+Alice enrolled in Computer Science
+Charlie enrolled in Computer Science
+
+Course MATH101 - Mathematics (2/2):
+  - Alice
+  - Bob
+
+Course CS201 - Computer Science (2/3):
+  - Alice
+  - Charlie
+
+Student #1: Alice
+  Courses: Mathematics, Computer Science
+Student #2: Bob
+  Courses: Mathematics
+Student #3: Charlie
+  Courses: Computer Science
