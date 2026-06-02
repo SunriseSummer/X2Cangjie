@@ -288,6 +288,20 @@ impl Engine {
             "withIndex" if args.is_empty() && !self.provably_non_collection(base) => {
                 Some(format!("{}.iterator().enumerate()", b))
             }
+            "forEach" if args.len() == 1 && !self.provably_non_collection(base) => {
+                let lam = self.t(args[0])?;
+                Some(format!(
+                    "for (_e in {}) {{ ({})(_e) }}",
+                    self.atom(base)?, lam
+                ))
+            }
+            "forEachIndexed" if args.len() == 1 && !self.provably_non_collection(base) => {
+                let lam = self.t(args[0])?;
+                Some(format!(
+                    "for ((_i, _e) in {}.enumerate()) {{ ({})(_i, _e) }}",
+                    self.as_iter(base)?, lam
+                ))
+            }
             "map" | "filter" if args.len() == 1 && !self.provably_non_collection(base) => {
                 Some(format!(
                     "collectArrayList({}.{}({}))",
@@ -378,7 +392,7 @@ impl Engine {
             }
             "distinct" if args.is_empty() && !self.provably_non_collection(base) => {
                 Some(format!(
-                    "({{ => let _hs = HashSet<Int64>(); let _r = ArrayList<Int64>(); for (_e in {}) {{ if (!_hs.contains(_e)) {{ _hs.put(_e); _r.append(_e) }} }}; _r }})()",
+                    "({{ => let _hs = HashSet<Int64>(); let _r = ArrayList<Int64>(); for (_e in {}) {{ if (!_hs.contains(_e)) {{ _hs.put(_e); _r.add(_e) }} }}; _r }})()",
                     self.atom(base)?
                 ))
             }
@@ -387,6 +401,88 @@ impl Engine {
             }
 
             // ---- 更多集合操作 ----
+            "mapIndexed" if args.len() == 1 && !self.provably_non_collection(base) => {
+                let lam = self.t(args[0])?;
+                Some(format!(
+                    "collectArrayList({}.enumerate().map({{ _p => ({})(_p[0], _p[1]) }}))",
+                    self.as_iter(base)?, lam
+                ))
+            }
+            "filterNot" if args.len() == 1 && !self.provably_non_collection(base) => {
+                let pred = self.t(args[0])?;
+                Some(format!(
+                    "collectArrayList({}.filter({{ _e => !({})(_e) }}))",
+                    self.as_iter(base)?, pred
+                ))
+            }
+            "filterNotNull" if args.is_empty() && !self.provably_non_collection(base) => {
+                Some(format!(
+                    "collectArrayList({}.filter({{ _e => _e != None }}).map({{ _e => _e.getOrThrow() }}))",
+                    self.as_iter(base)?
+                ))
+            }
+            "flatten" if args.is_empty() && !self.provably_non_collection(base) => {
+                Some(format!(
+                    "collectArrayList({}.flatMap({{ _e => _e.iterator() }}))",
+                    self.as_iter(base)?
+                ))
+            }
+            "associateBy" if args.len() == 1 && !self.provably_non_collection(base) => {
+                let key_fn = self.t(args[0])?;
+                Some(format!(
+                    "({{ => let _m = HashMap<Int64, Int64>(); for (_e in {}) {{ _m[({})(_e)] = _e }}; _m }})()",
+                    self.atom(base)?, key_fn
+                ))
+            }
+            "associateWith" if args.len() == 1 && !self.provably_non_collection(base) => {
+                let val_fn = self.t(args[0])?;
+                Some(format!(
+                    "({{ => let _m = HashMap<Int64, Int64>(); for (_e in {}) {{ _m[_e] = ({})(_e) }}; _m }})()",
+                    self.atom(base)?, val_fn
+                ))
+            }
+            "mapValues" if args.len() == 1 && !self.provably_non_collection(base) => {
+                let lam = self.t(args[0])?;
+                Some(format!(
+                    "({{ => let _m = HashMap<Int64, Int64>(); for ((_k, _v) in {}) {{ _m[_k] = ({})((key: _k, value: _v)) }}; _m }})()",
+                    self.atom(base)?, lam
+                ))
+            }
+            "mapKeys" if args.len() == 1 && !self.provably_non_collection(base) => {
+                let lam = self.t(args[0])?;
+                Some(format!(
+                    "({{ => let _m = HashMap<Int64, Int64>(); for ((_k, _v) in {}) {{ _m[({})((key: _k, value: _v))] = _v }}; _m }})()",
+                    self.atom(base)?, lam
+                ))
+            }
+            "indexOfFirst" if args.len() == 1 && !self.provably_non_collection(base) => {
+                let pred = self.t(args[0])?;
+                Some(format!(
+                    "({{ => var _i = 0; for (_e in {}) {{ if (({})(_e)) {{ return _i }}; _i++ }}; return -1 }})()",
+                    self.atom(base)?, pred
+                ))
+            }
+            "indexOfLast" if args.len() == 1 && !self.provably_non_collection(base) => {
+                let pred = self.t(args[0])?;
+                Some(format!(
+                    "({{ => var _r = -1; var _i = 0; for (_e in {}) {{ if (({})(_e)) {{ _r = _i }}; _i++ }}; return _r }})()",
+                    self.atom(base)?, pred
+                ))
+            }
+            "find" if args.len() == 1 && !self.provably_non_collection(base) => {
+                let pred = self.t(args[0])?;
+                Some(format!(
+                    "({{ => for (_e in {}) {{ if (({})(_e)) {{ return _e }} }}; return None }})()",
+                    self.atom(base)?, pred
+                ))
+            }
+            "findLast" if args.len() == 1 && !self.provably_non_collection(base) => {
+                let pred = self.t(args[0])?;
+                Some(format!(
+                    "({{ => var _r: Option<Int64> = None; for (_e in {}) {{ if (({})(_e)) {{ _r = _e }} }}; return _r }})()",
+                    self.atom(base)?, pred
+                ))
+            }
             "zip" if args.len() >= 1 && !self.provably_non_collection(base) => {
                 let other = self.t(args[0])?;
                 if args.len() == 2 {
@@ -406,14 +502,14 @@ impl Engine {
             "partition" if args.len() == 1 && !self.provably_non_collection(base) => {
                 let pred = self.t(args[0])?;
                 Some(format!(
-                    "({{ => let _t = ArrayList<Int64>(); let _f = ArrayList<Int64>(); for (_e in {}) {{ if (({})(_e)) {{ _t.append(_e) }} else {{ _f.append(_e) }} }}; (_t, _f) }})()",
+                    "({{ => let _t = ArrayList<Int64>(); let _f = ArrayList<Int64>(); for (_e in {}) {{ if (({})(_e)) {{ _t.add(_e) }} else {{ _f.add(_e) }} }}; (_t, _f) }})()",
                     self.atom(base)?, pred
                 ))
             }
             "chunked" if args.len() == 1 && !self.provably_non_collection(base) => {
                 let n = self.t(args[0])?;
                 Some(format!(
-                    "({{ => let _src = collectArrayList({}); let _r = ArrayList<ArrayList<Int64>>(); var _i = 0; while (_i < _src.size) {{ let _end = if (_i + {} < _src.size) {{ _i + {} }} else {{ _src.size }}; let _c = ArrayList<Int64>(); var _j = _i; while (_j < _end) {{ _c.append(_src[_j]); _j++ }}; _r.append(_c); _i = _end }}; _r }})()",
+                    "({{ => let _src = collectArrayList({}); let _r = ArrayList<ArrayList<Int64>>(); var _i = 0; while (_i < _src.size) {{ let _end = if (_i + {} < _src.size) {{ _i + {} }} else {{ _src.size }}; let _c = ArrayList<Int64>(); var _j = _i; while (_j < _end) {{ _c.add(_src[_j]); _j++ }}; _r.add(_c); _i = _end }}; _r }})()",
                     self.as_iter(base)?, n, n
                 ))
             }
@@ -422,7 +518,7 @@ impl Engine {
             "groupBy" if args.len() == 1 && !self.provably_non_collection(base) => {
                 let key_fn = self.t(args[0])?;
                 Some(format!(
-                    "({{ => let _m = HashMap<Int64, ArrayList<Int64>>(); for (_e in {}) {{ let _k = ({})(_e); if (!_m.contains(_k)) {{ _m[_k] = ArrayList<Int64>() }}; _m[_k].append(_e) }}; _m }})()",
+                    "({{ => let _m = HashMap<Int64, ArrayList<Int64>>(); for (_e in {}) {{ let _k = ({})(_e); if (!_m.contains(_k)) {{ _m[_k] = ArrayList<Int64>() }}; _m[_k.add(_e) }}; _m }})()",
                     self.atom(base)?, key_fn
                 ))
             }

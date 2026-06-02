@@ -1,0 +1,15 @@
+doubled: [2, -4, 6, -8, 10]
+positive: [1, 3, 5]
+removeNeg: [1, 3, 5]
+indexed: [1, 8, 23, 26, 45]
+total: 3
+product: 24
+firstPos: 1
+lastPos: 4
+hasNeg: true
+allPos: false
+top3: [5, 3, 1]
+skip2: [-2, 5, 1]
+min=1 max=5 sum=23 count=7
+topN: [5, 5, 4]
+dups: [3, 5]
