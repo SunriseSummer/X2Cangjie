@@ -518,7 +518,7 @@ impl Engine {
             "groupBy" if args.len() == 1 && !self.provably_non_collection(base) => {
                 let key_fn = self.t(args[0])?;
                 Some(format!(
-                    "({{ => let _m = HashMap<Int64, ArrayList<Int64>>(); for (_e in {}) {{ let _k = ({})(_e); if (!_m.contains(_k)) {{ _m[_k] = ArrayList<Int64>() }}; _m[_k.add(_e) }}; _m }})()",
+                    "({{ => let _m = HashMap<Int64, ArrayList<Int64>>(); for (_e in {}) {{ let _k = ({})(_e); if (!_m.contains(_k)) {{ _m[_k] = ArrayList<Int64>() }}; _m[_k].add(_e) }}; _m }})()",
                     self.atom(base)?, key_fn
                 ))
             }
