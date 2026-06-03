@@ -1,3 +1,6 @@
+import model.Pet
+import service.PetShop
+
 fun main() {
     val shop = PetShop("Happy Paws")
     shop.addPet(Pet("Buddy", "Dog", 3))

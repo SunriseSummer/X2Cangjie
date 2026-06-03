@@ -1,3 +1,7 @@
+package service
+
+import model.Pet
+
 class PetShop(val shopName: String) {
     val pets = mutableListOf<Pet>()
 

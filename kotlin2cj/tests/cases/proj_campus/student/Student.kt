@@ -1,3 +1,5 @@
+package student
+
 class Student(val id: Int, val name: String) {
     val enrolledCourses = mutableListOf<String>()
 

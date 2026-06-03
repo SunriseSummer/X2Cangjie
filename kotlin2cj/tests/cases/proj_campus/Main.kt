@@ -1,3 +1,6 @@
+import student.Student
+import course.Course
+
 fun main() {
     val alice = Student(1, "Alice")
     val bob = Student(2, "Bob")

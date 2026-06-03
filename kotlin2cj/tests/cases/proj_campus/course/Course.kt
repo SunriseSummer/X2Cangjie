@@ -1,3 +1,7 @@
+package course
+
+import student.Student
+
 class Course(val code: String, val title: String, val capacity: Int) {
     val students = mutableListOf<Student>()
 
